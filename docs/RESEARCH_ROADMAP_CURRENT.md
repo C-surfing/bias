@@ -35,3 +35,7 @@
 ## Cross-Bias Qwen 真实反证实验（2026-10-17）
 
 Coat Selection + AgentCF Popularity/Item Memory 共四项研究任务，Qwen 无历史与相关历史各 4 次提案 + 4 次复盘，外加共享的 44 次新 Qwen 排序调用。总 60 调用、51,292 prompt tokens + 5,303 completion tokens。开发信号：固定规则1，无历史2，相关历史2；独立确认有效科学发现各为0。两个 Qwen 组四项行动完全相同，未证明 Memory 提升。独立审核发现至少两项复盘措辞与数值不符，生成的 5 张新 Research Memory 均为来源验证的发展期事实卡，非独立确认。此四任务与现有开发/作者状态均已使用，不得重复作为未见测试。下一步转为结构化反证预测合同与独立新训练状态。详情见 CROSSBIAS_DISCOVERY_PILOT_20261017.md。
+
+## 新 cohort 的条件性负面结果（2026-10-17）
+
+六位与旧 20 人不重叠的新作者数据用户完成 12 条真实 Qwen-AgentCF 训练事件，两组三人面板执行 Item Memory/Popularity 两种消融并与同条件重复对照。所有研究预测在训练前正式冻结；固定规则、无历史和经过审查的 Research Memory Qwen 各 0/2 预测通过跨面板方向、最小效应和 NDCG 质量门槛。92 次模型调用，78,030+11,607 tokens，确认级科学发现=0。需要更大的新 cohort、多训练种子与独立确认面板，不能以该六人样本继续调提示词。

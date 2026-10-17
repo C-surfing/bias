@@ -186,3 +186,7 @@ python scripts/build_code_bundle.py --verify outputs/<实际包名>.zip
 ## 最新 Cross-Bias 研究试验
 
 见 docs/CROSSBIAS_DISCOVERY_PILOT_20261017.md。科研 Agent 真实提出假设、选择 Coat/AgentCF 反证，独立执行与审计已完成。严格的独立科学发现数仍为 0，不能认为 RSI 已被证实。源码与结果均已记录；Qwen 服务退出、GPU 已释放。
+
+## 新用户 AgentCF 结构化预测复核
+
+新六人 cohort、12 次真实训练事件、四种配对排序条件与数值预测审查已完成。三种研究策略的两项事前预测均 0/2 通过；未获独立科学发现。详见 docs/AGENTCF_NEWSTATE_FORECAST_20261017.md。
