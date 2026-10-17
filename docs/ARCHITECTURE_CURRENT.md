@@ -62,3 +62,7 @@ Qwen：旧决策动作先导六题无历史 4/6、有历史 3/6；新构造八�
 ## RSI 决策实验补充
 
 research/decision_benchmark.py 生成开发/评价分离的 OPE 研究动作任务；research/decision_qwen_pilot.py 使用本地 Qwen 开展有上限的四组对照；research/decision_analysis.py 进行七类机制配对复核。方法、完整消极结果见 docs/DECISION_PILOT_20261017.md。
+
+## 新增可执行科研假设闭环
+
+research/crossbias_discovery.py 冻结 Coat / AgentCF 四项研究任务、动作与反证准入；research/crossbias_runner.py 本地 Qwen 自主提案与冻结状态重排序，research/crossbias_audit.py 做独立数字一致性/成本审计，research/crossbias_memory.py 只把有真实数值来源、按 SHA 验证的条件性事实写入 ResearchMemory。全部运行在 project/runs/crossbias-discovery-pilot-20261017，旧实验、原持久化环境及确认数据保留原状。此阶段不是新 Agent 框架，也未创造已验证的经典因果 Debias 发现。

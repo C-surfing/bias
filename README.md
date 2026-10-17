@@ -182,3 +182,7 @@ python scripts/build_code_bundle.py --verify outputs/<实际包名>.zip
 包内包括业务源码、全部测试、配置、文档、作者小数据和明确标记的离线演示；不包括真实请求日志、密钥、历史输出、论文 PDF 和完整作者仓库。`source_manifest.json` 记录每个文件的指纹，供 ZIP 内文件核验。
 
 下一步研究重点是检验真实模型看到反证后是否改变下一项实验，并与固定规则、单角色和无历史版本比较。结构化源码和双环连接是研究基础，还不是稳定去偏收益或自主算法发现的实验结论。
+
+## 最新 Cross-Bias 研究试验
+
+见 docs/CROSSBIAS_DISCOVERY_PILOT_20261017.md。科研 Agent 真实提出假设、选择 Coat/AgentCF 反证，独立执行与审计已完成。严格的独立科学发现数仍为 0，不能认为 RSI 已被证实。源码与结果均已记录；Qwen 服务退出、GPU 已释放。
