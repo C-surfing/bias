@@ -23,3 +23,7 @@
 
 **停止做**：不新增 Planner V3/V4，不在 outputs/ 建第二套 Agent，不让 Qwen 自判自己的科学成功，
 不把无标注的机制探针/用户头尾质量差称为已证实经典偏差。
+
+## 受控 Exposure P1 的补充进展
+
+已有合成 logging propensity 和可解析 oracle policy value，可直接用作 IPS/SNIPS/abstention 基础单元测试；下一轮需要先冻结扰动机制与成本，再在这类有真实参照的任务上比较 Qwen 的研究决策（不得泄漏 oracle 到 Planner）。

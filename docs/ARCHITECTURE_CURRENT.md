@@ -50,3 +50,11 @@ Qwen：旧决策动作先导六题无历史 4/6、有历史 3/6；新构造八�
 - 模型不具有任意 Shell 权限，不能自己改变评价器和科学成功标准。
 - 对外报告必须区分「程序执行成功」、「指标有变化」与「独立证实科学效果」。
 - 迁移记录详见 docs/CONSOLIDATION_MANIFEST_20261017.json。
+
+## 新增受控曝光基准
+
+- research/exposure_synthetic.py：已知正概率随机曝光、真实潜在偏好由合成机制定义。
+- 在相同随机日志上计算两个目标策略的 IPS、SNIPS、Naive 和已知策略真值；独立随机种子重复。
+- 对隐藏 propensity 的条件明确 ABSTAIN_NO_PROPENSITY，不输出伪 IPS。
+- CLI: python -m rsi_researcher bias-exposure-sim --output runs/new-unique-name。
+- 只用于离线估计量校准，不给 KuaiRand 日志添加不存在的真实倾向概率。

@@ -14,6 +14,7 @@ cd /data/cjh/rsi/project
 /data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-coat --output runs/my-new-coat
 /data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-exposure --output runs/my-new-exposure
 /data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-coat-sensitivity --output runs/my-new-sensitivity
+/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-exposure-sim --output runs/my-new-exposure-synthetic
 /data/cjh/rsi/envs/research/bin/python -B -m unittest discover -s tests -t .
 ```
 

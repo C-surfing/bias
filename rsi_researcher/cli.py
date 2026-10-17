@@ -105,7 +105,20 @@ def main(argv=None):
     sensitivity = sub.add_parser("bias-coat-sensitivity",
         help="Coat 估计倾向稳健性审计（开发数据、CPU，无模型调用）")
     sensitivity.add_argument("--output",required=True)
+    exposure_sim = sub.add_parser("bias-exposure-sim",
+        help="已知曝光概率的受控模拟 OPE Benchmark，CPU、无模型调用")
+    exposure_sim.add_argument("--output",required=True)
+    exposure_sim.add_argument("--reps",type=int,default=32)
+    exposure_sim.add_argument("--events",type=int,default=3000)
     args = parser.parse_args(argv)
+    if args.command == "bias-exposure-sim":
+        from rsi_researcher.research.exposure_synthetic import run as run_sim
+        r=run_sim(Path(args.output),reps=args.reps,events=args.events)
+        print(json.dumps({"status":r["status"],"targets":list(r["targets"]),
+            "propensity_missing_gate":r["missing_propensity_control"]["status"],
+            "independent_real_data_confirmation":False,"new_model_calls":0},
+            ensure_ascii=False))
+        return 0
     if args.command == "bias-coat-sensitivity":
         from rsi_researcher.research.coat_sensitivity import run as run_sensitivity
         r=run_sensitivity(Path(args.output))
