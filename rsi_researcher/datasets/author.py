@@ -6,7 +6,7 @@ import random
 
 AUTHOR_DATA_PROTOCOL = "cds_basic_9_comparisons_plus_target_user_round_v2"
 
-def author_data(directory, user_count, events_per_user, seed=20261013, selection="first"):
+def author_data(directory, user_count, events_per_user, seed=20261013, selection="first", excluded_users=None):
     directory = Path(directory)
     with (directory / "CDs.item").open(encoding="utf-8") as stream:
         rows = list(csv.reader(stream, delimiter="\t"))[1:]
@@ -19,7 +19,7 @@ def author_data(directory, user_count, events_per_user, seed=20261013, selection
         items[item_id] = {"title": title, "memory": f"The CD is called '{title}'. The category of this CD is: '{category}'."}
     with (directory / "CDs-100-user-dense.train.inter").open(encoding="utf-8") as stream:
         train = list(csv.DictReader(stream, delimiter="\t"))
-    users = select_users(train, user_count, seed, selection)
+    users = select_users(train, user_count, seed, selection, excluded_users=excluded_users)
     by_user = {user: [row for row in train if row["user_id:token"] == user][:events_per_user] for user in users}
     if len(users) != user_count or any(len(rows) != events_per_user for rows in by_user.values()):
         raise ValueError("requested smoke size exceeds available train data")
@@ -59,13 +59,26 @@ def author_data(directory, user_count, events_per_user, seed=20261013, selection
             "items": {i: items[i] for i in sorted(needed)}, "completed": []}, events, queries
 
 
-def select_users(train, count, seed, selection="first"):
+def select_users(train, count, seed, selection="first", excluded_users=None):
     """Freeze a cohort using training support only, before reading validation."""
     ordered = list(dict.fromkeys(row["user_id:token"] for row in train))
     if not 0 < count <= len(ordered):
         raise ValueError("requested user count exceeds author training data")
+    if selection == "exclude_known":
+        if excluded_users is None:
+            raise ValueError("Explicit exclusion list required")
+        eligible=[u for u in ordered if u not in set(excluded_users)]
+        if len(eligible)<count:
+            raise ValueError("Not enough disjoint author users")
+        return eligible[:count]
     if selection == "first":
         return ordered[:count]
+    if selection == "after_first_20":
+        # Fresh training-only cohort, disjoint from previous first-20 AgentCF
+        # development run; selection does not depend on validation or test.
+        if count > len(ordered) - 20:
+            raise ValueError("insufficient users beyond old cohort")
+        return ordered[20:20 + count]
     if selection != "training_popularity_quartiles":
         raise ValueError("unknown author user selection")
     counts = Counter(row["item_id:token"] for row in train)
