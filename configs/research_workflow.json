@@ -1,0 +1,17 @@
+{
+  "strategy_version": "recommendation_researcher_v4_dual_loop",
+  "candidate_limit": 2,
+  "world": {
+    "seed": 2026101401,
+    "users": 2,
+    "items": 20,
+    "events_per_user": 2,
+    "stratum": "unrelated"
+  },
+  "rerank_strength": 0.1,
+  "budget": {
+    "max_requests": 300,
+    "max_tokens": 700000,
+    "max_seconds": 900
+  }
+}

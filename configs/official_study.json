@@ -1,0 +1,19 @@
+{
+  "version": "official_observed_research_v1",
+  "source_dataset": "coat",
+  "source_data_dir": "data/external/coat",
+  "transfer_dataset": "kuairand-pure",
+  "transfer_data_dir": "data/external/kuairand-pure",
+  "split_seed": 20261014,
+  "user_limit": 200,
+  "rounds": 3,
+  "transfer_rounds": 2,
+  "budget": {
+    "max_requests": 30,
+    "max_tokens": 900000,
+    "max_seconds": 900
+  },
+  "purpose": "real_data_feasibility_and_exploratory_strategy_transfer_not_RSI_proof",
+  "final_selection": "development_only_freeze_then_one_heldout_evaluation",
+  "candidate_budget_controls": "same_candidate_rounds; with_history_vs_without_history_same_role_calls; fixed_rule_zero_model_calls"
+}

@@ -1,0 +1,18 @@
+{
+  "seeds": [
+    2026101501,
+    2026101502
+  ],
+  "strata": [
+    "unrelated",
+    "aligned"
+  ],
+  "world": {
+    "users": 2,
+    "items": 20,
+    "events_per_user": 1
+  },
+  "quality_floor_ratio": 0.99,
+  "bias_ceiling_ratio": 0.9,
+  "purpose": "independent_development_validation_not_live_or_final_test"
+}

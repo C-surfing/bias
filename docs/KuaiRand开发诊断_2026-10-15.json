@@ -1,0 +1,323 @@
+{
+  "date": "2026-10-15",
+  "split_seed": 20261016,
+  "scope": "CPU development diagnosis; no heldout scoring, no model calls",
+  "conditions": {
+    "cohort": {
+      "fingerprint": "03b34e2272423a508d1a9deb8e1440e5562e756e7d711c67a7e4bf464b8dc65e",
+      "statistics": {
+        "train_rows_scanned": 1141112,
+        "preperiod_rows": 1141112,
+        "train_outside_protocol_rows": 0,
+        "cohort_preperiod_rows": 8483,
+        "basic_feature_rows": 7583,
+        "random_rows_scanned": 1186059,
+        "random_outside_cohort_rows": 1178710,
+        "cohort_random_rows": 7349,
+        "random_outside_protocol_rows": 0,
+        "random_train_overlap_rows_removed": 6,
+        "development_repeat_rows_removed": 0,
+        "test_repeat_rows_removed": 0,
+        "eligible_training_users": 26210,
+        "users": 200,
+        "items": 7583,
+        "training_users": 200,
+        "training_pool_preperiod_rows": 8483,
+        "train_history_cap_rows_removed": 23,
+        "test_development_overlap_pairs_removed": 0,
+        "train_rows": 8460,
+        "development_rows": 2625,
+        "test_rows": 4718,
+        "development_users": 169,
+        "test_users": 193,
+        "development_users_with_positive": 85,
+        "test_users_with_positive": 146,
+        "train_observed_zero_rows": 4316,
+        "development_observed_zero_rows": 2194,
+        "test_observed_zero_rows": 3783
+      },
+      "profile": {
+        "dataset": "kuairand-pure",
+        "training_rows": 8460,
+        "development_rows": 2625,
+        "catalog_items": 7583,
+        "training_mean_feedback": 0.48983451536643025,
+        "random_development_mean_feedback": 0.1641904761904762,
+        "training_positive_head_share": 0.8701737451737451,
+        "random_development_positive_head_share": 0.27610208816705334,
+        "score_support": {
+          "users": 169,
+          "candidate_pairs": 2625,
+          "zero_score_fraction": 0.9367619047619048,
+          "users_without_positive_panel_scores": 101,
+          "users_without_training_positives": 6,
+          "scope": "training-derived score support on current development candidate IDs; not bias causality"
+        },
+        "interpretation": "Training popularity is an observation-frequency proxy; distribution differences do not identify a cause.",
+        "quality_scope": "NDCG@5 on observed random-feedback candidate panels; missing pairs remain unknown."
+      },
+      "baseline": {
+        "ndcg": 0.42621382529150753,
+        "panel_excess_head_share": 0.10766886842869668,
+        "head_share": 0.2747335028571056,
+        "tail_relevant_recall": 0.4254217584469685,
+        "quality_users": 85,
+        "zero_ideal_users": 84,
+        "evaluated_users": 169,
+        "tail_supported_users": 70,
+        "invalid_rankings": 0
+      },
+      "policies": [
+        {
+          "operator": "popularity_penalty",
+          "strength": 0.01,
+          "metrics": {
+            "ndcg": 0.39493730150294465,
+            "panel_excess_head_share": 0.07729075322579453,
+            "head_share": 0.1984225169994778,
+            "tail_relevant_recall": 0.4910680169503699,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 70,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "popularity_penalty",
+          "strength": 0.02,
+          "metrics": {
+            "ndcg": 0.3932188503283246,
+            "panel_excess_head_share": 0.07547798881580291,
+            "head_share": 0.19725576721493707,
+            "tail_relevant_recall": 0.4910680169503699,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 70,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "popularity_penalty",
+          "strength": 0.05,
+          "metrics": {
+            "ndcg": 0.38739091632760064,
+            "panel_excess_head_share": 0.05135505633233569,
+            "head_share": 0.17163153021547017,
+            "tail_relevant_recall": 0.5082108740932271,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 70,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "support_preserving",
+          "strength": 0.01,
+          "metrics": {
+            "ndcg": 0.4235515384029085,
+            "panel_excess_head_share": 0.10766886842869668,
+            "head_share": 0.27399282865273233,
+            "tail_relevant_recall": 0.4254217584469685,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 70,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "support_preserving",
+          "strength": 0.02,
+          "metrics": {
+            "ndcg": 0.4235515384029085,
+            "panel_excess_head_share": 0.10766886842869668,
+            "head_share": 0.27399282865273233,
+            "tail_relevant_recall": 0.4254217584469685,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 70,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "support_preserving",
+          "strength": 0.05,
+          "metrics": {
+            "ndcg": 0.4235515384029085,
+            "panel_excess_head_share": 0.10766886842869668,
+            "head_share": 0.27399282865273233,
+            "tail_relevant_recall": 0.4254217584469685,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 70,
+            "invalid_rankings": 0
+          }
+        }
+      ],
+      "elapsed_seconds": 8.312
+    },
+    "all_preperiod_users": {
+      "fingerprint": "e8734257da43b947ebe0b52b4880071cc72a184afb0f91c2ba62a793397347e1",
+      "statistics": {
+        "train_rows_scanned": 1141112,
+        "preperiod_rows": 1141112,
+        "train_outside_protocol_rows": 0,
+        "cohort_preperiod_rows": 8483,
+        "basic_feature_rows": 7583,
+        "random_rows_scanned": 1186059,
+        "random_outside_cohort_rows": 1178710,
+        "cohort_random_rows": 7349,
+        "random_outside_protocol_rows": 0,
+        "random_train_overlap_rows_removed": 6,
+        "development_repeat_rows_removed": 0,
+        "test_repeat_rows_removed": 0,
+        "eligible_training_users": 26210,
+        "users": 200,
+        "items": 7583,
+        "training_users": 26210,
+        "training_pool_preperiod_rows": 1141112,
+        "train_history_cap_rows_removed": 19139,
+        "test_development_overlap_pairs_removed": 0,
+        "train_rows": 1121973,
+        "development_rows": 2625,
+        "test_rows": 4718,
+        "development_users": 169,
+        "test_users": 193,
+        "development_users_with_positive": 85,
+        "test_users_with_positive": 146,
+        "train_observed_zero_rows": 597702,
+        "development_observed_zero_rows": 2194,
+        "test_observed_zero_rows": 3783
+      },
+      "profile": {
+        "dataset": "kuairand-pure",
+        "training_rows": 1121973,
+        "development_rows": 2625,
+        "catalog_items": 7583,
+        "training_mean_feedback": 0.4672759504907872,
+        "random_development_mean_feedback": 0.1641904761904762,
+        "training_positive_head_share": 0.7951746329665383,
+        "random_development_positive_head_share": 0.2529002320185615,
+        "score_support": {
+          "users": 169,
+          "candidate_pairs": 2625,
+          "zero_score_fraction": 0.9344761904761905,
+          "users_without_positive_panel_scores": 107,
+          "users_without_training_positives": 6,
+          "scope": "training-derived score support on current development candidate IDs; not bias causality"
+        },
+        "interpretation": "Training popularity is an observation-frequency proxy; distribution differences do not identify a cause.",
+        "quality_scope": "NDCG@5 on observed random-feedback candidate panels; missing pairs remain unknown."
+      },
+      "baseline": {
+        "ndcg": 0.4350664943058818,
+        "panel_excess_head_share": 0.09988070584786268,
+        "head_share": 0.24755755760456827,
+        "tail_relevant_recall": 0.4350014376056043,
+        "quality_users": 85,
+        "zero_ideal_users": 84,
+        "evaluated_users": 169,
+        "tail_supported_users": 72,
+        "invalid_rankings": 0
+      },
+      "policies": [
+        {
+          "operator": "popularity_penalty",
+          "strength": 0.01,
+          "metrics": {
+            "ndcg": 0.4371090941581288,
+            "panel_excess_head_share": 0.06465088151407926,
+            "head_share": 0.16038358297522745,
+            "tail_relevant_recall": 0.5064327647660981,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 72,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "popularity_penalty",
+          "strength": 0.02,
+          "metrics": {
+            "ndcg": 0.43615888499999506,
+            "panel_excess_head_share": 0.06317824691950175,
+            "head_share": 0.15964290877085413,
+            "tail_relevant_recall": 0.5064327647660981,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 72,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "popularity_penalty",
+          "strength": 0.05,
+          "metrics": {
+            "ndcg": 0.43566486455829445,
+            "panel_excess_head_share": 0.05513080650247421,
+            "head_share": 0.15235612249537855,
+            "tail_relevant_recall": 0.5124512832846166,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 72,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "support_preserving",
+          "strength": 0.01,
+          "metrics": {
+            "ndcg": 0.43240420741728275,
+            "panel_excess_head_share": 0.09914438855057392,
+            "head_share": 0.24681688340019495,
+            "tail_relevant_recall": 0.4350014376056043,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 72,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "support_preserving",
+          "strength": 0.02,
+          "metrics": {
+            "ndcg": 0.43240420741728275,
+            "panel_excess_head_share": 0.09914438855057392,
+            "head_share": 0.24681688340019495,
+            "tail_relevant_recall": 0.4350014376056043,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 72,
+            "invalid_rankings": 0
+          }
+        },
+        {
+          "operator": "support_preserving",
+          "strength": 0.05,
+          "metrics": {
+            "ndcg": 0.43240420741728275,
+            "panel_excess_head_share": 0.09914438855057392,
+            "head_share": 0.24681688340019495,
+            "tail_relevant_recall": 0.4350014376056043,
+            "quality_users": 85,
+            "zero_ideal_users": 84,
+            "evaluated_users": 169,
+            "tail_supported_users": 72,
+            "invalid_rankings": 0
+          }
+        }
+      ],
+      "elapsed_seconds": 23.65
+    }
+  }
+}

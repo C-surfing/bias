@@ -1,0 +1,22 @@
+{
+  "version": "official_observed_research_v1",
+  "source_dataset": "coat",
+  "source_data_dir": "data/external/coat",
+  "transfer_dataset": "kuairand-pure",
+  "transfer_data_dir": "data/external/kuairand-pure",
+  "split_seed": 20261015,
+  "user_limit": 200,
+  "rounds": 3,
+  "transfer_rounds": 2,
+  "budget": {
+    "max_requests": 8,
+    "max_tokens": 300000,
+    "max_seconds": 600
+  },
+  "purpose": "cross_task_context_attribution_feasibility_check_not_confirmatory_RSI",
+  "final_selection": "development_only_freeze_then_one_heldout_evaluation",
+  "candidate_budget_controls": "same_candidate_rounds; with_history_vs_without_history_same_role_calls; fixed_rule_zero_model_calls",
+  "mode": "context_transfer_check",
+  "source_campaign": "runs/official-study-20261014-v2",
+  "shared_request_ceiling": 30
+}

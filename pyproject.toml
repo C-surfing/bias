@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rsi-researcher"
+version = "0.6.0"
+description = "Evidence-driven recommendation-system research workflows"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["jsonschema==4.26.0", "certifi>=2025.11.12"]
+
+[project.scripts]
+rsi-researcher = "rsi_researcher.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rsi_researcher*"]
+exclude = ["tests*"]

@@ -1,0 +1,9 @@
+cell_id,experiment,exposure_A,prompt_position_P,memory_M,state_isolation,stage
+E2-000,mechanism_factorial,low,paired_balanced,frozen,independent_full_memory_pool,planned
+E2-001,mechanism_factorial,low,paired_balanced,original_update,independent_full_memory_pool,planned
+E2-010,mechanism_factorial,low,head_first,frozen,independent_full_memory_pool,planned
+E2-011,mechanism_factorial,low,head_first,original_update,independent_full_memory_pool,planned
+E2-100,mechanism_factorial,high,paired_balanced,frozen,independent_full_memory_pool,planned
+E2-101,mechanism_factorial,high,paired_balanced,original_update,independent_full_memory_pool,planned
+E2-110,mechanism_factorial,high,head_first,frozen,independent_full_memory_pool,planned
+E2-111,mechanism_factorial,high,head_first,original_update,independent_full_memory_pool,planned

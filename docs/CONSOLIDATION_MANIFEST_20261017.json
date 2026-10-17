@@ -1,0 +1,153 @@
+{
+  "status": "VERIFIED_275_TESTS",
+  "original_snapshot": "/data/cjh/rsi/project/releases/20261017-pre-consolidation",
+  "historical_release_untouched": "/data/cjh/rsi/project/releases/20261016-five-bias-validation",
+  "copies": [
+    {
+      "target": "rsi_researcher/diagnostics/agentcf_smoke.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/diagnostics/agentcf_smoke.py",
+      "sha256": "b1b3c0a0f8b889423e4e71fbce183ceb9ba7dadae52144c573d4320d0e1c4284"
+    },
+    {
+      "target": "rsi_researcher/evaluation/author_probes.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/evaluation/author_probes.py",
+      "sha256": "f286a122e96788a95fa835691a084b20c44191655b8e8184b405ce504d6cd35e"
+    },
+    {
+      "target": "rsi_researcher/evaluation/author_patterns.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/evaluation/author_patterns.py",
+      "sha256": "7eb2237a38d98a7aa53bb72c06e8f1f0bc161d2ccfd6d7dadfc1eb77f24ddf92"
+    },
+    {
+      "target": "rsi_researcher/evaluation/author_mechanism.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/evaluation/author_mechanism.py",
+      "sha256": "bc1314854b53772189899cb18e26e47b8178818daaab57fd425df091f4a3a736"
+    },
+    {
+      "target": "rsi_researcher/recommenders/author_feedback.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/recommenders/author_feedback.py",
+      "sha256": "ab627bf9c6528f129ef65a40528d7ee60453cf8d740b2ec650bf1d6546ecddb3"
+    },
+    {
+      "target": "rsi_researcher/research/agentcf_loop.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/research/agentcf_loop.py",
+      "sha256": "1b40063b3955ca995fb9ee361759fbb2980c2668b9a134766c4b4f33489487dc"
+    },
+    {
+      "target": "rsi_researcher/research/author_experiment.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/research/author_experiment.py",
+      "sha256": "280ed1e30afd116eb10b952c4bfaacb9ed31995b716debf40294d4e9360286de"
+    },
+    {
+      "target": "rsi_researcher/research/author_evidence.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/rsi_researcher/research/author_evidence.py",
+      "sha256": "9ea8dc8647dc3d951d8cab97ca078153bb25a6dcea50e6a15a9d319f9aa26c99"
+    },
+    {
+      "target": "tests/test_agentcf_loop.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/tests/test_agentcf_loop.py",
+      "sha256": "477ff83363ca7810cf64ce8b8174b24b1fe1af5255aa8b3b7c732cb2bc3e5a75"
+    },
+    {
+      "target": "tests/test_author_experiment.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/tests/test_author_experiment.py",
+      "sha256": "284235b7b7206a839e213fa3c7fd2424c191f885c7b7275a0dea35cbbf5929b7"
+    },
+    {
+      "target": "tests/test_author_patterns.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/tests/test_author_patterns.py",
+      "sha256": "b42e24323e4c951560e1313d4094b9f16d8c8815919476ae4118b191e2cf5e46"
+    },
+    {
+      "target": "tests/test_author_pipeline.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/tests/test_author_pipeline.py",
+      "sha256": "58ef651de67cdadc51bf2944ee8cf25ec41a82e6dcdcc2287de97c9895bc7588"
+    },
+    {
+      "target": "tests/test_author_probes.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/tests/test_author_probes.py",
+      "sha256": "15631348339688204b4300f49e9822cb2895825d85ffa9a25225fc097031c5f8"
+    },
+    {
+      "target": "tests/test_bounded_author_batch.py",
+      "original": "/data/cjh/rsi/project/releases/20261016-five-bias-validation/tests/test_bounded_author_batch.py",
+      "sha256": "7e6ecdaddcb3748e0f98ca5c11a38a57b6b1a0947551c975c9cfab90f5e544d2"
+    },
+    {
+      "target": "rsi_researcher/research/bias_registry.py",
+      "original": "/data/cjh/rsi/experiments/classic-five-20261016/registry.py",
+      "sha256": "785ee5aae27aae39519a5b68e1bda6f3536bfa8e3bfd68e5b096d6406aa49f37"
+    },
+    {
+      "target": "rsi_researcher/research/coat_selection.py",
+      "original": "/data/cjh/rsi/experiments/classic-five-20261016/coat_selection.py",
+      "sha256": "a24af78917f016cf06aa9571e1df9943ae951aac06628c6491741c4ff88dbf9d"
+    },
+    {
+      "target": "rsi_researcher/research/planner.py",
+      "original": "/data/cjh/rsi/outputs/research-planner-v2-20261016/engine.py",
+      "sha256": "68070e70e30e7d4ff011f0d45fe1e4055625640c86c2544bf3ef76bacfe42947"
+    },
+    {
+      "target": "rsi_researcher/research/planner_adapters.py",
+      "original": "/data/cjh/rsi/outputs/research-planner-v2-20261016/adapters.py",
+      "sha256": "29752f58bcba7cdf50833fea1165986e23bee2a71bbd6df66b4c1eac64cba8ba"
+    },
+    {
+      "target": "rsi_researcher/research/planner_tools.py",
+      "original": "/data/cjh/rsi/outputs/research-planner-v2-20261016/tools.py",
+      "sha256": "3b4d1f10711e544a63d3cc72eb66cd44fa2c921326545accab7149403aade877"
+    },
+    {
+      "target": "rsi_researcher/research/memory.py",
+      "original": "/data/cjh/rsi/outputs/research-planner-integration-20261016/memory.py",
+      "sha256": "24f261579e859d55b82291fc08251e0c0533f8bdb36e87be35d371d7795920a8"
+    },
+    {
+      "target": "rsi_researcher/research/planner_integration.py",
+      "original": "/data/cjh/rsi/outputs/research-planner-integration-20261016/integration.py",
+      "sha256": "a651cc51e541f662a5c6f77867d4f3a208ce2805d18dd65630182a8329242b85"
+    },
+    {
+      "target": "rsi_researcher/research/unified.py",
+      "original": "/data/cjh/rsi/experiments/unified-research-20261017-chatgpt/unified.py",
+      "sha256": "b6e587536efe13d92da3f13a5167a64a4b1764f3442d28b5540a51c2aa7c4788"
+    },
+    {
+      "target": "rsi_researcher/research/kuairand_transfer.py",
+      "original": "/data/cjh/rsi/experiments/unified-research-20261017-chatgpt/kuairand_transfer.py",
+      "sha256": "0629ca8242e889bbf58fb30e86bd4e790b2adc50ec62c68930cfa11e7939d615"
+    },
+    {
+      "target": "tests/test_consolidated_coat.py",
+      "original": "/data/cjh/rsi/experiments/unified-research-20261017-chatgpt/test_unified.py",
+      "sha256": "44b88d2f2f84b01bf27f17b9ad257a55fcd00e3c0db0db66aa8713490e8c54f8"
+    },
+    {
+      "target": "tests/test_consolidated_exposure.py",
+      "original": "/data/cjh/rsi/experiments/unified-research-20261017-chatgpt/test_transfer.py",
+      "sha256": "e6854356f00a8b489e6d5263a53f33fbf5fdd24e46ca0863ea7ffade54a73473"
+    },
+    {
+      "target": "tests/test_consolidated_external.py",
+      "original": "/data/cjh/rsi/experiments/unified-research-20261017-chatgpt/test_external.py",
+      "sha256": "97b7c39a29b13c3643528ab3d2ef5926a4ffe2d794614556d41b6aebdceff482"
+    },
+    {
+      "target": "rsi_researcher/cli.py",
+      "note": "add bias-tasks/bias-coat/bias-exposure"
+    }
+  ],
+  "canonical_root": "/data/cjh/rsi/project",
+  "later_code": [
+    "scripts/run_bounded_author_batch.py",
+    "rsi_researcher/research/coat_sensitivity.py",
+    "tests/test_coat_sensitivity.py",
+    "cli.py: bias-coat-sensitivity"
+  ],
+  "development_sensitivity_best_clip": {
+    "0.75": 100,
+    "1.0": 100,
+    "1.25": 20
+  }
+}

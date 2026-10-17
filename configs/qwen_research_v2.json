@@ -1,0 +1,56 @@
+{
+  "version": "official_observed_research_v1",
+  "source_dataset": "coat",
+  "source_data_dir": "data/external/coat",
+  "transfer_dataset": "kuairand-pure",
+  "transfer_data_dir": "data/external/kuairand-pure",
+  "split_seed": 20261016,
+  "user_limit": 1000,
+  "rounds": 3,
+  "transfer_rounds": 2,
+  "budget": {
+    "max_requests": 30,
+    "max_tokens": 1200000,
+    "max_seconds": 5400
+  },
+  "purpose": "new_development_cohort_sparse_score_diagnosis_and_proportional_penalty_exploration_not_RSI_proof",
+  "final_selection": "development_only_freeze_then_one_heldout_evaluation",
+  "candidate_budget_controls": "same_candidate_rounds; with_history_vs_without_history_same_role_calls; fixed_rule_zero_model_calls",
+  "llm": {
+    "provider": "vllm",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "model": "qwen3-8b",
+    "enable_thinking": false,
+    "max_tokens": 2048,
+    "temperature": 0.7,
+    "top_p": 0.8,
+    "top_k": 20,
+    "seed": 42,
+    "timeout_seconds": 180
+  },
+  "research_strategy": {
+    "version": "research_strategy_sparse_support_v1",
+    "strength_grid": [
+      0,
+      0.01,
+      0.02,
+      0.05,
+      0.1
+    ],
+    "evidence_focus": "tradeoff_users",
+    "preferred_operator": "support_preserving",
+    "allowed_operators": [
+      "retain",
+      "popularity_penalty",
+      "user_calibrated",
+      "support_preserving"
+    ]
+  },
+  "control_operator": "popularity_penalty",
+  "control_strengths": [
+    0.01,
+    0.02,
+    0.05
+  ],
+  "training_scope": "all_preperiod_users"
+}

@@ -1,0 +1,21 @@
+# Secrets, large datasets, published experiment artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*
+*.pem
+*.key
+*.zip
+*.tar
+*.tar.gz
+*.log
+*.jsonl
+/data/external/
+/runs/
+/outputs/
+/releases/
+/sources/
+*.egg-info/

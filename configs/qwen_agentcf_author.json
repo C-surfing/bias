@@ -1,0 +1,24 @@
+{
+  "dataset": "CDs-100-user-dense",
+  "data_dir": "data",
+  "users": 2,
+  "events_per_user": 5,
+  "seed": 20261013,
+  "budget": {
+    "max_requests": 120,
+    "max_tokens": 750000,
+    "max_seconds": 3600
+  },
+  "llm": {
+    "provider": "vllm",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "model": "qwen3-8b",
+    "enable_thinking": false,
+    "max_tokens": 1024,
+    "temperature": 0.7,
+    "top_p": 0.8,
+    "top_k": 20,
+    "seed": 42,
+    "timeout_seconds": 180
+  }
+}

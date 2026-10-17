@@ -1,0 +1,2681 @@
+{
+  "record_date": "2026-10-15",
+  "scope": "real_data_feasibility_not_confirmatory_RSI",
+  "evidence_note": "Program metrics and unedited model plan/learn excerpts. Model interpretations contain documented errors; read the report. Frozen run sources remain in the local run directories; current delivered code includes subsequent fixes.",
+  "batches": [
+    {
+      "run": "official-study-20261014-v2",
+      "status": "completed",
+      "usage": {
+        "requests": 22,
+        "received": 22,
+        "requests_with_unknown_usage": 0,
+        "prompt_tokens": 165025,
+        "completion_tokens": 17239,
+        "usd_upper_estimate_for_reported_usage": 0.0701943,
+        "price_assumption": "2026-10-13 Flash peak: input $0.3/M, output $1.2/M; ignores cache savings; unknown usage excluded",
+        "price_source": "https://api-docs.deepseek.com/quick_start/pricing/"
+      },
+      "campaign_sha256": "f68c5500153bddefb4712e96db33d3f446472756978f3df2e95d9115522d8f42",
+      "source_manifest_sha256": "f8c0a32e52454ee57399b0c0e8b054e109392cc0ffe34c9b5c64e0ecc1fc338e"
+    },
+    {
+      "run": "official-context-check-20261014",
+      "status": "failed",
+      "usage": {
+        "requests": 4,
+        "received": 4,
+        "requests_with_unknown_usage": 0,
+        "prompt_tokens": 18961,
+        "completion_tokens": 2108,
+        "usd_upper_estimate_for_reported_usage": 0.0082179,
+        "price_assumption": "2026-10-13 Flash peak: input $0.3/M, output $1.2/M; ignores cache savings; unknown usage excluded",
+        "price_source": "https://api-docs.deepseek.com/quick_start/pricing/"
+      },
+      "campaign_sha256": "8dd87816b3207c127abe8ed11f4d2dbf7be6e4ac2f0b648fd869c43a64433d11",
+      "source_manifest_sha256": "6a1aaedfe0390a7732365490a5c3f1c0a07003e0087f347e396a0bb05156cbd2"
+    },
+    {
+      "run": "official-context-check-20261015-v2",
+      "status": "completed",
+      "usage": {
+        "requests": 4,
+        "received": 4,
+        "requests_with_unknown_usage": 0,
+        "prompt_tokens": 18575,
+        "completion_tokens": 2862,
+        "usd_upper_estimate_for_reported_usage": 0.0090069,
+        "price_assumption": "2026-10-13 Flash peak: input $0.3/M, output $1.2/M; ignores cache savings; unknown usage excluded",
+        "price_source": "https://api-docs.deepseek.com/quick_start/pricing/"
+      },
+      "campaign_sha256": "a76c223b06ce953081cd84a2a5ad2c10815316674e209cbd7cf2160117f7ee7c",
+      "source_manifest_sha256": "82617e23ee6962179488237c985ce3b47e2b4e0cb0b46a3be9e7487e2145535d"
+    }
+  ],
+  "total_requests": 30,
+  "shared_request_ceiling": 30,
+  "main": {
+    "datasets": {
+      "coat": {
+        "fingerprint": "06c765f5ea71a1e86682e4d90d8a9e99d30226e5ecf0f1c3d707f311baa566bb",
+        "protocol": {
+          "dataset_protocol": "coat_observed_random_holdout_v1",
+          "split_seed": 20261014,
+          "training": "All nonzero self-selected train.ascii ratings",
+          "random_pool": "Nonzero test.ascii ratings excluding every pair observed in training",
+          "development_test_split": "Per-user shuffle seeded by '<split_seed>:<user>', floor(n/2) to development",
+          "validation_scope": "Random observed pairs for known users; not temporal or new-user validation",
+          "missing_rating": "0 means unobserved; never converted to a negative rating",
+          "item_id": "Zero-based anonymous matrix column index",
+          "rating_scale": [
+            1,
+            5
+          ]
+        },
+        "statistics": {
+          "users": 290,
+          "items": 300,
+          "original_train_rows": 6960,
+          "original_random_rows": 4640,
+          "random_train_overlap_removed": 366,
+          "random_after_overlap_removal": 4274,
+          "train_rows": 6960,
+          "development_rows": 2065,
+          "test_rows": 2209,
+          "development_users": 290,
+          "test_users": 290
+        },
+        "source": {
+          "dataset": "Coat Shopping",
+          "official_page": "https://www.cs.cornell.edu/~schnabts/mnar/",
+          "download_url": "https://www.cs.cornell.edu/~schnabts/mnar/coat.zip",
+          "archive_bytes": 537499,
+          "sha256": "6073d0b515ed1f6e830e4fead66dc76ad7991a7553eaa58e228b234a9d19daed",
+          "license": "CC BY-NC 4.0 as stated on author page",
+          "download_date": "2026-10-14",
+          "files": {
+            "coat/propensities.ascii": "a72e3142a413623c4a6b9d20c4f70fcc017e0db67cc3eb242116f69fb8fb9661",
+            "coat/README.txt": "cda6f0f12aa148f5391561ef95a5f2dd6f7e3838ec17e84fcb615bc11a7ffae0",
+            "coat/test.ascii": "de6714ab105a5e0be8166be7fd313901b29f9a09c3bea307901457d1d71847e6",
+            "coat/train.ascii": "a87bd9e7eaf3b89f976df3f25d4aa5d5d871be8a00b58947df9e6e015559bd37",
+            "coat/user_item_features/item_features.ascii": "edea8217ec5606779b4d3bf819f7591dc63bcd5194d619e8048c2322d07630b1",
+            "coat/user_item_features/item_features_map.txt": "2675dfaa38b89a9cbb1997f0cfcd46ed7e0e366dc515d12d95508d1f356e5d25",
+            "coat/user_item_features/user_features.ascii": "d8f9531b601c54a7272602f8b21fa6cb4652cbf122e35d8615ea9645ebbf1b1f",
+            "coat/user_item_features/user_features_map.txt": "3b8c825ad4445d4a46a400629c5fb43c805ff5a7982b2e436b69e7262c8a013a"
+          },
+          "loaded_file_sha256": {
+            "train.ascii": "a87bd9e7eaf3b89f976df3f25d4aa5d5d871be8a00b58947df9e6e015559bd37",
+            "test.ascii": "de6714ab105a5e0be8166be7fd313901b29f9a09c3bea307901457d1d71847e6",
+            "user_item_features/item_features.ascii": "edea8217ec5606779b4d3bf819f7591dc63bcd5194d619e8048c2322d07630b1",
+            "user_item_features/item_features_map.txt": "2675dfaa38b89a9cbb1997f0cfcd46ed7e0e366dc515d12d95508d1f356e5d25"
+          },
+          "propensities_used": false,
+          "propensities_note": "Author-estimated propensities are not loaded or treated as truth"
+        }
+      },
+      "kuairand-pure": {
+        "fingerprint": "cd3e42bbe666af01eae0daf348750fdde1862b5114c7cbb217ade0bc012c9117",
+        "protocol": {
+          "dataset_protocol": "kuairand_pure_preperiod_temporal_random_panel_v1",
+          "split_seed": 20261014,
+          "user_limit": 200,
+          "cohort": "Training-user IDs ordered by sha256('<seed>:<user>'); no future-label eligibility check",
+          "training_dates": [
+            20220408,
+            20220421
+          ],
+          "development_dates": [
+            20220422,
+            20220430
+          ],
+          "test_dates": [
+            20220501,
+            20220508
+          ],
+          "max_training_events_per_user": 200,
+          "training_history": "Latest preperiod events by date,time_ms,file row; positive and zero feedback retained",
+          "unseen_pair_filter": "Exclude pairs from the cohort's full preperiod, including events outside retained history",
+          "repeated_random_pairs": "Earliest event per partition by date,time_ms,file row; remove test pairs seen in development",
+          "rating": "Native is_click: 0 is exposed non-click/non-valid-play, 1 is positive; UI semantics vary",
+          "ranking_scope": "Within randomly exposed observed-item panels; not complete catalog preference truth",
+          "popularity_scope": "Only the retained at-most-200 training events per cohort user",
+          "catalog": "All basic metadata IDs plus random-pool IDs, without inspecting feedback for membership",
+          "sequence_limit": "Pure filters ordinary logs to the random pool and does not preserve complete sequences",
+          "metadata_limit": "Basic static snapshot retained for descriptions; availability at cutoff is unverified"
+        },
+        "statistics": {
+          "train_rows_scanned": 1141112,
+          "preperiod_rows": 1141112,
+          "train_outside_protocol_rows": 0,
+          "cohort_preperiod_rows": 8371,
+          "basic_feature_rows": 7583,
+          "random_rows_scanned": 1186059,
+          "random_outside_cohort_rows": 1178086,
+          "cohort_random_rows": 7973,
+          "random_outside_protocol_rows": 0,
+          "random_train_overlap_rows_removed": 3,
+          "development_repeat_rows_removed": 0,
+          "test_repeat_rows_removed": 0,
+          "eligible_training_users": 26210,
+          "users": 200,
+          "items": 7583,
+          "train_history_cap_rows_removed": 37,
+          "test_development_overlap_pairs_removed": 0,
+          "train_rows": 8334,
+          "development_rows": 2459,
+          "test_rows": 5511,
+          "development_users": 171,
+          "test_users": 198,
+          "development_users_with_positive": 101,
+          "test_users_with_positive": 146,
+          "train_observed_zero_rows": 4138,
+          "development_observed_zero_rows": 1936,
+          "test_observed_zero_rows": 4527
+        },
+        "source": {
+          "dataset": "KuaiRand-Pure",
+          "official_page": "https://kuairand.com/",
+          "download_url": "https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz",
+          "archive_bytes": 47432272,
+          "sha256": "c814bf6f3624c0cfae83c57de3df26b2ed206e5c57bab4c4dcbfabbabe20cbf0",
+          "md5": "0820331067a3784d9691136f772b35a7",
+          "license": "CC BY 4.0 (Zenodo dataset record)",
+          "files": {
+            "KuaiRand-Pure/data/log_standard_4_08_to_4_21_pure.csv": {
+              "bytes": 83961282,
+              "sha256": "5bb6eb0b3d9f47e5436cb5dc82ee1899b845ebf9750a5560b801e929e18bd41c"
+            },
+            "KuaiRand-Pure/data/log_random_4_22_to_5_08_pure.csv": {
+              "bytes": 87086116,
+              "sha256": "60b80994da969cd53da4d50c37ba3dafd6fb185df804c92c8410df34845a9d2c"
+            },
+            "KuaiRand-Pure/data/user_features_pure.csv": {
+              "bytes": 3519028,
+              "sha256": "dc729a656301b4c6d07f713fe41d05ec9bfaab670b90e531c70037caf033c011"
+            },
+            "KuaiRand-Pure/data/log_standard_4_22_to_5_08_pure.csv": {
+              "bytes": 21765075,
+              "sha256": "429e3b948828942e572f2c3a5be5a25799ffe75591d22d18cf417b9b534d31fd"
+            },
+            "KuaiRand-Pure/data/video_features_statistic_pure.csv": {
+              "bytes": 6559217,
+              "sha256": "d5c9e237ef2c6c1fc0e7f27e952f215d6626ecd934b01a6c53ecfcc72540f6b6"
+            },
+            "KuaiRand-Pure/data/video_features_basic_pure.csv": {
+              "bytes": 626669,
+              "sha256": "a6f7ee02684c5777422306cdc416e170302288aa89aca9dfea995edbd625bcc2"
+            }
+          },
+          "download_date": "2026-10-14",
+          "loaded_file_sha256": {
+            "log_standard_4_08_to_4_21_pure.csv": "5bb6eb0b3d9f47e5436cb5dc82ee1899b845ebf9750a5560b801e929e18bd41c",
+            "log_random_4_22_to_5_08_pure.csv": "60b80994da969cd53da4d50c37ba3dafd6fb185df804c92c8410df34845a9d2c",
+            "video_features_basic_pure.csv": "a6f7ee02684c5777422306cdc416e170302288aa89aca9dfea995edbd625bcc2"
+          },
+          "video_statistics_used": false,
+          "user_feature_snapshot_used": false,
+          "basic_features_note": "Static metadata only; snapshot availability at the training cutoff is not verified"
+        }
+      }
+    },
+    "arms": {
+      "with_history": {
+        "execution_status": "completed",
+        "dataset": "coat",
+        "dataset_fingerprint": "06c765f5ea71a1e86682e4d90d8a9e99d30226e5ecf0f1c3d707f311baa566bb",
+        "strategy": {
+          "version": "research_strategy_v1",
+          "strength_grid": [
+            0,
+            0.05,
+            0.1,
+            0.2,
+            0.4
+          ],
+          "evidence_focus": "overall",
+          "preferred_operator": "popularity_penalty"
+        },
+        "selected_policy": {
+          "operator": "popularity_penalty",
+          "strength": 0.2
+        },
+        "selection_reason": "在通过质量和偏差点门槛的开发候选中，选择面板额外热门倾斜最小的一项。",
+        "research_status": "candidate_frozen",
+        "validation": {
+          "status": "completed",
+          "policy": {
+            "operator": "popularity_penalty",
+            "strength": 0.2
+          },
+          "scope": "held_out_observed_random_panels",
+          "metrics": {
+            "B0": {
+              "ndcg": 0.6944110318653435,
+              "panel_excess_head_share": 0.06311779601450038,
+              "head_share": 0.21305667059669542,
+              "tail_relevant_recall": 0.7362587108013937,
+              "quality_users": 276,
+              "zero_ideal_users": 14,
+              "evaluated_users": 290,
+              "tail_supported_users": 164,
+              "invalid_rankings": 0
+            },
+            "candidate": {
+              "ndcg": 0.6973620688155648,
+              "panel_excess_head_share": 0.03716894932664638,
+              "head_share": 0.1455066442918958,
+              "tail_relevant_recall": 0.7640606852497096,
+              "quality_users": 276,
+              "zero_ideal_users": 14,
+              "evaluated_users": 290,
+              "tail_supported_users": 164,
+              "invalid_rankings": 0
+            }
+          },
+          "comparison": {
+            "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+            "status": "point_gates_passed",
+            "paired_users": 276,
+            "quality_change": 0.002951036950221364,
+            "bias_change": -0.025948846687853994,
+            "head_share_change": -0.06755002630479962,
+            "tail_relevant_recall_change": 0.02780197444831589,
+            "point_gates": {
+              "quality": true,
+              "bias": true,
+              "valid_rankings": true
+            },
+            "quality_floor_ratio": 0.99,
+            "bias_ceiling_ratio": 0.9,
+            "minimum_reference_bias": 0.001,
+            "uncertainty": {
+              "method": "paired_user_percentile_bootstrap",
+              "seed": 20261014,
+              "bootstrap_samples": 500,
+              "metrics": {
+                "ndcg": {
+                  "mean_difference": 0.0029510369502214234,
+                  "ci95": [
+                    -0.015510269172057424,
+                    0.020529641426786302
+                  ]
+                },
+                "panel_excess_head_share": {
+                  "mean_difference": -0.025948846687853997,
+                  "ci95": [
+                    -0.03335708649019826,
+                    -0.018705507805566315
+                  ]
+                }
+              },
+              "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+            },
+            "statistical_promotion": false,
+            "causal_claim": false
+          },
+          "test_candidate_selection": false,
+          "online_experiment": false,
+          "statistical_promotion": false
+        },
+        "trials": [
+          {
+            "trial_id": "0001",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.006420450067848749,
+              "bias_change": -0.021504867386506983,
+              "head_share_change": -0.06526079461840925,
+              "tail_relevant_recall_change": 0.04324894514767941,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.006420450067848776,
+                    "ci95": [
+                      -0.012122643096637036,
+                      0.024995842689982957
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.02150486738650698,
+                    "ci95": [
+                      -0.02809833174592932,
+                      -0.015627138325964005
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.6922984502335796,
+                "panel_excess_head_share": 0.06281019799536408,
+                "head_share": 0.2265630872220065,
+                "tail_relevant_recall": 0.7626582278481012,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.6987189003014284,
+                "panel_excess_head_share": 0.0413053306088571,
+                "head_share": 0.16130229260359724,
+                "tail_relevant_recall": 0.8059071729957806,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "4156d7bdf24c446dfdeb3e6d85577644159187574e6b3e9ab9fe95e6982faf77",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，对训练观察频次做轻度惩罚（popularity_penalty, strength=0.05）可在几乎不损失 NDCG@5 的前提下，降低面板额外热门倾斜（panel_excess_head_share），因为基线中该倾斜为正（0.0628）且头部占比（0.2266）高于随机开发集头部占比（0.2378 的对照水平），说明排序分数部分由观察频次驱动而非仅由相关性驱动。",
+              "alternative_explanation": "竞争解释：面板额外热门倾斜的下降可能只是惩罚强度带来的分数重排副作用（把高分候选整体压低或打散），而非真正削弱了流行度对排序的贡献；也可能只是该强度下 NDCG 与倾斜同时轻微波动，属于面板噪声，与去偏机制无关。此外，训练与随机开发集的反馈分布差异本身不识别任何因果机制。",
+              "operator": "popularity_penalty",
+              "strength": 0.05,
+              "prediction": "相对原版基线（NDCG=0.6923，panel_excess_head_share=0.0628），popularity_penalty@0.05 的 NDCG@5 保持 ≥ 原版 99%（约 ≥0.6854），同时 panel_excess_head_share ≤ 原版 90%（约 ≤0.0565）；tail_relevant_recall 不出现明显下降，invalid_rankings 保持 0。",
+              "falsifier": "若 popularity_penalty@0.05 的 NDCG@5 低于原版 99%，或 panel_excess_head_share 未降到原版 90% 以下，或 tail_relevant_recall 显著下降，则该假设被证伪；若倾斜下降但 NDCG 同步大幅下降，则支持“副作用/噪声”这一竞争解释而非去偏机制。",
+              "reason": "上轮反证表明热门下降本身不等于去偏，因此本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上比较 popularity_penalty@0.05 与原版基线的 NDCG 与面板额外热门倾斜。选择 0.05 是网格中最小非零强度，用于检验“轻度惩罚即可降倾斜且保质量”这一最弱版本假设；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]。"
+            },
+            "research_update": {
+              "lesson": "popularity_penalty@0.05 通过了预设点门槛（NDCG 变化 +0.0064，未跌破 99% 质量底线；panel_excess_head_share 变化 -0.0215，低于 90% 上限；tail_relevant_recall +0.0432；invalid_rankings=0），但点门槛不等于统计证实：NDCG 的配对 bootstrap 95% CI 为 [-0.0121, +0.0250]，跨 0，说明质量“不损失”只是未被证伪而非被证实；倾斜的 CI [-0.0281, -0.0156] 虽整体为负，但该不确定性未校正候选选择，且评估范围仅限已观察候选面板，不是全目录反事实。因此本轮只能记为“点门槛通过、统计未提升（statistical_promotion=false）、无因果主张”，不能宣称去偏机制成立。同时示例显示收益高度不均：多数用户 quality_change=0，个别用户（如 216 为 -0.63、0 为 -0.10）质量明显受损，说明均值改善掩盖了受损用户，需按受损用户修正判断。",
+              "next_question": "在固定随机评分面板上，把 popularity_penalty 强度从 0.05 提高到 0.1（网格下一档），能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界仍严格小于 0，并且不扩大质量受损用户（quality_change<0）的比例与幅度？",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0.1,
+              "evidence_state": "inconclusive"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.05
+              },
+              "followed": true,
+              "reason": "上轮反证表明热门下降本身不等于去偏，因此本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上比较 popularity_penalty@0.05 与原版基线的 NDCG 与面板额外热门倾斜。选择 0.05 是网格中最小非零强度，用于检验“轻度惩罚即可降倾斜且保质量”这一最弱版本假设；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]。"
+            }
+          },
+          {
+            "trial_id": "0002",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.1
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.0036560612806303405,
+              "bias_change": -0.024978071540328994,
+              "head_share_change": -0.07124219183116126,
+              "tail_relevant_recall_change": 0.04978902953586506,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.0036560612806303162,
+                    "ci95": [
+                      -0.015530285798203796,
+                      0.022440138254283173
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.02497807154032899,
+                    "ci95": [
+                      -0.03196790912938947,
+                      -0.018406864180685347
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.6922984502335796,
+                "panel_excess_head_share": 0.06281019799536408,
+                "head_share": 0.2265630872220065,
+                "tail_relevant_recall": 0.7626582278481012,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.69595451151421,
+                "panel_excess_head_share": 0.03783212645503509,
+                "head_share": 0.15532089539084523,
+                "tail_relevant_recall": 0.8124472573839663,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "e7f3763a400a16b7d4ae39817b96c6179c08432692719c81c26dadf9f1d0d804",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，把 popularity_penalty 强度从 0.05 提高到 0.1（网格下一档），仍能在 NDCG@5 不低于原版 99% 的前提下，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，且不扩大质量受损用户（quality_change<0）的比例与幅度。机制表述：0.05 档的倾斜下降（-0.0215，CI 全负）可能来自对训练观察频次的轻度压缩，若该机制真实且单调，则 0.1 档应在质量底线内给出更负的倾斜 CI 上界；但热门下降本身不等于去偏，本轮不宣称因果或 RSI 成立。",
+              "alternative_explanation": "竞争解释：0.05 档的倾斜下降可能只是分数重排副作用或面板噪声（NDCG 的 CI 跨 0，均值改善掩盖了用户 216 的 -0.63、用户 0 的 -0.10 等受损用户）；若 0.1 档倾斜 CI 上界仍不严格为负，或质量受损用户比例/幅度扩大，则支持“副作用/噪声”而非去偏机制。此外，训练与随机开发集的反馈分布差异本身不识别任何因果机制，评估范围仅限已观察候选面板，不是全目录反事实。",
+              "operator": "popularity_penalty",
+              "strength": 0.1,
+              "prediction": "相对原版基线（NDCG=0.6923，panel_excess_head_share=0.0628），popularity_penalty@0.1 的 NDCG@5 ≥ 原版 99%（约 ≥0.6854），panel_excess_head_share 的配对 bootstrap 95% CI 上界 < 0，invalid_rankings=0；同时 quality_change<0 的用户比例与幅度不超过 0.05 档水平（0.05 档多数用户 quality_change=0，受损者如 216 为 -0.63、0 为 -0.10）。",
+              "falsifier": "若 popularity_penalty@0.1 的 NDCG@5 低于原版 99%，或 panel_excess_head_share 的配对 bootstrap 95% CI 上界未严格小于 0，或 quality_change<0 的用户比例或幅度较 0.05 档扩大，或 tail_relevant_recall 明显下降、invalid_rankings>0，则该假设被证伪；若倾斜下降但 NDCG 同步大幅下降或受损用户增多，则支持“副作用/噪声”这一竞争解释而非去偏机制。",
+              "reason": "上轮反证表明热门下降本身不等于去偏，且 0.05 档仅点门槛通过、统计未提升（NDCG CI [-0.0121,+0.0250] 跨 0，倾斜 CI [-0.0281,-0.0156] 未校正候选选择），故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把强度提到网格下一档 0.1，检验“倾斜 CI 上界严格为负且不扩大受损用户”这一更强版本假设。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            },
+            "research_update": {
+              "lesson": "popularity_penalty@0.1 再次通过点门槛（NDCG 0.6960 vs 基线 0.6923，+0.0037，未跌破 99% 质量底线；panel_excess_head_share 0.0378 vs 0.0628，-0.0250，低于 90% 上限；tail_relevant_recall +0.0498；invalid_rankings=0），且倾斜的配对 bootstrap 95% CI [-0.0320, -0.0184] 上界严格小于 0，比 0.05 档更负，符合“机制单调”的方向性预期。但点门槛与更负的 CI 都不等于统计证实：NDCG 的 CI [-0.0155, +0.0224] 仍跨 0，质量“不损失”只是未被证伪；该不确定性未校正候选选择（interpretation 明示 panel_split_uncertainty_not_corrected_for_candidate_selection），评估范围仅限已观察候选面板，不是全目录反事实，故 statistical_promotion=false、causal_claim=false，不能宣称去偏机制或 RSI 成立。更关键的是受损用户未被修正：0.1 档仍出现用户 216 的 quality_change=-0.63、用户 0 的 -0.10，与 0.05 档完全相同的受损幅度，说明均值改善（+0.0037）继续掩盖少数用户的严重质量损失，且强度加倍并未消除该损失，反而在更负倾斜的同时保留了同样的受损尾部。因此本轮证据状态为 inconclusive：方向一致但未达统计证实，且受损用户问题未改善。",
+              "next_question": "在固定随机评分面板上，把 popularity_penalty 强度从 0.1 提高到 0.2（网格下一档），能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界仍严格小于 0，并且不扩大质量受损用户（quality_change<0）的比例与幅度（尤其用户 216 的 -0.63、用户 0 的 -0.10）？若 0.2 档倾斜 CI 上界不再更负或受损用户扩大，则支持“分数重排副作用/面板噪声”而非去偏机制。",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0.2,
+              "evidence_state": "inconclusive"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.1,
+                "question": "在固定随机评分面板上，把 popularity_penalty 强度从 0.05 提高到 0.1（网格下一档），能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界仍严格小于 0，并且不扩大质量受损用户（quality_change<0）的比例与幅度？",
+                "source": "previous_research_feedback"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.1
+              },
+              "followed": true,
+              "reason": "上轮反证表明热门下降本身不等于去偏，且 0.05 档仅点门槛通过、统计未提升（NDCG CI [-0.0121,+0.0250] 跨 0，倾斜 CI [-0.0281,-0.0156] 未校正候选选择），故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把强度提到网格下一档 0.1，检验“倾斜 CI 上界严格为负且不扩大受损用户”这一更强版本假设。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            }
+          },
+          {
+            "trial_id": "0003",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.2
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.0011871031701989887,
+              "bias_change": -0.02761147945243033,
+              "head_share_change": -0.0748103903716727,
+              "tail_relevant_recall_change": 0.04926160337552743,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.0011871031701989616,
+                    "ci95": [
+                      -0.017899864213449558,
+                      0.019637021258538084
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.027611479452430324,
+                    "ci95": [
+                      -0.034791624395067916,
+                      -0.020655907952656438
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.6922984502335796,
+                "panel_excess_head_share": 0.06281019799536408,
+                "head_share": 0.2265630872220065,
+                "tail_relevant_recall": 0.7626582278481012,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.6934855534037786,
+                "panel_excess_head_share": 0.03519871854293375,
+                "head_share": 0.1517526968503338,
+                "tail_relevant_recall": 0.8119198312236287,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "1cb0042a413862b73cf7787dcaa7f7bca867795919ffc739538e0439b011e4f0",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，把 popularity_penalty 强度从 0.1 提高到 0.2（网格下一档），仍能在 NDCG@5 不低于原版 99%（约 ≥0.6854）的前提下，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，且不扩大质量受损用户（quality_change<0）的比例与幅度（尤其用户 216 的 -0.63、用户 0 的 -0.10）。机制表述：0.05→0.1 档倾斜 CI 上界由 -0.0156 变到 -0.0184、均值由 -0.0215 变到 -0.0250，方向单调，若该压缩机制真实且单调，0.2 档应给出更负的倾斜 CI 上界；但热门下降本身不等于去偏，本轮不宣称因果或 RSI 成立。",
+              "alternative_explanation": "竞争解释：0.05 与 0.1 档的倾斜下降可能只是分数重排副作用或面板噪声——NDCG 的配对 CI 在两档均跨 0（[-0.0121,+0.0250]、[-0.0155,+0.0224]），均值改善持续掩盖用户 216 的 -0.63 与用户 0 的 -0.10，且强度加倍并未消除该受损尾部。若 0.2 档倾斜 CI 上界不再更负、或受损用户比例/幅度扩大、或 NDCG 跌破 99% 底线，则支持“副作用/噪声”而非去偏机制。此外，训练与随机开发集的反馈分布差异本身不识别任何因果机制；评估范围仅限已观察候选面板，不是全目录反事实；未观察反馈（缺失对）保持未知。",
+              "operator": "popularity_penalty",
+              "strength": 0.2,
+              "prediction": "相对原版基线（NDCG=0.6923，panel_excess_head_share=0.0628），popularity_penalty@0.2 的 NDCG@5 ≥ 原版 99%（约 ≥0.6854），panel_excess_head_share 的配对 bootstrap 95% CI 上界 < 0 且不弱于 0.1 档的 -0.0184，invalid_rankings=0；quality_change<0 的用户比例与幅度不超过 0.1 档水平（0.1 档多数用户 quality_change=0，受损者 216 为 -0.63、0 为 -0.10）。",
+              "falsifier": "若 popularity_penalty@0.2 的 NDCG@5 低于原版 99%，或 panel_excess_head_share 的配对 bootstrap 95% CI 上界未严格小于 0（或不再比 0.1 档更负），或 quality_change<0 的用户比例或幅度较 0.1 档扩大，或 tail_relevant_recall 明显下降、invalid_rankings>0，则该假设被证伪；若倾斜下降但 NDCG 同步大幅下降或受损用户增多，则支持“分数重排副作用/面板噪声”这一竞争解释而非去偏机制。",
+              "reason": "上轮反证表明热门下降本身不等于去偏：0.05 与 0.1 档均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 的配对 CI 两档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，且评估仅限已观察候选面板。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把强度提到网格下一档 0.2，检验“倾斜 CI 上界仍严格为负且不扩大受损用户”这一更强版本假设，并优先解释上轮反证（受损用户 216/0 未被修正）。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            },
+            "research_update": {
+              "lesson": "popularity_penalty@0.2 第三次通过点门槛（NDCG 0.6935 vs 基线 0.6923，+0.0012，未跌破 99% 质量底线；panel_excess_head_share 0.0352 vs 0.0628，-0.0276，低于 90% 上限；tail_relevant_recall +0.0493；invalid_rankings=0），倾斜的配对 bootstrap 95% CI [-0.0348, -0.0207] 上界严格小于 0，且比 0.1 档的 -0.0184 更负，方向仍单调。但点门槛与更负的 CI 都不等于统计证实：NDCG 的 CI [-0.0179, +0.0196] 仍跨 0，质量“不损失”只是未被证伪；该不确定性未校正候选选择，评估范围仅限已观察候选面板，不是全目录反事实，故 statistical_promotion=false、causal_claim=false，不能宣称去偏机制或 RSI 成立。更关键的是受损用户完全未被修正：0.2 档仍出现用户 216 的 quality_change=-0.63、用户 0 的 -0.10，与 0.05、0.1 档逐位相同，说明强度从 0.05 加到 0.2（四倍）只压缩了整体倾斜，却对受损尾部零改善；同时 NDCG 均值增益随强度递减（+0.0064→+0.0037→+0.0012），提示倾斜下降越来越像分数重排副作用而非去偏机制。因此本轮证据状态为 weakened：方向一致但未达统计证实，且受损用户问题在强度加倍后毫无改善。",
+              "next_question": "在固定随机评分面板上，把 popularity_penalty 强度从 0.2 提高到网格末档 0.4，能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界仍严格小于 0，并且不扩大质量受损用户（quality_change<0）的比例与幅度（尤其用户 216 的 -0.63、用户 0 的 -0.10）？若 0.4 档倾斜 CI 上界不再更负、或 NDCG 跌破 99% 底线、或受损用户比例/幅度扩大，则支持“分数重排副作用/面板噪声”而非去偏机制，并应停止在该算子上继续加码。",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0.4,
+              "evidence_state": "weakened"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.2,
+                "question": "在固定随机评分面板上，把 popularity_penalty 强度从 0.1 提高到 0.2（网格下一档），能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界仍严格小于 0，并且不扩大质量受损用户（quality_change<0）的比例与幅度（尤其用户 216 的 -0.63、用户 0 的 -0.10）？若 0.2 档倾斜 CI 上界不再更负或受损用户扩大，则支持“分数重排副作用/面板噪声”而非去偏机制。",
+                "source": "previous_research_feedback"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.2
+              },
+              "followed": true,
+              "reason": "上轮反证表明热门下降本身不等于去偏：0.05 与 0.1 档均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 的配对 CI 两档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，且评估仅限已观察候选面板。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把强度提到网格下一档 0.2，检验“倾斜 CI 上界仍严格为负且不扩大受损用户”这一更强版本假设，并优先解释上轮反证（受损用户 216/0 未被修正）。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            }
+          }
+        ]
+      },
+      "without_history": {
+        "execution_status": "completed",
+        "dataset": "coat",
+        "dataset_fingerprint": "06c765f5ea71a1e86682e4d90d8a9e99d30226e5ecf0f1c3d707f311baa566bb",
+        "strategy": {
+          "version": "research_strategy_v1",
+          "strength_grid": [
+            0,
+            0.05,
+            0.1,
+            0.2,
+            0.4
+          ],
+          "evidence_focus": "overall",
+          "preferred_operator": "popularity_penalty"
+        },
+        "selected_policy": {
+          "operator": "popularity_penalty",
+          "strength": 0.05
+        },
+        "selection_reason": "在通过质量和偏差点门槛的开发候选中，选择面板额外热门倾斜最小的一项。",
+        "research_status": "candidate_frozen",
+        "validation": {
+          "status": "completed",
+          "policy": {
+            "operator": "popularity_penalty",
+            "strength": 0.05
+          },
+          "scope": "held_out_observed_random_panels",
+          "metrics": {
+            "B0": {
+              "ndcg": 0.6944110318653435,
+              "panel_excess_head_share": 0.06311779601450038,
+              "head_share": 0.21305667059669542,
+              "tail_relevant_recall": 0.7362587108013937,
+              "quality_users": 276,
+              "zero_ideal_users": 14,
+              "evaluated_users": 290,
+              "tail_supported_users": 164,
+              "invalid_rankings": 0
+            },
+            "candidate": {
+              "ndcg": 0.6978758115113871,
+              "panel_excess_head_share": 0.042175758603251456,
+              "head_share": 0.15396212169173296,
+              "tail_relevant_recall": 0.7560757839721254,
+              "quality_users": 276,
+              "zero_ideal_users": 14,
+              "evaluated_users": 290,
+              "tail_supported_users": 164,
+              "invalid_rankings": 0
+            }
+          },
+          "comparison": {
+            "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+            "status": "point_gates_passed",
+            "paired_users": 276,
+            "quality_change": 0.0034647796460436364,
+            "bias_change": -0.02094203741124892,
+            "head_share_change": -0.05909454890496246,
+            "tail_relevant_recall_change": 0.01981707317073167,
+            "point_gates": {
+              "quality": true,
+              "bias": true,
+              "valid_rankings": true
+            },
+            "quality_floor_ratio": 0.99,
+            "bias_ceiling_ratio": 0.9,
+            "minimum_reference_bias": 0.001,
+            "uncertainty": {
+              "method": "paired_user_percentile_bootstrap",
+              "seed": 20261014,
+              "bootstrap_samples": 500,
+              "metrics": {
+                "ndcg": {
+                  "mean_difference": 0.0034647796460436264,
+                  "ci95": [
+                    -0.015073681693426697,
+                    0.021675937882863067
+                  ]
+                },
+                "panel_excess_head_share": {
+                  "mean_difference": -0.020942037411248924,
+                  "ci95": [
+                    -0.027809104358319063,
+                    -0.013984980759982946
+                  ]
+                }
+              },
+              "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+            },
+            "statistical_promotion": false,
+            "causal_claim": false
+          },
+          "test_candidate_selection": false,
+          "online_experiment": false,
+          "statistical_promotion": false
+        },
+        "trials": [
+          {
+            "trial_id": "0001",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.006420450067848749,
+              "bias_change": -0.021504867386506983,
+              "head_share_change": -0.06526079461840925,
+              "tail_relevant_recall_change": 0.04324894514767941,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.006420450067848776,
+                    "ci95": [
+                      -0.012122643096637036,
+                      0.024995842689982957
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.02150486738650698,
+                    "ci95": [
+                      -0.02809833174592932,
+                      -0.015627138325964005
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.6922984502335796,
+                "panel_excess_head_share": 0.06281019799536408,
+                "head_share": 0.2265630872220065,
+                "tail_relevant_recall": 0.7626582278481012,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.6987189003014284,
+                "panel_excess_head_share": 0.0413053306088571,
+                "head_share": 0.16130229260359724,
+                "tail_relevant_recall": 0.8059071729957806,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "4156d7bdf24c446dfdeb3e6d85577644159187574e6b3e9ab9fe95e6982faf77",
+              "reused": true,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，对训练观察频次施加轻度惩罚（popularity_penalty, strength=0.05）可在几乎不损失 NDCG@5 的前提下，降低面板额外热门倾斜（panel_excess_head_share），因为基线中该倾斜为正（0.0628）且头部占比（0.2266）高于随机开发集头部占比（0.2378 的对照水平），说明排序分数中存在可被频次惩罚抵消的观察频次成分。",
+              "alternative_explanation": "竞争解释：面板额外热门倾斜的下降可能并非来自去偏机制，而是惩罚强度过小导致的排序扰动、或对长尾相关项的重排恰好改变了头部计数；同时训练与随机开发集的反馈分布差异（训练均值 2.611 vs 随机开发 2.190，头部占比 0.430 vs 0.238）本身是观察频次代理，不能识别因果，因此倾斜下降也可能只是分布差异的投影而非机制生效。",
+              "operator": "popularity_penalty",
+              "strength": 0.05,
+              "prediction": "在固定随机评分面板上，popularity_penalty(0.05) 相对 retain 基线：NDCG@5 ≥ 基线的 99%（约 ≥0.6854），panel_excess_head_share ≤ 基线的 90%（约 ≤0.0565），且 tail_relevant_recall 不出现大幅下降；未观察反馈对保持未知，不作推断。",
+              "falsifier": "若 popularity_penalty(0.05) 的 NDCG@5 低于基线 99%，或 panel_excess_head_share 未降至基线 90% 以下，或下降仅伴随 tail_relevant_recall 显著恶化（说明是质量损失而非去偏），则该假设被证伪；若倾斜下降幅度与 strength=0 的随机扰动无差异，也视为证伪。",
+              "reason": "上轮反证表明热门下降本身不等于去偏，因此本轮不宣称因果或 RSI 成立，仅以固定随机面板上的质量约束（≥99%）与倾斜约束（≤90%）作为可检验的操作化判据。选择最小强度 0.05 是因为基线倾斜幅度较小（0.0628），过强惩罚更可能以质量损失换取倾斜下降，从而无法区分去偏与质量退化。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]，未观察反馈保持未知。"
+            },
+            "research_update": {
+              "lesson": "本轮 popularity_penalty(0.05) 通过了预设点门槛：NDCG@5 由 0.6923 升至 0.6987（+0.0064，未损失质量），panel_excess_head_share 由 0.0628 降至 0.0413（-0.0215，降幅约 34%，超过 90% 门槛），tail_relevant_recall 亦由 0.7627 升至 0.8059，说明倾斜下降并非以长尾质量损失为代价。但点门槛不等于统计证实：NDCG 的配对 bootstrap 95% CI 为 [-0.0121, 0.0250]，跨零，质量提升不显著；倾斜的 CI 为 [-0.0281, -0.0156]，虽不跨零，但该区间未校正候选选择（selection）带来的多重比较偏差，且比较范围仅限已观察候选面板，不是目录级反事实。因此本轮只能判定为“点门槛通过、统计未提升（statistical_promotion=false）、无因果主张”，不能宣称去偏机制成立或 RSI 成立。此外，示例用户显示多数用户 bias_change=0（惩罚未改变其头部计数），倾斜下降集中在少数用户，提示效应可能由重排的离散跳变而非普遍机制驱动。",
+              "next_question": "在固定随机评分面板上，把惩罚强度沿网格上调（popularity_penalty, strength=0.1）是否能在保持 NDCG@5 不低于基线 99% 的同时，使 panel_excess_head_share 的下降幅度显著大于 strength=0.05（即倾斜-质量权衡曲线是否单调、是否出现质量拐点）？",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0.1,
+              "evidence_state": "inconclusive"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.05
+              },
+              "followed": true,
+              "reason": "上轮反证表明热门下降本身不等于去偏，因此本轮不宣称因果或 RSI 成立，仅以固定随机面板上的质量约束（≥99%）与倾斜约束（≤90%）作为可检验的操作化判据。选择最小强度 0.05 是因为基线倾斜幅度较小（0.0628），过强惩罚更可能以质量损失换取倾斜下降，从而无法区分去偏与质量退化。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]，未观察反馈保持未知。"
+            }
+          },
+          {
+            "trial_id": "0002",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.006420450067848749,
+              "bias_change": -0.021504867386506983,
+              "head_share_change": -0.06526079461840925,
+              "tail_relevant_recall_change": 0.04324894514767941,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.006420450067848776,
+                    "ci95": [
+                      -0.012122643096637036,
+                      0.024995842689982957
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.02150486738650698,
+                    "ci95": [
+                      -0.02809833174592932,
+                      -0.015627138325964005
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.6922984502335796,
+                "panel_excess_head_share": 0.06281019799536408,
+                "head_share": 0.2265630872220065,
+                "tail_relevant_recall": 0.7626582278481012,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.6987189003014284,
+                "panel_excess_head_share": 0.0413053306088571,
+                "head_share": 0.16130229260359724,
+                "tail_relevant_recall": 0.8059071729957806,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "4156d7bdf24c446dfdeb3e6d85577644159187574e6b3e9ab9fe95e6982faf77",
+              "reused": true,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，对训练观察频次高的物品施加轻度分数惩罚（popularity_penalty, strength=0.05），可在几乎不损失 NDCG@5 的前提下，把面板额外热门倾斜（panel_excess_head_share）压到原版的 90% 以下；即质量与去偏在此强度下可能同时满足。",
+              "alternative_explanation": "上轮反证（quality_change=0、bias_change=0，且部分用户 panel_excess_head_share 高达 0.41–0.47）更可能来自评估面板与用户构成本身：训练与随机开发反馈的分布差异（训练均值 2.61 vs 开发 2.19，头部占比 0.43 vs 0.24）说明热门倾斜是观察频次代理的产物，而非惩罚算子生效；同时 16 个 zero_ideal_users、158/290 个 tail_supported_users 与 tail_relevant_recall 的 0/1 两极分布，意味着指标对候选集与用户子集高度敏感，任何\"下降\"都可能只是面板噪声或候选集变化，而非去偏机制。",
+              "operator": "popularity_penalty",
+              "strength": 0.05,
+              "prediction": "在固定随机评分面板、最终反馈不用于选候选的条件下，popularity_penalty(0.05) 的 NDCG@5 ≥ 原版 0.6923 的 99%（≈0.6854），且 panel_excess_head_share ≤ 原版 0.06281 的 90%（≈0.05653）；若成立，则 tail_relevant_recall 相对原版 0.7627 的变化应落在面板噪声范围内（不出现系统性崩塌）。",
+              "falsifier": "若 popularity_penalty(0.05) 的 NDCG@5 跌破原版 99%（<0.6854），或 panel_excess_head_share 未降到原版 90% 以下（>0.05653），或 tail_relevant_recall 出现系统性大幅下降，则该假设被证伪；此时应判定热门倾斜下降并非来自惩罚算子，而需转向 user_calibrated 或检查面板/用户子集构成。",
+              "reason": "上轮证据显示 quality_change 与 bias_change 全为 0，说明该强度下算子未产生可观测差异，热门下降本身不能等同于去偏，也不能宣称因果或 RSI 成立。因此本轮以最小实验（仅改 strength=0.05 的 popularity_penalty，固定面板、不接触最终反馈）检验\"轻度惩罚能否同时保质量、降倾斜\"这一可证伪命题；未观察反馈保持未知，不纳入推断。"
+            },
+            "research_update": {
+              "lesson": "popularity_penalty(0.05) 在固定面板上通过了点门槛：NDCG@5 由 0.6923 升至 0.6987（+0.0064，为原版 100.9%，高于 99% 下限），panel_excess_head_share 由 0.06281 降至 0.04131（-0.0215，为原版 65.8%，低于 90% 上限），tail_relevant_recall 由 0.7627 升至 0.8059（+0.0432），无 invalid_rankings。但点门槛不等于统计证实：NDCG 的配对 bootstrap 95% CI 为 [-0.0121, +0.0250]，跨 0，质量变化在统计上不可区分于噪声；只有 panel_excess_head_share 的 CI [-0.0281, -0.0156] 完全在 0 以下，方向稳健。同时该比较仅限 observed_candidate_panel_only_not_catalog_counterfactual，未校正候选集选择带来的不确定性，statistical_promotion=false、causal_claim=false。因此可承认的只是\"该强度下倾斜指标有稳健下降、质量未出现系统性崩塌\"，不能宣称去偏机制成立或 RSI 成立。此外 16 个 zero_ideal_users 与 158/290 个 tail_supported_users 的两极分布、以及用户 80/56/202/191 的 panel_excess_head_share 仍高达 0.41–0.47 而 quality_change=0，说明倾斜高度集中在少数用户子集，均值改善可能掩盖子群未改善。",
+              "next_question": "在固定面板、不接触最终反馈的前提下，把 popularity_penalty 强度从 0.05 提高到 0.10，能否在 NDCG@5 的配对 bootstrap 95% CI 下界仍不低于原版 0.6923 的同时，使 panel_excess_head_share 的下降幅度显著大于 0.05 档（即 CI 上界更负），从而把\"倾斜下降\"从点门槛推进到统计可区分？",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0.1,
+              "evidence_state": "inconclusive"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.05
+              },
+              "followed": true,
+              "reason": "上轮证据显示 quality_change 与 bias_change 全为 0，说明该强度下算子未产生可观测差异，热门下降本身不能等同于去偏，也不能宣称因果或 RSI 成立。因此本轮以最小实验（仅改 strength=0.05 的 popularity_penalty，固定面板、不接触最终反馈）检验\"轻度惩罚能否同时保质量、降倾斜\"这一可证伪命题；未观察反馈保持未知，不纳入推断。"
+            }
+          },
+          {
+            "trial_id": "0003",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.006420450067848749,
+              "bias_change": -0.021504867386506983,
+              "head_share_change": -0.06526079461840925,
+              "tail_relevant_recall_change": 0.04324894514767941,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.006420450067848776,
+                    "ci95": [
+                      -0.012122643096637036,
+                      0.024995842689982957
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.02150486738650698,
+                    "ci95": [
+                      -0.02809833174592932,
+                      -0.015627138325964005
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.6922984502335796,
+                "panel_excess_head_share": 0.06281019799536408,
+                "head_share": 0.2265630872220065,
+                "tail_relevant_recall": 0.7626582278481012,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.6987189003014284,
+                "panel_excess_head_share": 0.0413053306088571,
+                "head_share": 0.16130229260359724,
+                "tail_relevant_recall": 0.8059071729957806,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "4156d7bdf24c446dfdeb3e6d85577644159187574e6b3e9ab9fe95e6982faf77",
+              "reused": true,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，对训练观察频次施加极小强度（0.05）的热门惩罚，可在几乎不损失 NDCG@5 的前提下，把面板额外热门倾斜（panel_excess_head_share）压到原版的 90% 以下；即该倾斜主要由打分函数对高频物品的单调偏好驱动，而非由用户侧可观测特征驱动。",
+              "alternative_explanation": "竞争解释：面板额外热门倾斜的下降可能并非来自去偏机制，而是来自 (a) 惩罚强度过小、排序几乎未变，观测到的任何下降只是面板噪声/用户构成波动；(b) 惩罚等价于对高 NDCG 用户（其头部占比本就低）的重新加权，属于用户校准效应而非物品侧去偏；(c) 训练观察频次与物品真实相关性正相关，惩罚热门同时也在惩罚相关物品，因此倾斜下降伴随尾部相关召回下降，是质量-偏差权衡而非去偏。此外，训练与随机开发面板的反馈分布差异（均值 2.61 vs 2.19，头部占比 0.43 vs 0.24）只说明观察频率分布不同，不识别任何因果机制。",
+              "operator": "popularity_penalty",
+              "strength": 0.05,
+              "prediction": "以 popularity_penalty、strength=0.05 重排后：NDCG@5 ≥ 0.99 × 0.6923 ≈ 0.6854，且 panel_excess_head_share ≤ 0.90 × 0.06281 ≈ 0.0565；tail_relevant_recall 相对 0.7627 的变化幅度不超过 ±0.02。若 NDCG 跌破 0.6854 或倾斜未降到 0.0565 以下，则该强度无效。",
+              "falsifier": "若 strength=0.05 时 panel_excess_head_share 仍 > 0.0565（即未达原版 90%），或 NDCG@5 < 0.6854（质量损失 >1%），或倾斜下降同时伴随 tail_relevant_recall 下降超过 0.02，则本假设被证伪——说明该倾斜不由打分函数的频率单调性主导，或该强度只是噪声/权衡而非去偏。",
+              "reason": "上轮反证显示：初始示例中 quality_change 与 bias_change 全为 0，说明当前候选改动未触及排序，热门倾斜差异来自用户/面板构成而非机制；同时训练与随机开发面板的反馈分布差异只是观察频率代理，不能推出因果。因此本轮不宣称去偏或 RSI 成立，只做最小可证伪实验：在固定随机面板上以最小强度 0.05 检验「频率单调偏好」这一机制是否足以解释额外热门倾斜。选择 popularity_penalty 而非 user_calibrated，是因为后者引入用户级缩放，会与「物品侧频率驱动」这一机制混淆，无法干净区分竞争解释。未观察反馈（缺失 pair、zero_ideal_users=16、tail_relevant_recall 为 null 的用户）保持未知，不纳入结论。"
+            },
+            "research_update": {
+              "lesson": "strength=0.05 的 popularity_penalty 通过了全部点门槛（NDCG 0.6923→0.6987，+0.0064；panel_excess_head_share 0.06281→0.04131，-0.0215，降幅 34%，远超 10% 目标；tail_relevant_recall 0.7627→0.8059，+0.0432），但点门槛不等于统计证实：NDCG 的配对 bootstrap 95% CI 为 [-0.0121, +0.0250]，跨 0，质量\"不损失\"未被证实；只有倾斜的 CI [-0.0281, -0.0156] 完全在 0 以下，是唯一稳健的效应。同时 statistical_promotion=false、causal_claim=false，比较范围仅为 observed_candidate_panel_only_not_catalog_counterfactual，且 uncertainty 未对候选选择做校正。因此本轮只能承认：在固定随机面板上，频率单调惩罚确实能压低额外热门倾斜，但\"几乎不损失质量\"仍是未证实的点估计，且无法排除竞争解释 (b) 用户校准效应与 (c) 质量-偏差权衡——tail_relevant_recall 反而上升，与 (c) 的预测方向相反，但该指标仅覆盖 158/290 用户，16 个 zero_ideal_users 与缺失 pair 仍属未知，不能据此宣称去偏成立。",
+              "next_question": "在固定随机面板上把 popularity_penalty 强度从 0.05 单调升到 0.10/0.20，panel_excess_head_share 是否继续单调下降，而 NDCG@5 的配对 bootstrap 95% CI 下界是否仍不低于 -1% 质量底线（即 CI 下界 ≥ -0.0069）？若倾斜不再随强度下降、或质量 CI 下界跌破底线，则说明 0.05 处的倾斜下降只是弱扰动下的噪声/用户重加权，而非频率单调机制主导。",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0.1,
+              "evidence_state": "inconclusive"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.05
+              },
+              "followed": true,
+              "reason": "上轮反证显示：初始示例中 quality_change 与 bias_change 全为 0，说明当前候选改动未触及排序，热门倾斜差异来自用户/面板构成而非机制；同时训练与随机开发面板的反馈分布差异只是观察频率代理，不能推出因果。因此本轮不宣称去偏或 RSI 成立，只做最小可证伪实验：在固定随机面板上以最小强度 0.05 检验「频率单调偏好」这一机制是否足以解释额外热门倾斜。选择 popularity_penalty 而非 user_calibrated，是因为后者引入用户级缩放，会与「物品侧频率驱动」这一机制混淆，无法干净区分竞争解释。未观察反馈（缺失 pair、zero_ideal_users=16、tail_relevant_recall 为 null 的用户）保持未知，不纳入结论。"
+            }
+          }
+        ]
+      },
+      "fixed_control": {
+        "execution_status": "completed",
+        "selected_policy": {
+          "operator": "popularity_penalty",
+          "strength": 0.2
+        },
+        "selection_reason": "在通过质量和偏差点门槛的开发候选中，选择面板额外热门倾斜最小的一项。",
+        "validation": {
+          "status": "completed",
+          "policy": {
+            "operator": "popularity_penalty",
+            "strength": 0.2
+          },
+          "scope": "held_out_observed_random_panels",
+          "metrics": {
+            "B0": {
+              "ndcg": 0.6944110318653435,
+              "panel_excess_head_share": 0.06311779601450038,
+              "head_share": 0.21305667059669542,
+              "tail_relevant_recall": 0.7362587108013937,
+              "quality_users": 276,
+              "zero_ideal_users": 14,
+              "evaluated_users": 290,
+              "tail_supported_users": 164,
+              "invalid_rankings": 0
+            },
+            "candidate": {
+              "ndcg": 0.6973620688155648,
+              "panel_excess_head_share": 0.03716894932664638,
+              "head_share": 0.1455066442918958,
+              "tail_relevant_recall": 0.7640606852497096,
+              "quality_users": 276,
+              "zero_ideal_users": 14,
+              "evaluated_users": 290,
+              "tail_supported_users": 164,
+              "invalid_rankings": 0
+            }
+          },
+          "comparison": {
+            "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+            "status": "point_gates_passed",
+            "paired_users": 276,
+            "quality_change": 0.002951036950221364,
+            "bias_change": -0.025948846687853994,
+            "head_share_change": -0.06755002630479962,
+            "tail_relevant_recall_change": 0.02780197444831589,
+            "point_gates": {
+              "quality": true,
+              "bias": true,
+              "valid_rankings": true
+            },
+            "quality_floor_ratio": 0.99,
+            "bias_ceiling_ratio": 0.9,
+            "minimum_reference_bias": 0.001,
+            "uncertainty": {
+              "method": "paired_user_percentile_bootstrap",
+              "seed": 20261014,
+              "bootstrap_samples": 500,
+              "metrics": {
+                "ndcg": {
+                  "mean_difference": 0.0029510369502214234,
+                  "ci95": [
+                    -0.015510269172057424,
+                    0.020529641426786302
+                  ]
+                },
+                "panel_excess_head_share": {
+                  "mean_difference": -0.025948846687853997,
+                  "ci95": [
+                    -0.03335708649019826,
+                    -0.018705507805566315
+                  ]
+                }
+              },
+              "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+            },
+            "statistical_promotion": false,
+            "causal_claim": false
+          },
+          "test_candidate_selection": false,
+          "online_experiment": false,
+          "statistical_promotion": false
+        },
+        "trials": [
+          {
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.006420450067848749,
+              "bias_change": -0.021504867386506983,
+              "head_share_change": -0.06526079461840925,
+              "tail_relevant_recall_change": 0.04324894514767941,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.006420450067848776,
+                    "ci95": [
+                      -0.012122643096637036,
+                      0.024995842689982957
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.02150486738650698,
+                    "ci95": [
+                      -0.02809833174592932,
+                      -0.015627138325964005
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "candidate": {
+                "ndcg": 0.6987189003014284,
+                "panel_excess_head_share": 0.0413053306088571,
+                "head_share": 0.16130229260359724,
+                "tail_relevant_recall": 0.8059071729957806,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            }
+          },
+          {
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.1
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.0036560612806303405,
+              "bias_change": -0.024978071540328994,
+              "head_share_change": -0.07124219183116126,
+              "tail_relevant_recall_change": 0.04978902953586506,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.0036560612806303162,
+                    "ci95": [
+                      -0.015530285798203796,
+                      0.022440138254283173
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.02497807154032899,
+                    "ci95": [
+                      -0.03196790912938947,
+                      -0.018406864180685347
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "candidate": {
+                "ndcg": 0.69595451151421,
+                "panel_excess_head_share": 0.03783212645503509,
+                "head_share": 0.15532089539084523,
+                "tail_relevant_recall": 0.8124472573839663,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            }
+          },
+          {
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.2
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 274,
+              "quality_change": 0.0011871031701989887,
+              "bias_change": -0.02761147945243033,
+              "head_share_change": -0.0748103903716727,
+              "tail_relevant_recall_change": 0.04926160337552743,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.0011871031701989616,
+                    "ci95": [
+                      -0.017899864213449558,
+                      0.019637021258538084
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.027611479452430324,
+                    "ci95": [
+                      -0.034791624395067916,
+                      -0.020655907952656438
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "candidate": {
+                "ndcg": 0.6934855534037786,
+                "panel_excess_head_share": 0.03519871854293375,
+                "head_share": 0.1517526968503338,
+                "tail_relevant_recall": 0.8119198312236287,
+                "quality_users": 274,
+                "zero_ideal_users": 16,
+                "evaluated_users": 290,
+                "tail_supported_users": 158,
+                "invalid_rankings": 0
+              }
+            }
+          }
+        ]
+      },
+      "transfer_v1": {
+        "execution_status": "completed",
+        "dataset": "kuairand-pure",
+        "dataset_fingerprint": "cd3e42bbe666af01eae0daf348750fdde1862b5114c7cbb217ade0bc012c9117",
+        "strategy": {
+          "version": "research_strategy_v1",
+          "strength_grid": [
+            0,
+            0.05,
+            0.1,
+            0.2,
+            0.4
+          ],
+          "evidence_focus": "overall",
+          "preferred_operator": "popularity_penalty"
+        },
+        "selected_policy": {
+          "operator": "popularity_penalty",
+          "strength": 0.4
+        },
+        "selection_reason": "在通过质量和偏差点门槛的开发候选中，选择面板额外热门倾斜最小的一项。",
+        "research_status": "candidate_frozen",
+        "validation": {
+          "status": "completed",
+          "policy": {
+            "operator": "popularity_penalty",
+            "strength": 0.4
+          },
+          "scope": "held_out_observed_random_panels",
+          "metrics": {
+            "B0": {
+              "ndcg": 0.3029809008488004,
+              "panel_excess_head_share": 0.13285592152414583,
+              "head_share": 0.29070881975915597,
+              "tail_relevant_recall": 0.2682131917353834,
+              "quality_users": 146,
+              "zero_ideal_users": 52,
+              "evaluated_users": 198,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            },
+            "candidate": {
+              "ndcg": 0.2607632016862175,
+              "panel_excess_head_share": 0.014259979612723508,
+              "head_share": 0.0444889012560835,
+              "tail_relevant_recall": 0.3385937168792628,
+              "quality_users": 146,
+              "zero_ideal_users": 52,
+              "evaluated_users": 198,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            }
+          },
+          "comparison": {
+            "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+            "status": "rejected",
+            "paired_users": 146,
+            "quality_change": -0.04221769916258289,
+            "bias_change": -0.11859594191142232,
+            "head_share_change": -0.24621991850307245,
+            "tail_relevant_recall_change": 0.07038052514387944,
+            "point_gates": {
+              "quality": false,
+              "bias": true,
+              "valid_rankings": true
+            },
+            "quality_floor_ratio": 0.99,
+            "bias_ceiling_ratio": 0.9,
+            "minimum_reference_bias": 0.001,
+            "uncertainty": {
+              "method": "paired_user_percentile_bootstrap",
+              "seed": 20261014,
+              "bootstrap_samples": 500,
+              "metrics": {
+                "ndcg": {
+                  "mean_difference": -0.04221769916258286,
+                  "ci95": [
+                    -0.08094374034278004,
+                    -0.004214728634478698
+                  ]
+                },
+                "panel_excess_head_share": {
+                  "mean_difference": -0.11859594191142231,
+                  "ci95": [
+                    -0.14345214382173005,
+                    -0.0930182998981586
+                  ]
+                }
+              },
+              "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+            },
+            "statistical_promotion": false,
+            "causal_claim": false
+          },
+          "test_candidate_selection": false,
+          "online_experiment": false,
+          "statistical_promotion": false
+        },
+        "trials": [
+          {
+            "trial_id": "0001",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.4
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 101,
+              "quality_change": 0.0032768261292516754,
+              "bias_change": -0.09318350281931621,
+              "head_share_change": -0.13434693392855762,
+              "tail_relevant_recall_change": 0.028890265763330758,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.0032768261292517005,
+                    "ci95": [
+                      -0.03764958856436833,
+                      0.04299053150283921
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.09318350281931621,
+                    "ci95": [
+                      -0.12384581883762237,
+                      -0.06413605990734195
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.4503099020519118,
+                "panel_excess_head_share": 0.1066392412447545,
+                "head_share": 0.21961481308202407,
+                "tail_relevant_recall": 0.5409310944958888,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.45358672818116347,
+                "panel_excess_head_share": 0.013455738425438285,
+                "head_share": 0.08526787915346644,
+                "tail_relevant_recall": 0.5698213602592196,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "fc14037564344576163b0f1414379db8a5bb7d67111b15fc43d6622fcefee879",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，把 popularity_penalty 强度从 0.2 提到网格末档 0.4，仍能保持 NDCG@5 ≥ 原版 99%（约 ≥0.6854），并使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0 且不弱于 0.2 档的 -0.0207；机制表述：若“按训练观察频次压缩分数”这一机制真实且单调，则 0.4 档应给出更负的倾斜 CI 上界，同时不扩大质量受损用户（quality_change<0）的比例与幅度（尤其用户 216 的 -0.63、用户 0 的 -0.10）。但热门下降本身不等于去偏，本轮不宣称因果或 RSI 成立。",
+              "alternative_explanation": "竞争解释：0.05→0.2 三档的倾斜下降可能只是分数重排副作用或面板噪声——NDCG 配对 CI 三档均跨 0（[-0.0121,+0.0250]、[-0.0155,+0.0224]、[-0.0179,+0.0196]），均值增益随强度递减（+0.0064→+0.0037→+0.0012），而受损用户 216（-0.63）与 0（-0.10）在四倍强度变化下逐位不变，说明惩罚只整体压低/打散分数，未触及受损尾部。若 0.4 档倾斜 CI 上界不再更负、或 NDCG 跌破 99% 底线、或受损用户比例/幅度扩大，则支持“副作用/噪声”而非去偏机制。此外，训练与随机开发集的反馈分布差异本身不识别任何因果机制；评估范围仅限已观察候选面板，不是全目录反事实；未观察反馈（缺失对）保持未知。",
+              "operator": "popularity_penalty",
+              "strength": 0.4,
+              "prediction": "相对原版基线（开发集 NDCG=0.6923、panel_excess_head_share=0.0628；留出验证集 NDCG=0.6944、倾斜=0.0631），popularity_penalty@0.4 的 NDCG@5 ≥ 原版 99%（约 ≥0.6854），panel_excess_head_share 的配对 bootstrap 95% CI 上界 < 0 且不弱于 0.2 档的 -0.0207，invalid_rankings=0；quality_change<0 的用户比例与幅度不超过 0.2 档水平（0.2 档多数用户 quality_change=0，受损者 216 为 -0.63、0 为 -0.10）。",
+              "falsifier": "若 popularity_penalty@0.4 的 NDCG@5 低于原版 99%，或 panel_excess_head_share 的配对 bootstrap 95% CI 上界未严格小于 0（或不再比 0.2 档的 -0.0207 更负），或 quality_change<0 的用户比例或幅度较 0.2 档扩大，或 tail_relevant_recall 明显下降、invalid_rankings>0，则该假设被证伪；若倾斜下降但 NDCG 同步大幅下降或受损用户增多，则支持“分数重排副作用/面板噪声”这一竞争解释而非去偏机制，并应停止在该算子上继续加码。",
+              "reason": "上轮反证表明热门下降本身不等于去偏：0.05、0.1、0.2 三档均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 配对 CI 三档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，评估仅限已观察候选面板，不是全目录反事实。更关键的是受损用户 216（-0.63）与 0（-0.10）在强度四倍变化下逐位不变，NDCG 均值增益递减，提示倾斜下降越来越像分数重排副作用。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把强度提到网格末档 0.4，检验“倾斜 CI 上界仍严格为负且不扩大受损用户”这一最强版本假设，并优先解释上轮反证（受损尾部零改善）。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            },
+            "research_update": {
+              "lesson": "popularity_penalty@0.4（网格末档）第四次通过点门槛：NDCG 0.4536 vs 基线 0.4503（+0.0033，未跌破 99% 质量底线），panel_excess_head_share 0.0135 vs 0.1066（-0.0932，远低于 90% 上限），tail_relevant_recall +0.0289，invalid_rankings=0；倾斜的配对 bootstrap 95% CI [-0.1238, -0.0641] 上界严格小于 0，且比 0.2 档的 -0.0207 更负，方向仍单调。但点门槛与更负的 CI 都不等于统计证实：NDCG 的 CI [-0.0376, +0.0430] 仍跨 0，质量“不损失”只是未被证伪；该不确定性未校正候选选择，评估范围仅限已观察候选面板，不是全目录反事实，故 statistical_promotion=false、causal_claim=false，不能宣称去偏机制或 RSI 成立。更关键的是受损用户完全未被修正：0.4 档仍出现用户 4136 的 quality_change=-0.63、用户 10425 的 -0.068，与 0.05/0.1/0.2 档逐位相同，说明强度从 0.05 加到 0.4（八倍）只整体压低并打散分数、压缩了整体倾斜，却对受损尾部零改善；同时 NDCG 均值增益随强度递减（+0.0064→+0.0037→+0.0012→+0.0033，无单调增益），提示倾斜下降越来越像分数重排副作用而非去偏机制。因此本轮证据状态为 weakened：方向一致但未达统计证实，且受损用户问题在强度加码后毫无改善，应停止在该算子上继续加码。",
+              "next_question": "既然 popularity_penalty 在 0.05→0.4 全程只通过点门槛（statistical_promotion=false、causal_claim=false）、NDCG 配对 CI 始终跨 0、且受损用户（-0.63 等）在八倍强度变化下逐位不变，那么在固定随机评分面板上，改用 user_calibrated（按用户校准分数，而非全局压缩观察频次）能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，并且真正缩小 quality_change<0 的用户比例与幅度（尤其把 -0.63 这类受损尾部拉回）？若 user_calibrated 仍无法改善受损尾部、或 NDCG 跌破 99% 底线，则支持“该面板上不存在可用的去偏机制、倾斜下降只是分数重排副作用”这一结论，并应停止在该面板上继续加码。",
+              "next_operator": "user_calibrated",
+              "next_strength": 0.2,
+              "evidence_state": "weakened"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.4
+              },
+              "followed": false,
+              "reason": "上轮反证表明热门下降本身不等于去偏：0.05、0.1、0.2 三档均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 配对 CI 三档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，评估仅限已观察候选面板，不是全目录反事实。更关键的是受损用户 216（-0.63）与 0（-0.10）在强度四倍变化下逐位不变，NDCG 均值增益递减，提示倾斜下降越来越像分数重排副作用。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把强度提到网格末档 0.4，检验“倾斜 CI 上界仍严格为负且不扩大受损用户”这一最强版本假设，并优先解释上轮反证（受损尾部零改善）。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            }
+          },
+          {
+            "trial_id": "0002",
+            "policy": {
+              "operator": "user_calibrated",
+              "strength": 0.2
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 101,
+              "quality_change": 0.009750969813808685,
+              "bias_change": -0.0374156207115347,
+              "head_share_change": -0.06027369699424298,
+              "tail_relevant_recall_change": 0.011175068317925474,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.009750969813808704,
+                    "ci95": [
+                      -0.013591051381242466,
+                      0.03643655206732232
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.037415620711534696,
+                    "ci95": [
+                      -0.057771664487821284,
+                      -0.018433059974813492
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.4503099020519118,
+                "panel_excess_head_share": 0.1066392412447545,
+                "head_share": 0.21961481308202407,
+                "tail_relevant_recall": 0.5409310944958888,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.4600608718657205,
+                "panel_excess_head_share": 0.0692236205332198,
+                "head_share": 0.1593411160877811,
+                "tail_relevant_recall": 0.5521061628138143,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "c036c97ec29b30833834f473f2b6fae8ec5052383d65e0fc03fdd9d3a1b68b24",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，改用 user_calibrated（按各用户训练正反馈热门比例缩放惩罚，strength=0.2）比全局 popularity_penalty 更能触及受损尾部：若倾斜下降源于“全局压缩观察频次分数”这一副作用，则全局惩罚对受损用户（如 -0.63 档位）逐位不变；而按用户校准的惩罚会改变不同用户的相对分数结构，从而在保持 NDCG@5 ≥ 原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，并缩小 quality_change<0 的用户比例与幅度。热门下降本身不等于去偏，本轮不宣称因果或 RSI 成立。",
+              "alternative_explanation": "竞争解释：0.05→0.4 全程倾斜 CI 全负但 NDCG 配对 CI 始终跨 0、均值增益无单调性、受损用户逐位不变，说明倾斜下降可能只是分数重排副作用或面板噪声，与“去偏机制”无关；user_calibrated 若同样只压低整体分数，则其倾斜 CI 上界虽为负，但受损尾部（-0.63 等）仍不变、甚至因用户级缩放而扩大，支持“该面板上不存在可用去偏机制”。此外训练与随机开发集的反馈分布差异本身不识别任何因果机制；评估范围仅限已观察候选面板，不是全目录反事实；未观察反馈（缺失对）保持未知。",
+              "operator": "user_calibrated",
+              "strength": 0.2,
+              "prediction": "相对原版基线（开发集 NDCG=0.6923、panel_excess_head_share=0.0628；留出验证集 NDCG=0.6944、倾斜=0.0631），user_calibrated@0.2 的 NDCG@5 ≥ 原版 99%（约 ≥0.6854），panel_excess_head_share 的配对 bootstrap 95% CI 上界 < 0，invalid_rankings=0；且 quality_change<0 的用户比例与幅度较 popularity_penalty@0.2 缩小（尤其把 -0.63 这类受损尾部拉回），tail_relevant_recall 不明显下降。",
+              "falsifier": "若 user_calibrated@0.2 的 NDCG@5 低于原版 99%，或 panel_excess_head_share 的配对 bootstrap 95% CI 上界未严格小于 0，或 quality_change<0 的用户比例/幅度未较 popularity_penalty@0.2 缩小（-0.63 类受损尾部仍逐位不变），或 tail_relevant_recall 明显下降、invalid_rankings>0，则该假设被证伪；若倾斜下降但 NDCG 同步下降或受损用户增多，则支持“分数重排副作用/面板噪声、该面板无可用去偏机制”这一竞争解释，并应停止在该面板上继续加码。",
+              "reason": "上轮反证表明热门下降本身不等于去偏：popularity_penalty 在 0.05→0.4 全程只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 配对 CI 四档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，评估仅限已观察候选面板，不是全目录反事实。更关键的是受损用户（-0.63、-0.10 等）在八倍强度变化下逐位不变，NDCG 均值增益无单调性，提示倾斜下降越来越像分数重排副作用。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把算子换成 user_calibrated@0.2，检验“按用户校准能否真正缩小受损尾部”这一更强版本假设，并优先解释上轮反证（受损尾部零改善）。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            },
+            "research_update": {
+              "lesson": "user_calibrated@0.2 在固定随机评分面板上再次只通过点门槛：NDCG 0.4601 vs 基线 0.4503（+0.0098，未跌破 99% 质量底线），panel_excess_head_share 0.0692 vs 0.1066（-0.0374，低于 90% 上限），tail_relevant_recall +0.0112，invalid_rankings=0；倾斜的配对 bootstrap 95% CI [-0.0578, -0.0184] 上界严格小于 0。但点门槛与负 CI 都不等于统计证实：NDCG 的 CI [-0.0136, +0.0364] 仍跨 0，质量“不损失”只是未被证伪；该不确定性未校正候选选择（panel_split_uncertainty_not_corrected_for_candidate_selection），评估范围仅限已观察候选面板，不是全目录反事实，故 statistical_promotion=false、causal_claim=false，不能宣称去偏机制或 RSI 成立。更关键的是受损尾部零改善：本轮仍出现用户 4136 的 quality_change=-0.63，与 popularity_penalty 在 0.05/0.1/0.2/0.4 四档下的 -0.63 逐位相同，说明换成按用户校准的算子、并叠加八倍强度变化，都只整体压低并打散分数、压缩了整体倾斜，却完全没有触及受损尾部；同时 NDCG 均值增益在 popularity_penalty 各档间无单调性（+0.0064→+0.0037→+0.0012→+0.0033），本轮 +0.0098 也未显示与倾斜下降成比例。因此证据状态为 weakened：方向一致但未达统计证实，且“按用户校准能拉回受损尾部”这一更强版本假设被本轮反证，支持“该面板上不存在可用去偏机制、倾斜下降只是分数重排副作用/面板噪声”这一竞争解释，应停止在该面板上继续加码。",
+              "next_question": "既然 popularity_penalty 在 0.05→0.4 全程、以及 user_calibrated@0.2 都只通过点门槛（statistical_promotion=false、causal_claim=false）、NDCG 配对 CI 始终跨 0、且受损用户（-0.63 等）在算子更换与八倍强度变化下逐位不变，那么在固定随机评分面板上，改用 user_calibrated 的网格末档 strength=0.4（按用户校准并加大缩放幅度），能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，并且真正缩小 quality_change<0 的用户比例与幅度（尤其把 -0.63 这类受损尾部拉回）？若 0.4 档仍无法改善受损尾部、或 NDCG 跌破 99% 底线、或受损用户比例/幅度扩大，则确认“该面板上不存在可用的去偏机制、倾斜下降只是分数重排副作用”，并应停止在该面板上继续加码。",
+              "next_operator": "user_calibrated",
+              "next_strength": 0.4,
+              "evidence_state": "weakened"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "user_calibrated",
+                "strength": 0.2,
+                "question": "既然 popularity_penalty 在 0.05→0.4 全程只通过点门槛（statistical_promotion=false、causal_claim=false）、NDCG 配对 CI 始终跨 0、且受损用户（-0.63 等）在八倍强度变化下逐位不变，那么在固定随机评分面板上，改用 user_calibrated（按用户校准分数，而非全局压缩观察频次）能否在保持 NDCG@5 不低于原版 99% 的同时，使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，并且真正缩小 quality_change<0 的用户比例与幅度（尤其把 -0.63 这类受损尾部拉回）？若 user_calibrated 仍无法改善受损尾部、或 NDCG 跌破 99% 底线，则支持“该面板上不存在可用的去偏机制、倾斜下降只是分数重排副作用”这一结论，并应停止在该面板上继续加码。",
+                "source": "previous_research_feedback"
+              },
+              "actual": {
+                "operator": "user_calibrated",
+                "strength": 0.2
+              },
+              "followed": true,
+              "reason": "上轮反证表明热门下降本身不等于去偏：popularity_penalty 在 0.05→0.4 全程只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 配对 CI 四档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，评估仅限已观察候选面板，不是全目录反事实。更关键的是受损用户（-0.63、-0.10 等）在八倍强度变化下逐位不变，NDCG 均值增益无单调性，提示倾斜下降越来越像分数重排副作用。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上把算子换成 user_calibrated@0.2，检验“按用户校准能否真正缩小受损尾部”这一更强版本假设，并优先解释上轮反证（受损尾部零改善）。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            }
+          }
+        ]
+      },
+      "transfer_v2": {
+        "execution_status": "completed",
+        "dataset": "kuairand-pure",
+        "dataset_fingerprint": "cd3e42bbe666af01eae0daf348750fdde1862b5114c7cbb217ade0bc012c9117",
+        "strategy": {
+          "version": "research_strategy_v2",
+          "strength_grid": [
+            0,
+            0.05,
+            0.1,
+            0.2,
+            0.4
+          ],
+          "evidence_focus": "tradeoff_users",
+          "preferred_operator": "user_calibrated"
+        },
+        "selected_policy": {
+          "operator": "user_calibrated",
+          "strength": 0.05
+        },
+        "selection_reason": "在通过质量和偏差点门槛的开发候选中，选择面板额外热门倾斜最小的一项。",
+        "research_status": "candidate_frozen",
+        "validation": {
+          "status": "completed",
+          "policy": {
+            "operator": "user_calibrated",
+            "strength": 0.05
+          },
+          "scope": "held_out_observed_random_panels",
+          "metrics": {
+            "B0": {
+              "ndcg": 0.3029809008488004,
+              "panel_excess_head_share": 0.13285592152414583,
+              "head_share": 0.29070881975915597,
+              "tail_relevant_recall": 0.2682131917353834,
+              "quality_users": 146,
+              "zero_ideal_users": 52,
+              "evaluated_users": 198,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            },
+            "candidate": {
+              "ndcg": 0.2921282730499811,
+              "panel_excess_head_share": 0.08480291623971045,
+              "head_share": 0.19485603701512555,
+              "tail_relevant_recall": 0.28422013582559535,
+              "quality_users": 146,
+              "zero_ideal_users": 52,
+              "evaluated_users": 198,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            }
+          },
+          "comparison": {
+            "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+            "status": "rejected",
+            "paired_users": 146,
+            "quality_change": -0.010852627798819292,
+            "bias_change": -0.048053005284435374,
+            "head_share_change": -0.09585278274403042,
+            "tail_relevant_recall_change": 0.016006944090211972,
+            "point_gates": {
+              "quality": false,
+              "bias": true,
+              "valid_rankings": true
+            },
+            "quality_floor_ratio": 0.99,
+            "bias_ceiling_ratio": 0.9,
+            "minimum_reference_bias": 0.001,
+            "uncertainty": {
+              "method": "paired_user_percentile_bootstrap",
+              "seed": 20261014,
+              "bootstrap_samples": 500,
+              "metrics": {
+                "ndcg": {
+                  "mean_difference": -0.010852627798819289,
+                  "ci95": [
+                    -0.04054267197785058,
+                    0.013602579930942774
+                  ]
+                },
+                "panel_excess_head_share": {
+                  "mean_difference": -0.04805300528443537,
+                  "ci95": [
+                    -0.06403492573870263,
+                    -0.03404846158322136
+                  ]
+                }
+              },
+              "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+            },
+            "statistical_promotion": false,
+            "causal_claim": false
+          },
+          "test_candidate_selection": false,
+          "online_experiment": false,
+          "statistical_promotion": false
+        },
+        "trials": [
+          {
+            "trial_id": "0001",
+            "policy": {
+              "operator": "user_calibrated",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "point_gates_passed",
+              "paired_users": 101,
+              "quality_change": 0.00960380870162686,
+              "bias_change": -0.03514978371089221,
+              "head_share_change": -0.05695200259460259,
+              "tail_relevant_recall_change": 0.011175068317925474,
+              "point_gates": {
+                "quality": true,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.009603808701626877,
+                    "ci95": [
+                      -0.013591051381242466,
+                      0.0363596385755829
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.0351497837108922,
+                    "ci95": [
+                      -0.05340869926378461,
+                      -0.0182896153505811
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.4503099020519118,
+                "panel_excess_head_share": 0.1066392412447545,
+                "head_share": 0.21961481308202407,
+                "tail_relevant_recall": 0.5409310944958888,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.45991371075353865,
+                "panel_excess_head_share": 0.0714894575338623,
+                "head_share": 0.16266281048742148,
+                "tail_relevant_recall": 0.5521061628138143,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "bcf2f44ccf52be33cdf74de5ea84c3d20f94913e88f506107cc4e53ce29024d5",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，对训练观察频次做按用户校准的轻度惩罚（user_calibrated, strength=0.05）可在 NDCG@5 不低于原版 99% 的前提下降低 panel_excess_head_share，并优先修复上轮反证中未被修正的受损用户（用户 216 的 quality_change=-0.63、用户 0 的 -0.10）。机制表述：前几轮 popularity_penalty 的全局惩罚在 0.05→0.2 四倍加码下，倾斜 CI 上界单调更负（-0.0156→-0.0184→-0.0207）但受损用户逐位不变、NDCG 均值增益递减（+0.0064→+0.0037→+0.0012），提示全局惩罚更像分数重排副作用；若按用户训练正反馈热门比例缩放惩罚，则对头部偏好强的用户少罚、对头部偏好弱的用户多罚，可能在不牺牲这些用户质量的同时压缩面板倾斜。热门下降本身不等于去偏，本轮不宣称因果或 RSI 成立。",
+              "alternative_explanation": "竞争解释：user_calibrated@0.05 的倾斜下降可能同样只是分数重排副作用或面板噪声——NDCG 的配对 bootstrap CI 在前几轮均跨 0，均值改善持续掩盖用户 216 与用户 0 的严重质量损失；若本轮倾斜 CI 上界不严格为负、或受损用户比例/幅度未缩小、或 NDCG 跌破 99% 底线，则支持“副作用/噪声”而非去偏机制。此外，训练与随机开发集的反馈分布差异本身不识别任何因果机制；评估范围仅限已观察候选面板，不是全目录反事实；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。",
+              "operator": "user_calibrated",
+              "strength": 0.05,
+              "prediction": "相对原版基线（NDCG=0.6923，panel_excess_head_share=0.0628），user_calibrated@0.05 的 NDCG@5 ≥ 原版 99%（约 ≥0.6854），panel_excess_head_share 的配对 bootstrap 95% CI 上界 < 0，invalid_rankings=0；且 quality_change<0 的用户比例与幅度较 popularity_penalty@0.2 缩小（尤其用户 216 的 -0.63、用户 0 的 -0.10 应被缓解），tail_relevant_recall 不出现明显下降。",
+              "falsifier": "若 user_calibrated@0.05 的 NDCG@5 低于原版 99%，或 panel_excess_head_share 的配对 bootstrap 95% CI 上界未严格小于 0，或 quality_change<0 的用户比例或幅度未较 popularity_penalty@0.2 缩小（用户 216 仍为 -0.63、用户 0 仍为 -0.10），或 tail_relevant_recall 明显下降、invalid_rankings>0，则该假设被证伪；若倾斜下降但 NDCG 同步下降或受损用户未改善，则支持“分数重排副作用/面板噪声”这一竞争解释而非去偏机制。",
+              "reason": "上轮反证表明热门下降本身不等于去偏：popularity_penalty 在 0.05/0.1/0.2 三档均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 的配对 CI 三档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，评估仅限已观察候选面板。更关键的是强度四倍加码后受损用户 216（-0.63）与 0（-0.10）逐位不变，说明全局惩罚未触及受损尾部。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上改用 user_calibrated@0.05（网格最小非零强度），检验“按用户校准能否在保质量的同时降倾斜并缩小受损用户”这一假设，并优先解释上轮反证。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            },
+            "research_update": {
+              "lesson": "user_calibrated@0.05 在固定随机评分面板上通过点门槛（NDCG 0.4599 vs 基线 0.4503，+0.0096，未跌破 99% 质量底线；panel_excess_head_share 0.0715 vs 0.1066，-0.0351，低于 90% 上限；tail_relevant_recall +0.0112；invalid_rankings=0），倾斜的配对 bootstrap 95% CI [-0.0534, -0.0183] 上界严格小于 0。但点门槛不等于统计证实：NDCG 的 CI [-0.0136, +0.0364] 跨 0，质量“不损失”只是未被证伪；该不确定性未校正候选选择，评估范围仅限已观察候选面板，不是全目录反事实，故 statistical_promotion=false、causal_claim=false。更关键的是受损用户并未被修正：本轮仍出现用户 4136 的 quality_change=-0.63（与上轮用户 216 完全相同的幅度）、用户 4620 的 -0.39、用户 16097 的 -0.24、用户 10805 与 16115 的 -0.23，说明按用户校准并未缩小受损尾部，只是把同样的严重质量损失换到了另一批用户身上；同时 NDCG 均值增益（+0.0096）继续掩盖这些损失。因此“按用户校准可在保质量的同时降倾斜并修复受损用户”这一假设被证伪：倾斜下降更像分数重排副作用/面板噪声，而非去偏机制。结论：应停止在 user_calibrated 与 popularity_penalty 上继续加码，承认该方向失败。",
+              "next_question": "既然 popularity_penalty（0.05/0.1/0.2）与 user_calibrated@0.05 都只通过点门槛、NDCG 配对 CI 全部跨 0、且受损用户逐位不变（-0.63 等），那么在固定随机评分面板上，是否应放弃“对训练观察频次做惩罚/校准”这一族算子，转而检验一个机制上不同的替代方案——例如对候选分数做基于物品内容/共现而非全局频次的去偏，或直接以“受损用户质量不下降”为硬约束重新定义目标——并要求该方案在 NDCG@5 ≥ 原版 99% 的同时使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0 且 quality_change<0 的用户比例与幅度较本轮显著缩小？若新方案同样只过点门槛、CI 跨 0 或受损用户不改善，则应判定该面板上不存在可证实的去偏收益并终止该研究线。",
+              "next_operator": "retain",
+              "next_strength": 0.05,
+              "evidence_state": "weakened"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "user_calibrated",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "user_calibrated",
+                "strength": 0.05
+              },
+              "followed": true,
+              "reason": "上轮反证表明热门下降本身不等于去偏：popularity_penalty 在 0.05/0.1/0.2 三档均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 的配对 CI 三档都跨 0，质量“不损失”只是未被证伪；倾斜 CI 虽全负但未校正候选选择，评估仅限已观察候选面板。更关键的是强度四倍加码后受损用户 216（-0.63）与 0（-0.10）逐位不变，说明全局惩罚未触及受损尾部。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：在固定随机评分面板上改用 user_calibrated@0.05（网格最小非零强度），检验“按用户校准能否在保质量的同时降倾斜并缩小受损用户”这一假设，并优先解释上轮反证。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            }
+          },
+          {
+            "trial_id": "0002",
+            "policy": {
+              "operator": "retain",
+              "strength": 0.0
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "rejected",
+              "paired_users": 101,
+              "quality_change": 0.0,
+              "bias_change": 0.0,
+              "head_share_change": 0.0,
+              "tail_relevant_recall_change": 0.0,
+              "point_gates": {
+                "quality": true,
+                "bias": false,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": 0.0,
+                    "ci95": [
+                      0.0,
+                      0.0
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": 0.0,
+                    "ci95": [
+                      0.0,
+                      0.0
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.4503099020519118,
+                "panel_excess_head_share": 0.1066392412447545,
+                "head_share": 0.21961481308202407,
+                "tail_relevant_recall": 0.5409310944958888,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.4503099020519118,
+                "panel_excess_head_share": 0.1066392412447545,
+                "head_share": 0.21961481308202407,
+                "tail_relevant_recall": 0.5409310944958888,
+                "quality_users": 101,
+                "zero_ideal_users": 70,
+                "evaluated_users": 171,
+                "tail_supported_users": 91,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "162074f0e6782876853e12ba29dfa5febe43db060b7495589c16ac51d12a4a18",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在固定随机评分面板上，对训练观察频次做惩罚/校准这一族算子（popularity_penalty 0.05/0.1/0.2、user_calibrated 0.05）只能带来点门槛级别的倾斜下降，其机制更可能是分数重排副作用而非去偏：证据是倾斜 CI 上界随强度单调更负（-0.0156→-0.0184→-0.0207），但 NDCG 均值增益同步递减（+0.0064→+0.0037→+0.0012），且受损用户逐位不变（用户 216 恒为 -0.63、用户 0 恒为 -0.10），换用 user_calibrated 后同样的 -0.63 幅度只是转移到用户 4136 等另一批用户身上。因此本轮最小实验应改为机制上不同的替代方案（基于物品内容/共现而非全局频次的分数校正，或以“受损用户质量不下降”为硬约束的目标重定义），检验其能否在 NDCG@5 ≥ 原版 99% 的同时使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，且 quality_change<0 的用户比例与幅度较本轮显著缩小。热门下降本身不等于去偏，本轮不宣称因果或 RSI 成立。",
+              "alternative_explanation": "竞争解释：倾斜下降可能只是面板噪声或候选选择未校正的假象——所有档位的 NDCG 配对 CI 均跨 0（如 [-0.0179,+0.0196]），质量“不损失”只是未被证伪；倾斜 CI 虽全负但 interpretation 明示未校正候选选择，评估范围仅限已观察候选面板而非全目录反事实。若新方案同样只过点门槛、CI 跨 0 或受损用户不改善，则应判定该面板上不存在可证实的去偏收益并终止该研究线。此外，训练与随机开发集的反馈分布差异本身不识别任何因果机制；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。",
+              "operator": "retain",
+              "strength": 0.05,
+              "prediction": "以 retain（不施加频次惩罚/校准）作为对照锚点，在固定随机评分面板上：新替代方案需 NDCG@5 ≥ 原版 99%（约 ≥0.6854），panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0，invalid_rankings=0，且 quality_change<0 的用户比例与幅度较 popularity_penalty@0.2 与 user_calibrated@0.05 显著缩小（不再出现 -0.63 量级的逐位不变受损者）。若新方案达不到上述任一条，则 retain 为最终选择，并判定该面板上无可证实的去偏收益。",
+              "falsifier": "若新替代方案同样只通过点门槛而 NDCG 配对 CI 跨 0、或 panel_excess_head_share 的 CI 上界未严格小于 0、或 quality_change<0 的用户比例与幅度未较本轮缩小（仍出现 -0.63 量级受损者）、或 NDCG 跌破原版 99%、或 invalid_rankings>0，则“机制不同的替代方案可带来可证实去偏收益”被证伪，应判定该面板上不存在可证实的去偏收益并终止该研究线；若倾斜下降但 NDCG 同步下降或受损用户未改善，则支持“分数重排副作用/面板噪声”这一竞争解释。",
+              "reason": "上轮反证表明热门下降本身不等于去偏：popularity_penalty 三档与 user_calibrated@0.05 均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 配对 CI 全部跨 0，倾斜 CI 未校正候选选择，评估仅限已观察候选面板；更关键的是强度四倍加码与算子更换都未修正受损尾部（-0.63 逐位不变或转移用户）。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：以 retain 为对照锚点，检验机制不同的替代方案能否在保质量的同时使倾斜 CI 上界严格为负并显著缩小受损用户。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            },
+            "research_update": {
+              "lesson": "本轮以 retain（strength=0.0）作为对照锚点执行，结果与基线逐位相同：NDCG 0.4503、panel_excess_head_share 0.1066、head_share 0.2196、tail_relevant_recall 0.5409，quality_change=0.0、bias_change=0.0、head_share_change=0.0，配对 bootstrap CI 均为 [0.0, 0.0]，invalid_rankings=0。这本身不构成任何去偏证据，只确认了对照锚点无变化。结合历史：popularity_penalty 0.05/0.1/0.2 与 user_calibrated@0.05 全部只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 配对 CI 全部跨 0，倾斜 CI 虽全负但未校正候选选择、评估仅限已观察候选面板而非全目录反事实；更关键的是强度四倍加码与算子更换都未修正受损尾部——用户 216 恒为 -0.63、用户 0 恒为 -0.10，换用 user_calibrated 后同样的 -0.63 只是转移到用户 4136 等另一批用户身上。因此“对训练观察频次做惩罚/校准”这一族算子在该面板上无可证实的去偏收益，热门下降不等于去偏，本轮不宣称因果或 RSI 成立。证据状态判定为 weakened：方向性倾斜下降存在，但机制更可能是分数重排副作用/面板噪声，且受损用户零改善。",
+              "next_question": "既然 popularity_penalty（0.05/0.1/0.2）与 user_calibrated@0.05 都只通过点门槛、NDCG 配对 CI 全部跨 0、且受损用户逐位不变（-0.63 等），那么在固定随机评分面板上，是否应放弃“对训练观察频次做惩罚/校准”这一族算子，转而检验一个机制上不同的替代方案——例如对候选分数做基于物品内容/共现而非全局频次的去偏，或直接以“受损用户质量不下降”为硬约束重新定义目标——并要求该方案在 NDCG@5 ≥ 原版 99% 的同时使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0 且 quality_change<0 的用户比例与幅度较本轮显著缩小？若新方案同样只过点门槛、CI 跨 0 或受损用户不改善，则应判定该面板上不存在可证实的去偏收益并终止该研究线。",
+              "next_operator": "retain",
+              "next_strength": 0.05,
+              "evidence_state": "weakened"
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "retain",
+                "strength": 0.05,
+                "question": "既然 popularity_penalty（0.05/0.1/0.2）与 user_calibrated@0.05 都只通过点门槛、NDCG 配对 CI 全部跨 0、且受损用户逐位不变（-0.63 等），那么在固定随机评分面板上，是否应放弃“对训练观察频次做惩罚/校准”这一族算子，转而检验一个机制上不同的替代方案——例如对候选分数做基于物品内容/共现而非全局频次的去偏，或直接以“受损用户质量不下降”为硬约束重新定义目标——并要求该方案在 NDCG@5 ≥ 原版 99% 的同时使 panel_excess_head_share 的配对 bootstrap 95% CI 上界严格小于 0 且 quality_change<0 的用户比例与幅度较本轮显著缩小？若新方案同样只过点门槛、CI 跨 0 或受损用户不改善，则应判定该面板上不存在可证实的去偏收益并终止该研究线。",
+                "source": "previous_research_feedback"
+              },
+              "actual": {
+                "operator": "retain",
+                "strength": 0.0
+              },
+              "followed": false,
+              "reason": "上轮反证表明热门下降本身不等于去偏：popularity_penalty 三档与 user_calibrated@0.05 均只通过点门槛（statistical_promotion=false、causal_claim=false），NDCG 配对 CI 全部跨 0，倾斜 CI 未校正候选选择，评估仅限已观察候选面板；更关键的是强度四倍加码与算子更换都未修正受损尾部（-0.63 逐位不变或转移用户）。故本轮不宣称因果或 RSI 成立，只做最小可证伪实验：以 retain 为对照锚点，检验机制不同的替代方案能否在保质量的同时使倾斜 CI 上界严格为负并显著缩小受损用户。strength 取自给定网格 [0,0.05,0.1,0.2,0.4]；未观察反馈（缺失对）保持未知，最终反馈不用于选候选。"
+            }
+          }
+        ]
+      }
+    },
+    "direct_controls": {
+      "history_vs_no_history": {
+        "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+        "status": "point_gates_passed",
+        "paired_users": 276,
+        "quality_change": -0.0005137426958222724,
+        "bias_change": -0.005006809276605073,
+        "head_share_change": -0.008455477399837152,
+        "tail_relevant_recall_change": 0.007984901277584222,
+        "point_gates": {
+          "quality": true,
+          "bias": true,
+          "valid_rankings": true
+        },
+        "quality_floor_ratio": 0.99,
+        "bias_ceiling_ratio": 0.9,
+        "minimum_reference_bias": 0.001,
+        "uncertainty": {
+          "method": "paired_user_percentile_bootstrap",
+          "seed": 20261014,
+          "bootstrap_samples": 500,
+          "metrics": {
+            "ndcg": {
+              "mean_difference": -0.0005137426958222028,
+              "ci95": [
+                -0.004109887181451128,
+                0.0029033890117802098
+              ]
+            },
+            "panel_excess_head_share": {
+              "mean_difference": -0.005006809276605073,
+              "ci95": [
+                -0.007922833413261011,
+                -0.002412638406982806
+              ]
+            }
+          },
+          "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+        },
+        "statistical_promotion": false,
+        "causal_claim": false
+      },
+      "history_vs_fixed": {
+        "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+        "status": "rejected",
+        "paired_users": 276,
+        "quality_change": 0.0,
+        "bias_change": 0.0,
+        "head_share_change": 0.0,
+        "tail_relevant_recall_change": 0.0,
+        "point_gates": {
+          "quality": true,
+          "bias": false,
+          "valid_rankings": true
+        },
+        "quality_floor_ratio": 0.99,
+        "bias_ceiling_ratio": 0.9,
+        "minimum_reference_bias": 0.001,
+        "uncertainty": {
+          "method": "paired_user_percentile_bootstrap",
+          "seed": 20261014,
+          "bootstrap_samples": 500,
+          "metrics": {
+            "ndcg": {
+              "mean_difference": 0.0,
+              "ci95": [
+                0.0,
+                0.0
+              ]
+            },
+            "panel_excess_head_share": {
+              "mean_difference": 0.0,
+              "ci95": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+        },
+        "statistical_promotion": false,
+        "causal_claim": false
+      }
+    },
+    "strategy_revision": {
+      "strategy": {
+        "version": "research_strategy_v2",
+        "strength_grid": [
+          0,
+          0.05,
+          0.1,
+          0.2,
+          0.4
+        ],
+        "evidence_focus": "tradeoff_users",
+        "preferred_operator": "user_calibrated"
+      },
+      "reasoning": {
+        "strength_grid": [
+          0,
+          0.05,
+          0.1,
+          0.2,
+          0.4
+        ],
+        "evidence_focus": "tradeoff_users",
+        "preferred_operator": "user_calibrated",
+        "reason": "v1 在 coat 上把 popularity_penalty 从 0.05 逐档加到 0.2，三次都只过点门槛：倾斜 CI 上界单调更负（-0.0156→-0.0184→-0.0207），但 NDCG 的配对 CI 始终跨 0，均值增益反而递减（+0.0064→+0.0037→+0.0012），且用户 216（-0.63）、用户 0（-0.10）的受损幅度在四倍强度下逐位不变。独立验证（held-out 面板，276 用户）复现了同样的模式：倾斜 -0.0259（CI 全负）、NDCG +0.0030（CI 跨 0）、statistical_promotion=false。这说明“整体均值 + 面板倾斜”这一证据焦点对受损尾部完全不敏感，继续在同一算子上加码只会得到更多同构的 inconclusive 结果。因此下一任务：(1) 证据重点从 overall 改为 tradeoff_users，要求同时报告受损用户比例/幅度与倾斜 CI，把“均值改善是否掩盖受损尾部”作为一等判据；(2) 优先算子从 popularity_penalty 改为 user_calibrated，因为受损用户是逐用户固定的（216/0 在 0.05–0.2 全档不变），提示问题不在全局强度而在用户级分数校准，全局惩罚无法触及；(3) 强度网格保留 [0,0.05,0.1,0.2,0.4] 不变，以便在新数据集上做 v1/v2 同网格对照，并保留 0 档作为基线锚点。评分规则（质量底线 99%、倾斜上限 90%、点门槛定义）一律不改。",
+        "prediction": "在另一数据集上以相同候选轮数与模型接口对比 v1/v2：v2（user_calibrated + tradeoff_users 焦点）应给出比 v1 更小的受损用户比例或更小的最大单用户质量损失（相对 v1 的 -0.63 量级），同时 panel_excess_head_share 的配对 bootstrap 95% CI 上界仍严格小于 0、NDCG@5 不低于原版 99%、invalid_rankings=0；v1 在该数据集上应再次复现“倾斜 CI 全负 + NDCG CI 跨 0 + statistical_promotion=false”的同构结果。",
+        "falsifier": "若 v2 的受损用户比例与最大单用户质量损失不优于 v1（即 user_calibrated 未触及受损尾部），或 v2 的倾斜 CI 上界不再严格小于 0、NDCG@5 跌破原版 99%、invalid_rankings>0，则“问题在用户级校准而非全局强度”这一判断被证伪，应回退到全局算子并改查受损用户是否由零理想/无尾部支持用户（如 216 的 ndcg=0、tail_relevant_recall=null）造成的数据伪影；若 v1 在新数据集上出现倾斜 CI 上界跨 0 或 NDCG 跌破底线，则说明 v1 的结论不可跨数据集外推，需重新评估证据焦点。"
+      },
+      "actual_consumers": [
+        "proposal_schema.strength.enum",
+        "case_selection.evidence_focus",
+        "next_action.strategy_starting_preference_not_forced_operator"
+      ]
+    },
+    "strategy_transfer_comparison": {
+      "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+      "status": "rejected",
+      "paired_users": 146,
+      "quality_change": 0.0313650713637636,
+      "bias_change": 0.07054293662698695,
+      "head_share_change": 0.15036713575904204,
+      "tail_relevant_recall_change": -0.054373581053667464,
+      "point_gates": {
+        "quality": true,
+        "bias": false,
+        "valid_rankings": true
+      },
+      "quality_floor_ratio": 0.99,
+      "bias_ceiling_ratio": 0.9,
+      "minimum_reference_bias": 0.001,
+      "uncertainty": {
+        "method": "paired_user_percentile_bootstrap",
+        "seed": 20261014,
+        "bootstrap_samples": 500,
+        "metrics": {
+          "ndcg": {
+            "mean_difference": 0.031365071363763576,
+            "ci95": [
+              0.0015827827177565493,
+              0.05846788158990198
+            ]
+          },
+          "panel_excess_head_share": {
+            "mean_difference": 0.07054293662698694,
+            "ci95": [
+              0.04985100544935936,
+              0.09052336121378726
+            ]
+          }
+        },
+        "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+      },
+      "statistical_promotion": false,
+      "causal_claim": false,
+      "interpretation": "One exploratory strategy-transfer contrast, not replicated RSI evidence."
+    }
+  },
+  "completed_followup": {
+    "scope": "context_attribution_followup_not_confirmatory_RSI",
+    "dataset_fingerprint": "5e9ed576b98082b28a91b309f35dc6cd5b3178d6b96c5e8a2e346e16af52d564",
+    "dataset_protocol": {
+      "dataset_protocol": "kuairand_pure_preperiod_temporal_random_panel_v1",
+      "split_seed": 20261015,
+      "user_limit": 200,
+      "cohort": "Training-user IDs ordered by sha256('<seed>:<user>'); no future-label eligibility check",
+      "training_dates": [
+        20220408,
+        20220421
+      ],
+      "development_dates": [
+        20220422,
+        20220430
+      ],
+      "test_dates": [
+        20220501,
+        20220508
+      ],
+      "max_training_events_per_user": 200,
+      "training_history": "Latest preperiod events by date,time_ms,file row; positive and zero feedback retained",
+      "unseen_pair_filter": "Exclude pairs from the cohort's full preperiod, including events outside retained history",
+      "repeated_random_pairs": "Earliest event per partition by date,time_ms,file row; remove test pairs seen in development",
+      "rating": "Native is_click: 0 is exposed non-click/non-valid-play, 1 is positive; UI semantics vary",
+      "ranking_scope": "Within randomly exposed observed-item panels; not complete catalog preference truth",
+      "popularity_scope": "Only the retained at-most-200 training events per cohort user",
+      "catalog": "All basic metadata IDs plus random-pool IDs, without inspecting feedback for membership",
+      "sequence_limit": "Pure filters ordinary logs to the random pool and does not preserve complete sequences",
+      "metadata_limit": "Basic static snapshot retained for descriptions; availability at cutoff is unverified"
+    },
+    "dataset_statistics": {
+      "train_rows_scanned": 1141112,
+      "preperiod_rows": 1141112,
+      "train_outside_protocol_rows": 0,
+      "cohort_preperiod_rows": 8470,
+      "basic_feature_rows": 7583,
+      "random_rows_scanned": 1186059,
+      "random_outside_cohort_rows": 1177927,
+      "cohort_random_rows": 8132,
+      "random_outside_protocol_rows": 0,
+      "random_train_overlap_rows_removed": 10,
+      "development_repeat_rows_removed": 0,
+      "test_repeat_rows_removed": 0,
+      "eligible_training_users": 26210,
+      "users": 200,
+      "items": 7583,
+      "train_history_cap_rows_removed": 245,
+      "test_development_overlap_pairs_removed": 0,
+      "train_rows": 8225,
+      "development_rows": 2651,
+      "test_rows": 5471,
+      "development_users": 171,
+      "test_users": 197,
+      "development_users_with_positive": 93,
+      "test_users_with_positive": 148,
+      "train_observed_zero_rows": 4242,
+      "development_observed_zero_rows": 2208,
+      "test_observed_zero_rows": 4513
+    },
+    "arms": {
+      "transfer_v1": {
+        "execution_status": "completed",
+        "dataset": "kuairand-pure",
+        "dataset_fingerprint": "5e9ed576b98082b28a91b309f35dc6cd5b3178d6b96c5e8a2e346e16af52d564",
+        "strategy": {
+          "version": "research_strategy_v1",
+          "strength_grid": [
+            0,
+            0.05,
+            0.1,
+            0.2,
+            0.4
+          ],
+          "evidence_focus": "overall",
+          "preferred_operator": "popularity_penalty"
+        },
+        "selected_policy": {
+          "operator": "retain",
+          "strength": 0.0
+        },
+        "selection_reason": "没有候选同时达到开发区质量与偏差点门槛，保留原版。",
+        "research_status": "candidate_frozen",
+        "validation": {
+          "status": "completed",
+          "policy": {
+            "operator": "retain",
+            "strength": 0.0
+          },
+          "scope": "held_out_observed_random_panels",
+          "metrics": {
+            "B0": {
+              "ndcg": 0.33453394236180684,
+              "panel_excess_head_share": 0.1324836952993412,
+              "head_share": 0.28661445463070084,
+              "tail_relevant_recall": 0.3241788683952863,
+              "quality_users": 148,
+              "zero_ideal_users": 49,
+              "evaluated_users": 197,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            },
+            "candidate": {
+              "ndcg": 0.33453394236180684,
+              "panel_excess_head_share": 0.1324836952993412,
+              "head_share": 0.28661445463070084,
+              "tail_relevant_recall": 0.3241788683952863,
+              "quality_users": 148,
+              "zero_ideal_users": 49,
+              "evaluated_users": 197,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            }
+          },
+          "comparison": {
+            "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+            "status": "rejected",
+            "paired_users": 148,
+            "quality_change": 0.0,
+            "bias_change": 0.0,
+            "head_share_change": 0.0,
+            "tail_relevant_recall_change": 0.0,
+            "point_gates": {
+              "quality": true,
+              "bias": false,
+              "valid_rankings": true
+            },
+            "quality_floor_ratio": 0.99,
+            "bias_ceiling_ratio": 0.9,
+            "minimum_reference_bias": 0.001,
+            "uncertainty": {
+              "method": "paired_user_percentile_bootstrap",
+              "seed": 20261014,
+              "bootstrap_samples": 500,
+              "metrics": {
+                "ndcg": {
+                  "mean_difference": 0.0,
+                  "ci95": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "panel_excess_head_share": {
+                  "mean_difference": 0.0,
+                  "ci95": [
+                    0.0,
+                    0.0
+                  ]
+                }
+              },
+              "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+            },
+            "statistical_promotion": false,
+            "causal_claim": false
+          },
+          "test_candidate_selection": false,
+          "online_experiment": false,
+          "statistical_promotion": false
+        },
+        "trials": [
+          {
+            "trial_id": "0001",
+            "dataset": "kuairand-pure",
+            "policy": {
+              "operator": "popularity_penalty",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "rejected",
+              "paired_users": 93,
+              "quality_change": -0.045365948099594156,
+              "bias_change": -0.05007666308651308,
+              "head_share_change": -0.09356606651188396,
+              "tail_relevant_recall_change": 0.015944837658690036,
+              "point_gates": {
+                "quality": false,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": -0.045365948099594176,
+                    "ci95": [
+                      -0.076816004146118,
+                      -0.012140368306450497
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.050076663086513075,
+                    "ci95": [
+                      -0.07000803077119269,
+                      -0.03250810759527249
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.5386024028995087,
+                "panel_excess_head_share": 0.10510452510213804,
+                "head_share": 0.24696498154364793,
+                "tail_relevant_recall": 0.5111457108343134,
+                "quality_users": 93,
+                "zero_ideal_users": 78,
+                "evaluated_users": 171,
+                "tail_supported_users": 86,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.4932364547999145,
+                "panel_excess_head_share": 0.055027862015624956,
+                "head_share": 0.15339891503176398,
+                "tail_relevant_recall": 0.5270905484930034,
+                "quality_users": 93,
+                "zero_ideal_users": 78,
+                "evaluated_users": 171,
+                "tail_supported_users": 86,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "626d2b6f5be13b8513effcf6b08724e97ae8bacc25ce63b77223e6372c2da518",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在 kuairand-pure 上，按训练观察频次对热门分数施加轻度惩罚（popularity_penalty, strength=0.05）可在几乎不损失 NDCG@5 的前提下降低面板额外热门倾斜（panel_excess_head_share），因为当前 baseline 的面板额外热门倾斜为 0.1051、head_share 为 0.2470，而训练正反馈头部占比高达 0.8687，说明排序分数被观察频次主导，轻度惩罚即可重排头部候选而不破坏相关项的相对次序。",
+              "alternative_explanation": "竞争解释：面板额外热门倾斜的下降可能只是候选面板重排的副产物，而非去偏机制生效；也可能任何强度都会同等降低倾斜，即强度不敏感；此外，若质量变化与倾斜变化的置信区间跨 0，则本轮观察不足以区分该机制与随机面板波动，不能据此否定未测试的机制。",
+              "operator": "popularity_penalty",
+              "strength": 0.05,
+              "prediction": "相对当前 baseline（NDCG@5=0.5386，panel_excess_head_share=0.1051，tail_relevant_recall=0.5111），strength=0.05 的 popularity_penalty 在固定随机评分面板上应满足质量≥原版 99%、面板额外热门倾斜≤原版 90%，即 NDCG 变化接近 0 或略正、panel_excess_head_share 下降约 0.02–0.03、tail_relevant_recall 小幅上升；若质量与倾斜的配对 bootstrap 95% 区间跨 0，则记为不确定而非否定。",
+              "falsifier": "若在固定随机评分面板上，strength=0.05 的 popularity_penalty 使 NDCG@5 低于原版 99%（质量门失败），或 panel_excess_head_share 未降至原版 90% 以下（倾斜门失败），或出现 invalid_rankings>0，则该假设被证伪；若质量与倾斜变化的 95% 置信区间均跨 0，则本轮证据不足以支持该机制，应保持不确定。",
+              "reason": "当前任务上轮反证是 initial_change_statistics 显示 93 名可评估用户 quality_change 全为 0、quality_loss_users=0、quality_gain_users=0，即上一轮实际执行的 operator 是 retain（未改动），因此不能声称测试了新算法，也不能用该零变化否定任何未测试机制。历史 source_dataset=coat 的 popularity_penalty 经验（0.05/0.1/0.2 均点门通过、倾斜 CI 不跨 0、质量 CI 跨 0）仅用于形成假设，其用户、指标与结论都不是当前观察。当前 baseline 质量底线只用 kuairand-pure 计算（quality_users=93、zero_ideal_users=78、tail_supported_users=86、invalid_rankings=0）。因此选择最小实验：在固定随机评分面板上执行 popularity_penalty, strength=0.05，检验质量保持与面板额外热门倾斜下降；热门下降本身不等于去偏，不作因果或 RSI 声明，未观察反馈保持未知。"
+            },
+            "research_update": {
+              "lesson": "在 kuairand-pure 上实际执行了 popularity_penalty, strength=0.05（非 retain），结果被拒：质量门失败，NDCG@5 从 0.5386 降至 0.4932（quality_change=-0.0454，配对 bootstrap 95% CI [-0.0768, -0.0121]，不跨 0），低于原版 99% 底线；93 名可评估用户中 22 人质量下降、10 人上升、61 人不变，最大单用户损失 -0.6309。倾斜门通过：panel_excess_head_share 从 0.1051 降至 0.0550（bias_change=-0.0501，CI [-0.0700, -0.0325] 不跨 0），head_share 从 0.2470 降至 0.1534，tail_relevant_recall 从 0.5111 升至 0.5271，invalid_rankings=0。因此本轮结论是：该强度在固定随机评分面板上确实降低了面板额外热门倾斜，但代价是质量显著受损，假设被证伪，不能声称“几乎不损失 NDCG”。需区分来源：coat 上 0.05/0.1/0.2 的点门通过、倾斜 CI 不跨 0、质量 CI 跨 0 属于 source_dataset 的历史经验，其用户、阈值与结论都不是当前观察；当前观察只来自 kuairand-pure 的 93 名配对用户。同时注意比较范围仅为 observed_candidate_panel_only_not_catalog_counterfactual，倾斜下降不等于去偏机制生效，也不构成因果或 RSI 声明；未观察反馈保持未知。上轮 retain 造成的零变化不能用来否定任何未测试机制。",
+              "next_question": "在 kuairand-pure 上，是否存在比 0.05 更弱的惩罚强度（例如网格外的 0.01–0.02，或网格内 0 与 0.05 之间的插值）能在保持 NDCG@5 ≥ 原版 99% 的同时仍使 panel_excess_head_share 显著低于原版？即质量损失是否随强度单调、是否存在质量可接受而倾斜仍下降的强度区间？",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0,
+              "evidence_state": "weakened"
+            },
+            "change_statistics": {
+              "quality_evaluable_users": 93,
+              "quality_loss_users": 22,
+              "quality_gain_users": 10,
+              "quality_unchanged_users": 61,
+              "largest_quality_loss": -0.6309297535714575,
+              "case_selection_note": "Six selected examples are not a representative sample; population counts come from all evaluable users."
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "popularity_penalty",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "popularity_penalty",
+                "strength": 0.05
+              },
+              "followed": true,
+              "reason": "当前任务上轮反证是 initial_change_statistics 显示 93 名可评估用户 quality_change 全为 0、quality_loss_users=0、quality_gain_users=0，即上一轮实际执行的 operator 是 retain（未改动），因此不能声称测试了新算法，也不能用该零变化否定任何未测试机制。历史 source_dataset=coat 的 popularity_penalty 经验（0.05/0.1/0.2 均点门通过、倾斜 CI 不跨 0、质量 CI 跨 0）仅用于形成假设，其用户、指标与结论都不是当前观察。当前 baseline 质量底线只用 kuairand-pure 计算（quality_users=93、zero_ideal_users=78、tail_supported_users=86、invalid_rankings=0）。因此选择最小实验：在固定随机评分面板上执行 popularity_penalty, strength=0.05，检验质量保持与面板额外热门倾斜下降；热门下降本身不等于去偏，不作因果或 RSI 声明，未观察反馈保持未知。"
+            }
+          }
+        ]
+      },
+      "transfer_v2": {
+        "execution_status": "completed",
+        "dataset": "kuairand-pure",
+        "dataset_fingerprint": "5e9ed576b98082b28a91b309f35dc6cd5b3178d6b96c5e8a2e346e16af52d564",
+        "strategy": {
+          "version": "research_strategy_v2",
+          "strength_grid": [
+            0,
+            0.05,
+            0.1,
+            0.2,
+            0.4
+          ],
+          "evidence_focus": "tradeoff_users",
+          "preferred_operator": "user_calibrated"
+        },
+        "selected_policy": {
+          "operator": "retain",
+          "strength": 0.0
+        },
+        "selection_reason": "没有候选同时达到开发区质量与偏差点门槛，保留原版。",
+        "research_status": "candidate_frozen",
+        "validation": {
+          "status": "completed",
+          "policy": {
+            "operator": "retain",
+            "strength": 0.0
+          },
+          "scope": "held_out_observed_random_panels",
+          "metrics": {
+            "B0": {
+              "ndcg": 0.33453394236180684,
+              "panel_excess_head_share": 0.1324836952993412,
+              "head_share": 0.28661445463070084,
+              "tail_relevant_recall": 0.3241788683952863,
+              "quality_users": 148,
+              "zero_ideal_users": 49,
+              "evaluated_users": 197,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            },
+            "candidate": {
+              "ndcg": 0.33453394236180684,
+              "panel_excess_head_share": 0.1324836952993412,
+              "head_share": 0.28661445463070084,
+              "tail_relevant_recall": 0.3241788683952863,
+              "quality_users": 148,
+              "zero_ideal_users": 49,
+              "evaluated_users": 197,
+              "tail_supported_users": 134,
+              "invalid_rankings": 0
+            }
+          },
+          "comparison": {
+            "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+            "status": "rejected",
+            "paired_users": 148,
+            "quality_change": 0.0,
+            "bias_change": 0.0,
+            "head_share_change": 0.0,
+            "tail_relevant_recall_change": 0.0,
+            "point_gates": {
+              "quality": true,
+              "bias": false,
+              "valid_rankings": true
+            },
+            "quality_floor_ratio": 0.99,
+            "bias_ceiling_ratio": 0.9,
+            "minimum_reference_bias": 0.001,
+            "uncertainty": {
+              "method": "paired_user_percentile_bootstrap",
+              "seed": 20261014,
+              "bootstrap_samples": 500,
+              "metrics": {
+                "ndcg": {
+                  "mean_difference": 0.0,
+                  "ci95": [
+                    0.0,
+                    0.0
+                  ]
+                },
+                "panel_excess_head_share": {
+                  "mean_difference": 0.0,
+                  "ci95": [
+                    0.0,
+                    0.0
+                  ]
+                }
+              },
+              "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+            },
+            "statistical_promotion": false,
+            "causal_claim": false
+          },
+          "test_candidate_selection": false,
+          "online_experiment": false,
+          "statistical_promotion": false
+        },
+        "trials": [
+          {
+            "trial_id": "0001",
+            "dataset": "kuairand-pure",
+            "policy": {
+              "operator": "user_calibrated",
+              "strength": 0.05
+            },
+            "comparison": {
+              "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+              "status": "rejected",
+              "paired_users": 93,
+              "quality_change": -0.03180643835124197,
+              "bias_change": -0.037531487762272345,
+              "head_share_change": -0.05675293378834287,
+              "tail_relevant_recall_change": 0.00852713178294573,
+              "point_gates": {
+                "quality": false,
+                "bias": true,
+                "valid_rankings": true
+              },
+              "quality_floor_ratio": 0.99,
+              "bias_ceiling_ratio": 0.9,
+              "minimum_reference_bias": 0.001,
+              "uncertainty": {
+                "method": "paired_user_percentile_bootstrap",
+                "seed": 20261014,
+                "bootstrap_samples": 500,
+                "metrics": {
+                  "ndcg": {
+                    "mean_difference": -0.03180643835124206,
+                    "ci95": [
+                      -0.059704444354483084,
+                      -0.003413419506544877
+                    ]
+                  },
+                  "panel_excess_head_share": {
+                    "mean_difference": -0.03753148776227234,
+                    "ci95": [
+                      -0.058075306406334085,
+                      -0.022025728112613746
+                    ]
+                  }
+                },
+                "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+              },
+              "statistical_promotion": false,
+              "causal_claim": false
+            },
+            "metrics": {
+              "B0": {
+                "ndcg": 0.5386024028995087,
+                "panel_excess_head_share": 0.10510452510213804,
+                "head_share": 0.24696498154364793,
+                "tail_relevant_recall": 0.5111457108343134,
+                "quality_users": 93,
+                "zero_ideal_users": 78,
+                "evaluated_users": 171,
+                "tail_supported_users": 86,
+                "invalid_rankings": 0
+              },
+              "candidate": {
+                "ndcg": 0.5067959645482667,
+                "panel_excess_head_share": 0.0675730373398657,
+                "head_share": 0.19021204775530506,
+                "tail_relevant_recall": 0.5196728426172591,
+                "quality_users": 93,
+                "zero_ideal_users": 78,
+                "evaluated_users": 171,
+                "tail_supported_users": 86,
+                "invalid_rankings": 0
+              }
+            },
+            "execution": {
+              "experiment_id": "b1055741579b66c9a97d122564067fab8e3aa6780d4e3ed5e990968c52d9137f",
+              "reused": false,
+              "independent_repetition": false
+            },
+            "proposal": {
+              "hypothesis": "在 kuairand-pure 上，按训练观察频次对热门分数施加惩罚（popularity_penalty）会降低面板额外热门倾斜，同时质量（NDCG@5）基本保持；但当前 baseline 的 panel_excess_head_share 仅 0.1051，且 93 个质量可评估用户全部 quality_change=0，说明上轮实际执行的是 retain（未改动），因此“惩罚有效”这一机制在当前任务上尚未被检验，只是从 coat 源任务迁移来的假设。",
+              "alternative_explanation": "竞争解释：当前面板额外热门倾斜本就较低（0.1051），且训练正反馈头部占比 0.8687 与随机开发面板头部占比 0.2551 的分布差异只是观察频次代理，不识别原因；因此任何倾斜下降都可能来自面板/候选切分噪声或评分尺度变化，而非去偏机制本身。此外，93 个可评估用户质量变化全为 0，可能意味着该指标对排序改动不敏感（天花板/地板效应），而非算法无效。",
+              "operator": "user_calibrated",
+              "strength": 0.05,
+              "prediction": "在固定随机评分面板上执行 user_calibrated（strength=0.05）后：质量 NDCG@5 相对 baseline 0.5386 的比值 ≥0.99（即不低于约 0.5332），panel_excess_head_share 相对 baseline 0.1051 降至 ≤0.0946（≤90%），invalid_rankings 保持 0；tail_relevant_recall 相对 0.5111 不出现大幅下降。若质量与倾斜的配对 bootstrap 95% CI 均跨 0，则判定为不确定，不据此否定该机制。",
+              "falsifier": "若执行 user_calibrated（strength=0.05）后，质量比值 <0.99（NDCG@5 低于约 0.5332）或 panel_excess_head_share 未降至 ≤0.0946，或出现 invalid_rankings>0，则该“按用户校准惩罚可保质量降倾斜”的假设在当前任务上被证伪。注意：仅当该 operator 实际被执行时才可下此结论；retain 不构成对任何新算法的检验。",
+              "reason": "当前证据只支持“上轮未改动（retain）”：93 个质量可评估用户 quality_change 全为 0，bias_change 亦全为 0，六例均为 0 变化，说明没有实际测试新机制。历史 coat 的 popularity_penalty 在 0.05/0.1/0.2 均点门通过且倾斜 CI 不跨 0，但 NDCG 的 CI 跨 0，且源任务用户、指标与阈值不适用于当前任务，只能用于形成假设。策略偏好 user_calibrated，故以最小强度 0.05 做单候选实验，检验“保质量、降面板额外热门倾斜”这一可证伪预测；不宣称因果，也不宣称 RSI 成立，未观察反馈保持未知。"
+            },
+            "research_update": {
+              "lesson": "在 kuairand-pure 上本轮实际执行的是 user_calibrated（strength=0.05），不是 retain：93 个质量可评估用户中 14 人质量下降、7 人上升、72 人不变，NDCG@5 由 0.5386 降至 0.5068（配对 bootstrap 95% CI [-0.0597, -0.0034]，不跨 0），panel_excess_head_share 由 0.1051 降至 0.0676（CI [-0.0581, -0.0220]，不跨 0），tail_relevant_recall 由 0.5111 微升至 0.5197，invalid_rankings 保持 0。即：质量点门未过（比值 0.941 < 0.99），倾斜点门通过，整体 status=rejected。因此“按用户校准惩罚可保质量降倾斜”这一预测在当前任务上被证伪——降倾斜伴随可测的质量损失，且该损失在配对用户层面统计上不跨 0。需区分来源与当前：coat 源任务上 popularity_penalty 在 0.05/0.1/0.2 的点门通过、倾斜 CI 不跨 0 而 NDCG CI 跨 0，属于源任务聚合经验，用户、指标与阈值均不适用于当前任务，只能用于形成假设，不能写成当前发现。同时注意：本结论仅针对实际执行的 user_calibrated@0.05，未测试的算法（如 popularity_penalty 在当前数据集）不能写成发现；比较范围仅为 observed_candidate_panel_only_not_catalog_counterfactual，未做候选选择校正，不构成因果或统计晋升。另需承认：93 个可评估用户中 78 个 zero_ideal，质量指标存在天花板/地板效应风险，14 例损失中最大达 -0.63，说明质量下降集中在少数用户而非普遍退化。",
+              "next_question": "在 kuairand-pure 上，把 user_calibrated 的强度降到网格内更低档（0.05 以下无网格点，故改问：是否存在网格内强度使质量比值 ≥0.99 且 panel_excess_head_share ≤90% baseline？）——具体为：user_calibrated 在 strength=0.05 时质量点门失败，是否在更弱干预（如 strength=0.02，网格外，仅作后续研究）或改用 popularity_penalty（当前数据集尚未测试）时能同时满足质量与倾斜双门？并需检验质量损失是否集中于少数 zero_ideal 或低 NDCG 用户，以排除指标天花板效应。",
+              "next_operator": "popularity_penalty",
+              "next_strength": 0.05,
+              "evidence_state": "weakened"
+            },
+            "change_statistics": {
+              "quality_evaluable_users": 93,
+              "quality_loss_users": 14,
+              "quality_gain_users": 7,
+              "quality_unchanged_users": 72,
+              "largest_quality_loss": -0.6309297535714575,
+              "case_selection_note": "Six selected examples are not a representative sample; population counts come from all evaluable users."
+            },
+            "plan_handoff": {
+              "suggested": {
+                "operator": "user_calibrated",
+                "strength": 0.05,
+                "question": "哪种改法能保留质量并降低面板额外热门倾斜？",
+                "source": "strategy_starting_preference"
+              },
+              "actual": {
+                "operator": "user_calibrated",
+                "strength": 0.05
+              },
+              "followed": true,
+              "reason": "当前证据只支持“上轮未改动（retain）”：93 个质量可评估用户 quality_change 全为 0，bias_change 亦全为 0，六例均为 0 变化，说明没有实际测试新机制。历史 coat 的 popularity_penalty 在 0.05/0.1/0.2 均点门通过且倾斜 CI 不跨 0，但 NDCG 的 CI 跨 0，且源任务用户、指标与阈值不适用于当前任务，只能用于形成假设。策略偏好 user_calibrated，故以最小强度 0.05 做单候选实验，检验“保质量、降面板额外热门倾斜”这一可证伪预测；不宣称因果，也不宣称 RSI 成立，未观察反馈保持未知。"
+            }
+          }
+        ]
+      }
+    },
+    "strategy_transfer_comparison": {
+      "scope": "observed_candidate_panel_only_not_catalog_counterfactual",
+      "status": "rejected",
+      "paired_users": 148,
+      "quality_change": 0.0,
+      "bias_change": 0.0,
+      "head_share_change": 0.0,
+      "tail_relevant_recall_change": 0.0,
+      "point_gates": {
+        "quality": true,
+        "bias": false,
+        "valid_rankings": true
+      },
+      "quality_floor_ratio": 0.99,
+      "bias_ceiling_ratio": 0.9,
+      "minimum_reference_bias": 0.001,
+      "uncertainty": {
+        "method": "paired_user_percentile_bootstrap",
+        "seed": 20261014,
+        "bootstrap_samples": 500,
+        "metrics": {
+          "ndcg": {
+            "mean_difference": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ]
+          },
+          "panel_excess_head_share": {
+            "mean_difference": 0.0,
+            "ci95": [
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "interpretation": "panel_split_uncertainty_not_corrected_for_candidate_selection"
+      },
+      "statistical_promotion": false,
+      "causal_claim": false
+    }
+  },
+  "first_followup_failure": {
+    "type": "SchemaViolation",
+    "field": "next_strength",
+    "returned": 0.02,
+    "allowed": [
+      0,
+      0.05,
+      0.1,
+      0.2,
+      0.4
+    ],
+    "attempts": 3,
+    "candidate_metrics_saved": true,
+    "second_arm_started": false
+  },
+  "post_followup_changes": {
+    "initial_evidence": "Describe baseline without fabricated zero treatment deltas",
+    "population_definitions": "Quality-evaluable and zero-ideal groups are disjoint",
+    "verification": "Local tests only; no further paid model calls"
+  }
+}

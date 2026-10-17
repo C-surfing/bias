@@ -1,0 +1,189 @@
+{
+  "acceptance_rule": "Never promote proxy-only improvements as confirmed real data debiasing",
+  "legacy_agentcf_semantic_probes": "auxiliary mechanism diagnosis only",
+  "meaning": "Five classic recommendation bias research TASKS, not five Agent roles",
+  "tasks": [
+    {
+      "allowable_interventions": [
+        "popularity_penalty",
+        "user_calibrated_rerank",
+        "support_preserving_rerank"
+      ],
+      "auxiliary_datasets": [
+        "coat",
+        "kuairand_pure"
+      ],
+      "caveat": "Prior AgentCF popularity prompts primarily measured behavior/proxies; not causal popularity correction.",
+      "current_status": "DEVELOPMENT_PROXY_ONLY",
+      "definition": "Observed recommendation exposure or scores disproportionately favor frequently observed items relative to a specified utility/opportunity benchmark.",
+      "evaluation_metrics": [
+        "paired_NDCG_at_5",
+        "Hit_at_5",
+        "head_exposure_share",
+        "tail_relevant_recall"
+      ],
+      "id": "popularity",
+      "not_identified_if": [
+        "no_relevance_reference_to_distinguish_popularity_from_legitimate_demand"
+      ],
+      "observational_proxy": [
+        "training_item_frequency",
+        "extra_head_share_over_panel_ideal"
+      ],
+      "primary_dataset": "agentcf_cds",
+      "required_evidence": [
+        "preintervention_item_popularity",
+        "matched_candidate_panels",
+        "independent_relevance_reference"
+      ]
+    },
+    {
+      "allowable_interventions": [
+        "exposure_constraint_rerank",
+        "controlled_exploration",
+        "identified_propensity_weighting"
+      ],
+      "auxiliary_datasets": [
+        "controlled_synthetic",
+        "agentcf_cds"
+      ],
+      "caveat": "AgentCF unsupported-negative-memory text is a semantic mechanism, not exposure propensity.",
+      "current_status": "DATA_GROUNDING_EXPLORATORY",
+      "definition": "Feedback is biased by which items a logging policy exposes to a user, making unexposed preferences unavailable.",
+      "evaluation_metrics": [
+        "randomized_log_click_utility",
+        "policy_support_coverage",
+        "effective_sample_size",
+        "SNIPS_if_propensities_identified"
+      ],
+      "id": "exposure",
+      "not_identified_if": [
+        "no_exposure_records",
+        "no_identifiable_logging_propensities_or_randomized_reference",
+        "positivity_violated"
+      ],
+      "observational_proxy": [
+        "observed_exposure_frequency",
+        "policy_item_support_overlap"
+      ],
+      "primary_dataset": "kuairand_pure",
+      "required_evidence": [
+        "impression_log",
+        "logging_policy_or_known_randomization",
+        "support_positivity",
+        "observed_click_or_rating",
+        "time_window_alignment"
+      ]
+    },
+    {
+      "allowable_interventions": [
+        "unweighted_item_mean",
+        "estimated_propensity_weighted_item_mean",
+        "clipped_weight_sensitivity"
+      ],
+      "auxiliary_datasets": [
+        "kuairand_pure",
+        "controlled_synthetic"
+      ],
+      "caveat": "Coat propensities.ascii contains learned estimates, not true assignment probabilities; zero ratings are missing.",
+      "current_status": "BENCHMARK_READY_FOR_DEVELOPMENT",
+      "definition": "Recorded ratings/interactions are a nonrandom selection of user-item preferences (MNAR), changing the observed training distribution.",
+      "evaluation_metrics": [
+        "random_panel_Brier",
+        "random_panel_NDCG_at_5",
+        "random_panel_Hit_at_5",
+        "paired_utility_uncertainty"
+      ],
+      "id": "selection",
+      "not_identified_if": [
+        "no_random_reference_and_no_identification_assumptions",
+        "unknown_or_zero_support_propensities"
+      ],
+      "observational_proxy": [
+        "self_selected_vs_random_rating_positive_rate_gap",
+        "observed_item_frequency"
+      ],
+      "primary_dataset": "coat",
+      "required_evidence": [
+        "nonrandom_training_ratings",
+        "random_reference_panel",
+        "observed_label_mask",
+        "train_only_propensity_estimator"
+      ]
+    },
+    {
+      "allowable_interventions": [
+        "diversity_aware_rerank",
+        "bounded_interest_exploration"
+      ],
+      "auxiliary_datasets": [
+        "kuairand_pure",
+        "controlled_synthetic"
+      ],
+      "caveat": "One-shot diversity metric cannot establish a filter bubble.",
+      "current_status": "NOT_YET_IDENTIFIED",
+      "definition": "Repeated exposure-feedback-updates shrink topic/interest diversity beyond a predeclared relevance-preserving counterfactual.",
+      "evaluation_metrics": [
+        "longitudinal_topic_coverage",
+        "diversity_at_k",
+        "utility_over_time",
+        "counterfactual_trajectory_gap"
+      ],
+      "id": "filter_bubble",
+      "not_identified_if": [
+        "single_snapshot_only",
+        "item_topic_labels_unavailable",
+        "feedback_trajectories_not_comparable"
+      ],
+      "observational_proxy": [
+        "topic_concentration_over_time",
+        "personal_history_similarity"
+      ],
+      "primary_dataset": "agentcf_cds",
+      "required_evidence": [
+        "timestamped_repeated_exposures",
+        "item_topic_features",
+        "user_history",
+        "matched_initial_states",
+        "intervention_trajectory"
+      ]
+    },
+    {
+      "allowable_interventions": [
+        "group_constrained_rerank",
+        "equal_opportunity_with_utility_guard"
+      ],
+      "auxiliary_datasets": [
+        "coat",
+        "controlled_synthetic"
+      ],
+      "caveat": "Head/tail is not automatically a social-fairness group; normative choice must be documented.",
+      "current_status": "NOT_YET_IDENTIFIED",
+      "definition": "A predeclared subject (user/item/provider group) experiences unequal utility or opportunity under an explicit fairness criterion.",
+      "evaluation_metrics": [
+        "groupwise_NDCG_gap",
+        "group_opportunity_gap",
+        "worst_group_utility",
+        "overall_utility_cost"
+      ],
+      "id": "fairness",
+      "not_identified_if": [
+        "groups_not_defined",
+        "insufficient_group_support",
+        "fairness_norm_not_declared"
+      ],
+      "observational_proxy": [
+        "groupwise_exposure_counts",
+        "groupwise_utility_proxy"
+      ],
+      "primary_dataset": "kuairand_pure",
+      "required_evidence": [
+        "group_definition_and_scope",
+        "group_membership",
+        "minimum_group_support",
+        "group_utility_or_exposure_reference"
+      ]
+    }
+  ],
+  "version": "classic-five-bias-tasks-v1.0"
+}

@@ -1,0 +1,14 @@
+{
+  "dataset": "CDs-100-user-dense",
+  "data_dir": "data",
+  "users": 20,
+  "events_per_user": 5,
+  "user_selection": "training_popularity_quartiles",
+  "seed": 20261015,
+  "budget": {"max_requests": 750, "max_tokens": 3000000, "max_seconds": 7200},
+  "llm": {
+    "provider": "vllm", "base_url": "http://127.0.0.1:8000/v1", "model": "qwen3-8b",
+    "enable_thinking": false, "max_tokens": 1024,
+    "temperature": 0.7, "top_p": 0.8, "top_k": 20, "seed": 42, "timeout_seconds": 180
+  }
+}

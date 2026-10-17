@@ -1,0 +1,29 @@
+{
+  "strategy_version": "recommendation_researcher_v4_dual_loop",
+  "candidate_limit": 2,
+  "world": {
+    "seed": 2026101401,
+    "users": 2,
+    "items": 20,
+    "events_per_user": 2,
+    "stratum": "unrelated"
+  },
+  "rerank_strength": 0.1,
+  "budget": {
+    "max_requests": 300,
+    "max_tokens": 700000,
+    "max_seconds": 7200
+  },
+  "llm": {
+    "provider": "vllm",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "model": "qwen3-8b",
+    "enable_thinking": false,
+    "max_tokens": 2048,
+    "temperature": 0.7,
+    "top_p": 0.8,
+    "top_k": 20,
+    "seed": 42,
+    "timeout_seconds": 180
+  }
+}

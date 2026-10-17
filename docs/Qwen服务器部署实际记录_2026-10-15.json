@@ -1,0 +1,87 @@
+{
+  "checked_date": "2026-10-15",
+  "ssh": "authenticated",
+  "account": "cjh",
+  "project_root": "/data/cjh/rsi",
+  "hardware": {
+    "os": "Ubuntu Linux 6.8.0-138-generic x86_64",
+    "driver": "580.159.04",
+    "system_python": "3.10.12",
+    "ram_gib": 503,
+    "data_free_tib_approx": 5.5,
+    "gpus": [
+      {
+        "indices": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ],
+        "model": "A100-SXM4-80GB"
+      },
+      {
+        "indices": [
+          5,
+          6
+        ],
+        "model": "A100-PCIE-40GB"
+      }
+    ]
+  },
+  "selected_gpu": {
+    "index_at_inspection": 5,
+    "uuid": "GPU-e9bc2d1d-cb92-bc3e-b145-855b0cddae0b",
+    "model": "A100-PCIE-40GB",
+    "memory_used_mib_at_inspection": 14,
+    "utilization_at_inspection": 0
+  },
+  "other_active_gpu_at_inspection": 0,
+  "install_status": "completed",
+  "inference_service": "running",
+  "model_inference": "completed_author_engineering_check",
+  "system_changes": false,
+  "scope": "own project and own environments only",
+  "model_source": "Qwen official ModelScope because Hugging Face timed out",
+  "notes": [
+    "Miniforge generic checksum URL returned 404; versioned 26.7.2-0 asset and checksum used instead.",
+    "Actual final status must be updated after installation and inference checks.",
+    "Own inference bin added to service PATH so ninja can execute; system environment unchanged.",
+    "63 initial author requests exposed a one-character schema decoding issue; original metrics excluded from learning conclusions.",
+    "Non-whitespace schema corrected; full-sentence control verified by two local diagnostic requests."
+  ],
+  "server_source_upload": {
+    "status": "CRC_and_all_file_hashes_verified",
+    "source_zip_sha256": "c20ddae9cf37d0e903ed10cce898de48308c335d2a8823ba0b1af1442ae2f76f"
+  },
+  "official_data_on_server": {
+    "coat": "verified_and_extracted",
+    "kuairand-pure": "verified_and_extracted",
+    "network_downloads_on_server": 0
+  },
+  "server_program_tests": {
+    "count": 183,
+    "status": "passed",
+    "seconds": 15.442
+  },
+  "model_download_status": "downloaded",
+  "current_dataset_scope": "AgentCF author CDs-100-user-dense only",
+  "service_pid": 2009966,
+  "served_model": "qwen3-8b",
+  "vllm_version": "0.31.0",
+  "author_run": {
+    "path": "runs/qwen-author-day1-fixedtext-20261015",
+    "users": 2,
+    "training_events": 10,
+    "requests": 54,
+    "responses": 54,
+    "invalid_rankings": 0,
+    "resume_requests_after": 54,
+    "scientific_acceptance": "not_evaluated"
+  },
+  "windows_program_tests": {
+    "count": 188,
+    "status": "passed",
+    "seconds": 60.319
+  }
+}
