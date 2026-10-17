@@ -110,7 +110,17 @@ def main(argv=None):
     exposure_sim.add_argument("--output",required=True)
     exposure_sim.add_argument("--reps",type=int,default=32)
     exposure_sim.add_argument("--events",type=int,default=3000)
+    decisions = sub.add_parser("bias-decision-freeze",
+        help="冻结合成 Exposure 科研动作基准并运行强规则基线，仅 CPU")
+    decisions.add_argument("--output",required=True)
     args = parser.parse_args(argv)
+    if args.command == "bias-decision-freeze":
+        from rsi_researcher.research.decision_benchmark import freeze
+        r=freeze(Path(args.output))
+        print(json.dumps({"status":r["status"],"evaluation_cases":r["evaluation_cases"],
+                          "rule_regret":r["rule"]["mean_regret"],
+                          "new_model_requests":0},ensure_ascii=False))
+        return 0
     if args.command == "bias-exposure-sim":
         from rsi_researcher.research.exposure_synthetic import run as run_sim
         r=run_sim(Path(args.output),reps=args.reps,events=args.events)

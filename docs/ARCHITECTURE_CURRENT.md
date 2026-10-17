@@ -58,3 +58,7 @@ Qwen：旧决策动作先导六题无历史 4/6、有历史 3/6；新构造八�
 - 对隐藏 propensity 的条件明确 ABSTAIN_NO_PROPENSITY，不输出伪 IPS。
 - CLI: python -m rsi_researcher bias-exposure-sim --output runs/new-unique-name。
 - 只用于离线估计量校准，不给 KuaiRand 日志添加不存在的真实倾向概率。
+
+## RSI 决策实验补充
+
+research/decision_benchmark.py 生成开发/评价分离的 OPE 研究动作任务；research/decision_qwen_pilot.py 使用本地 Qwen 开展有上限的四组对照；research/decision_analysis.py 进行七类机制配对复核。方法、完整消极结果见 docs/DECISION_PILOT_20261017.md。

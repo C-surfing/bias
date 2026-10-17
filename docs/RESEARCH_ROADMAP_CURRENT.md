@@ -27,3 +27,7 @@
 ## 受控 Exposure P1 的补充进展
 
 已有合成 logging propensity 和可解析 oracle policy value，可直接用作 IPS/SNIPS/abstention 基础单元测试；下一轮需要先冻结扰动机制与成本，再在这类有真实参照的任务上比较 Qwen 的研究决策（不得泄漏 oracle 到 Planner）。
+
+## 决策 Pilot 的负面结果（2026-10-17）
+
+14 个合成未见配置；强规则平均 regret 0.001141、Qwen 无历史 0.001263、相关历史 0.001917、策略修订 0.002474、打乱历史 0.005275；不能证明 RSI 优于规则。禁止用这批题继续选提示词；下一轮转向独立机制家族与科研发现数/成本。详见 DECISION_PILOT_20261017.md。
