@@ -134,9 +134,26 @@ def review_plan(task, plan, critique):
     return "ACCEPTED_DESIGN_ONLY"
 
 
+def fixed_rule_proposal(task):
+    """One predeclared rule with the SAME metric floor as Qwen proposals."""
+    action = source.RULE[task]
+    metric = experiments.action_metrics(task, action)[0]
+    return {
+        "action": action,
+        "metric": metric,
+        "direction": "decrease" if task == "agentcf_popularity" else "increase",
+        "minimum_abs_effect": experiments.DEVELOPMENT_EFFECT_FLOOR[metric],
+        "hypothesis": "Predeclared rule tests one registered mechanism",
+        "competing_explanation": "Ranking noise, propensity uncertainty or candidate mix",
+        "falsifier": "No paired effect beyond the fixed metric floor, or quality harm",
+        "budget_justification": "Rule and prediction threshold fixed before inference",
+    }
+
+
 def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             allowed_next_tasks=(), rule_fallback=False,
-            arm="qwen_audited_history", skill_library=None, prior_campaign=None):
+            arm="qwen_audited_history", skill_library=None, prior_campaign=None,
+            prepared_state=None):
     directory.mkdir(parents=True, exist_ok=False)
     begin = perf_counter()
     calls_before = model.requests
@@ -154,24 +171,25 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
                       "no_validation_targets_in_research_prompt":True,
                       "scientific_input_sha256":experiments.scientific_input_fingerprint(cohort)}
             store_new(directory / "cohort_frozen.json", frozen)
-            ctx["new_agentcf_input_observations"] = experiments.preintervention_observations(cohort)
+            if prepared_state is None:
+                # Standalone science run: observe a genuine trained AgentCF
+                # baseline BEFORE generating a hypothesis or experiment plan.
+                prepared = experiments.train_and_observe_agentcf(cohort, model, directory)
+                prepared_state = directory / "prepared_agentcf.json"
+                shared_cost = False
+            else:
+                prepared = experiments.load_prepared_agentcf(prepared_state, cohort)
+                shared_cost = True
+            ctx["new_agentcf_input_observations"] = prepared["observation"]
+            ctx["predecision_baseline_fingerprint"] = prepared["training"]["baseline_rankings_sha256"]
+            ctx["shared_preparation_cost_accounted_separately"] = shared_cost
         store_new(directory / "evidence.json", ctx)
         eid = directory.name
 
         selected_by = "qwen_accepted_design"
         if arm == "strong_rule":
             # Strong fixed rule does not pay or receive credit for scientific-agent calls.
-            fallback_action = source.RULE[task]
-            plan = {
-                "action": fallback_action,
-                "metric": experiments.action_metrics(task, fallback_action)[0],
-                "direction": "decrease" if task=="agentcf_popularity" else "increase",
-                "minimum_abs_effect": 0.02,
-                "hypothesis": "Predeclared strong rule mechanism intervention",
-                "competing_explanation": "Observed effect may reflect model noise or candidate mix",
-                "falsifier": "Effect absent in paired development panels or violates utility",
-                "budget_justification": "Fixed action and numeric rule before evaluation",
-            }
+            plan = fixed_rule_proposal(task)
             selected_by = "fixed_rule_baseline"
             decision = "PREDECLARED_RULE_BASELINE"
             store_new(directory / "frozen_plan.json", {
@@ -210,17 +228,7 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
                                   model_calls=model.requests-calls_before)
                     atomic_json(directory / "status.json", status)
                     return status
-                fallback_action = source.RULE[task]
-                plan = {
-                    "action": fallback_action,
-                    "metric": experiments.action_metrics(task, fallback_action)[0],
-                    "direction": "decrease" if task=="agentcf_popularity" else "increase",
-                    "minimum_abs_effect": 0.02,
-                    "hypothesis": "Bounded strong-rule diagnostic",
-                    "competing_explanation": "Ranking randomness or propensity uncertainty",
-                    "falsifier": "No effect in paired panels or quality damage",
-                    "budget_justification": "Fixed-rule control, no Qwen design credit",
-                }
+                plan = fixed_rule_proposal(task)
                 selected_by = "fixed_rule_control_after_qwen_rejection"
                 store_new(directory / "rule_control_plan.json", {
                     "origin":selected_by, "rejected_qwen_plan":decision,
@@ -232,7 +240,8 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
         # Any interrupted real experiment is fail-closed: rerun with a NEW output.
         execute_start_calls = model.requests
         execute_start_time = perf_counter()
-        result = experiments.execute(task, plan["action"], mode, model, directory, cohort)
+        result = experiments.execute(task, plan["action"], mode, model, directory, cohort,
+                                     prepared_state)
         store_new(directory / "execution.json", result)
         audit = experiments.independent_verdict(task, plan["action"], plan, result)
         audit.update(execution_kind=result.get("execution_kind", result.get("status")),
@@ -257,11 +266,14 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             skills.proposal(directory, task, reflection["candidate_research_skill"],
                             directory / "audit.json")
 
-        end_state = ("COMPLETED_INCONCLUSIVE" if audit["evidence_grade"] == "inconclusive"
-                     else "COMPLETED_DEVELOPMENT")
-        if selected_by != "qwen_accepted_design":
-            end_state = ("COMPLETED_RULE_INCONCLUSIVE" if end_state == "COMPLETED_INCONCLUSIVE"
-                         else "COMPLETED_RULE_CONTROL")
+        if result.get("status","").startswith("ABSTAIN_"):
+            end_state = "ABSTAIN_INSUFFICIENT_MECHANISM_SUPPORT"
+        else:
+            end_state = ("COMPLETED_INCONCLUSIVE" if audit["evidence_grade"] == "inconclusive"
+                         else "COMPLETED_DEVELOPMENT")
+            if selected_by != "qwen_accepted_design":
+                end_state = ("COMPLETED_RULE_INCONCLUSIVE" if end_state == "COMPLETED_INCONCLUSIVE"
+                             else "COMPLETED_RULE_CONTROL")
         status.update(status=end_state, model_calls=model.requests-calls_before,
                       proposal_origin=selected_by,
                       suggested_next_task=reflection["suggested_next_task"],
@@ -279,7 +291,8 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
 
 def campaign(output, tasks, mode, model=None, max_episodes=4, cohort_size=6, seed=20261017,
              config=None, auto=False, rule_fallback=False,
-             arm="qwen_audited_history", skill_library=None, prior_campaign=None):
+             arm="qwen_audited_history", skill_library=None, prior_campaign=None,
+             prepared_by_task=None):
     """One finite campaign; no self-authorized infinite loop or GPU provisioning."""
     output = Path(output).resolve()
     if output.exists():
@@ -317,10 +330,16 @@ def campaign(output, tasks, mode, model=None, max_episodes=4, cohort_size=6, see
                 "numerical_auditor_independent_of_agents":True,
                 "source_protocol_sha256":digest(source.RUN / "protocol.json"),
                 "scientific_source_sha256": {
-                    p.name:digest(p) for p in (
-                        Path(__file__), Path(__file__).with_name("scientific_agents.py"),
-                        Path(__file__).with_name("scientific_experiments.py"))},
-                "project_commit_expected":"4264151"}
+                    str(p.relative_to(Path(__file__).resolve().parents[1])):digest(p)
+                    for p in (
+                        Path(__file__).resolve(),
+                        Path(__file__).with_name("scientific_agents.py"),
+                        Path(__file__).with_name("scientific_experiments.py"),
+                        Path(__file__).with_name("scientific_comparison.py"),
+                        Path(__file__).parents[1] / "recommenders" / "agentcf.py",
+                        Path(__file__).parents[1] / "datasets" / "author.py",
+                        Path(__file__).parents[1] / "evaluation" / "author.py")},
+                "base_mainline_commit":"4264151"}
     store_new(output / "protocol.json", protocol)
     store_new(output / "protocol.sha256.json", {"sha256":digest(output / "protocol.json")})
     excluded = set()
@@ -336,7 +355,8 @@ def campaign(output, tasks, mode, model=None, max_episodes=4, cohort_size=6, see
         try:
             status = episode(run_dir, task, model, mode, excluded, seed+i,
                              cohort_size, list(dict.fromkeys(tasks)) if auto else [],
-                             rule_fallback, arm, skill_library, prior_campaign)
+                             rule_fallback, arm, skill_library, prior_campaign,
+                             (prepared_by_task or {}).get(task))
         except Exception:
             statuses.append(json.loads((run_dir / "status.json").read_text(encoding="utf8")))
             atomic_json(output / "campaign.json", {"status":"FAILED_CLOSED","episodes":statuses,

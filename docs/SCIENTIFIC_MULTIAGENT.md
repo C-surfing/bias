@@ -50,10 +50,13 @@ Agent stacks.
 | AgentCF Popularity | `popularity_prompt`, `item_memory_ablation` | Same measured paired effects | Head exposure != identified popularity bias |
 
 Python refuses any task/action/metric mismatch EVEN IF Qwen Critic approves it.
-Diagnosis now sees genuine *pre-training input support* (training events,
-candidate coverage and overlapping positive items), never validation targets
-or an intervention result. This does not yet constitute diagnosis from
-learned rankings and memory changes.
+Diagnosis sees real pre-decision *trained AgentCF* observations: training
+event support, bounded User/Item Memory before/after examples, candidate
+coverage, cross-user Item Memory write/read links, and actual baseline rankings.
+The observations hide validation relevance and experiment outcomes. They are
+diagnostic evidence, NOT a causal claim that memory or popularity is harmful.
+The trained state, diagnostic evidence and baseline ranks are frozen before
+the hypothesis and its numeric intervention forecast.
 
 Each metric has a shared minimum development effect fixed by Python before
 Qwen proposes a number (Brier/gamma/placebo 0.0001, NDCG/tail/head 0.02,
@@ -62,7 +65,10 @@ a smaller threshold. Near-zero point estimates in tiny panels are NOT
 evidence of equivalence. These thresholds are effect screens, not p-values.
 Numbers are computed from exactly two disjoint *development* panels.
 Unchanged repeat rankings estimate stochastic noise. Changes without sufficient
-training-memory candidate overlap terminate as inconclusive. The randomized
+training-memory candidate overlap terminate as inconclusive. A task about
+shared Item Memory also abstains when no other-user memory writer appears in
+a ranking user's candidate panel, or when one of the two development panels
+has no cross-user memory path. Such abstentions are NOT completed experiments. The randomized
 Coat *holdout* and AgentCF hidden/unlabeled relevance never enter this loop.
 
 ## Three ways to run
@@ -102,14 +108,16 @@ by a separately labeled predeclared control, not to claim Qwen success.
 Each arm gets the SAME model-request/token/time ceiling, cohort seed, dataset
 and numerical audit. For AgentCF, paired status requires matching frozen
 initial state, training events, queries and prompts (one SHA-256 fingerprint);
-matching user IDs alone is insufficient. After independently training AgentCF
-for each arm, a SECOND hash records whether trained User/Item Memory states
-are identical. When trained states differ, the matched-input end-to-end
-comparison may still be reported, but isolated research-policy causal effect
-is NOT established. If an arm does not actually execute, the comparison is
-INCOMPLETE. Actual model
-calls and token usage are reported, not treated as equal because the caps are
-equal. An arm with rejected Qwen
+matching user IDs alone is insufficient. For new AgentCF comparisons, the
+trainer runs ONCE before any science arm; all arms receive one frozen trained
+state and identical pre-decision ranking observations. The common training and
+diagnostic Qwen calls are logged under shared_training/, separately from
+each research arm's Qwen budget and usage. policy_arms_share_trained_state
+means exactly that; it does NOT prove isolated causal research-policy gains
+because stochastic ranking and limited task replication remain. If an arm
+rejects the design or abstains for insufficient evidence, the comparison is
+INCOMPLETE. Actual arm usage and shared preparation costs are reported
+separately; equal ceilings are not equal actual costs. An arm with rejected Qwen
 proposals is recorded as not executed. Without a frozen prior campaign,
 `qwen_audited_history` and `qwen_no_history` may be identical:
 `memory_comparison_interpretable=false`, **no RSI memory claim**. Even with a prior campaign path, the history arm
@@ -135,6 +143,31 @@ becomes interpretable.
 - In the current author CDs and reused Coat development studies, confirmed
   scientific discoveries remain **zero** until a distinct pre-registered
   independent confirmation experiment exists.
+
+## Development cohort feasibility (CPU only, no new Qwen requests)
+
+Exploratory support check on seed integers 20270001–20270012, exactly two
+observed training events per user, using the existing author CDS train/valid
+candidate IDs and excluding known development users. Count a possible
+cross-user memory path when one candidate item was positively observed in
+another participating user's training history. Require >=1 such possible
+path in **each** half of the sorted query panel.
+
+| Users | Seeds with possible path in both panels / 12 |
+| --- | ---: |
+| 4 | 2 |
+| 6 | 7 |
+| 8 | 10 |
+| 12 | 12 |
+
+This checks only *candidate support* before Qwen training; even a possible
+path does not guarantee the generated memory was actually changed, that it
+affects ranking, or that it causes harmful bias. These 12 seeds are now
+development diagnostics, not fresh confirmatory trials. Prefer larger
+predeclared development cohorts for shared-memory questions, subject to
+actual inference cost and unchanged independent confirmation boundaries.
+Do not cherry-pick a successful seed or call these support proportions
+scientific discovery rates.
 
 ## Stop / failure semantics
 

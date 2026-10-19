@@ -11,7 +11,7 @@ from rsi_researcher.research import scientific_experiments as ex
 from rsi_researcher.research.scientific_agents import (
     DiagnosisAgent, DesignerAgent, CriticAgent, ReflectionAgent,
 )
-from rsi_researcher.research.scientific_loop import campaign, review_plan
+from rsi_researcher.research.scientific_loop import campaign, review_plan, fixed_rule_proposal
 
 class FakeModel:
     def __init__(self, reject=False, next_task="stop"):
@@ -203,6 +203,15 @@ class MultiAgentTests(unittest.TestCase):
         self.assertEqual(review_plan("agentcf_popularity",plan,{"decision":"approve"}),
                          "REJECTED_PREDECLARED_DIRECTION_MISMATCH")
 
+    def test_fixed_rule_uses_same_metric_floor_as_qwen(self):
+        for task, expected in (("coat_propensity",.0001),
+                               ("agentcf_memory",.2),
+                               ("agentcf_popularity",.02)):
+            rule=fixed_rule_proposal(task)
+            self.assertEqual(rule["minimum_abs_effect"],expected)
+            self.assertEqual(review_plan(task,rule,{"decision":"approve"}),
+                             "ACCEPTED_DESIGN_ONLY")
+
     def test_proposal_below_fixed_metric_floor_is_rejected(self):
         plan={"action":"item_memory_ablation","metric":"rank_change_excess",
               "direction":"increase","minimum_abs_effect":.001}
@@ -235,6 +244,49 @@ class MultiAgentTests(unittest.TestCase):
         self.assertFalse(verdict["forecast_passes_both_panels"])
         self.assertEqual(verdict["model_predicted_minimum_effect"],0.0)
         self.assertEqual(verdict["evaluation_minimum_effect"],.02)
+
+    def test_shared_memory_without_cross_user_read_abstains_not_finds_bias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model=FakeModel()
+            cohort=ex.prepare_cohort(set(),20261025,4)
+            prepared=ex.train_and_observe_agentcf(cohort,model,Path(tmp))
+            prepared["training"]["cross_user_candidate_memory_links"]=0
+            result=ex.run_fresh_agentcf("agentcf_memory","item_memory_ablation",
+                                       model,Path(tmp),cohort,prepared)
+            self.assertEqual(result["status"],"ABSTAIN_NO_CROSS_USER_MEMORY_PATH")
+            proposal={"action":"item_memory_ablation","metric":"rank_change_excess",
+                      "direction":"increase","minimum_abs_effect":.2}
+            audit=ex.independent_verdict("agentcf_memory","item_memory_ablation",
+                                         proposal,result)
+            self.assertEqual(audit["evidence_grade"],"inconclusive")
+            self.assertEqual(audit["independently_confirmed_discoveries"],0)
+
+    def test_memory_replication_requires_cross_user_support_in_both_panels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model=FakeModel()
+            cohort=ex.prepare_cohort(set(),20261025,4)
+            prepared=ex.train_and_observe_agentcf(cohort,model,Path(tmp))
+            prepared["training"]["cross_user_candidate_memory_links"]=1
+            prepared["training"]["cross_user_candidate_links_by_panel"]={"A":1,"B":0}
+            result=ex.run_fresh_agentcf("agentcf_memory","item_memory_ablation",
+                                       model,Path(tmp),cohort,prepared)
+            self.assertEqual(result["status"],
+                             "ABSTAIN_UNSUPPORTED_CROSS_USER_REPLICATION")
+
+    def test_scientific_abstention_does_not_count_as_executed(self):
+        from unittest.mock import patch
+        simulated={"action":"popularity_prompt",
+                   "status":"ABSTAIN_NO_CROSS_USER_MEMORY_PATH",
+                   "reason":"no cross-user memory path","panels":{}}
+        with tempfile.TemporaryDirectory() as tmp, patch(
+                "rsi_researcher.research.scientific_loop.experiments.execute",
+                return_value=simulated):
+            result=campaign(Path(tmp)/"abstain",["agentcf_popularity"],
+                            "fresh",FakeModel(),cohort_size=4)
+            self.assertEqual(result["status"],"COMPLETED_NO_EXECUTION")
+            self.assertEqual(result["executed_episodes"],0)
+            self.assertEqual(result["episodes"][0]["status"],
+                             "ABSTAIN_INSUFFICIENT_MECHANISM_SUPPORT")
 
     def test_independent_python_audit_rejects_malformed_numeric_plan(self):
         with self.assertRaises(ValueError):

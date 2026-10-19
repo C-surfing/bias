@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from rsi_researcher.research.scientific_comparison import compare_development
+from tests.test_scientific_loop import FakeModel
 
 
 def config():
@@ -35,7 +36,9 @@ class ComparisonTests(unittest.TestCase):
             return {"status":"COMPLETED_DEVELOPMENT","executed_episodes":1,
                     "independently_confirmed_discoveries":0}
         with tempfile.TemporaryDirectory() as tmp, patch(
-                "rsi_researcher.research.scientific_comparison.campaign",fake_campaign):
+                "rsi_researcher.research.scientific_comparison.campaign",fake_campaign), patch(
+                "rsi_researcher.research.scientific_comparison.prepare_shared_states",
+                return_value=({},{"requests":0,"usage_measured":False})):
             out=Path(tmp)/"compare"
             result=compare_development(out,["agentcf_popularity"],config(),
                 arms=("strong_rule","qwen_no_history","qwen_audited_history","qwen_shuffled_history"),
@@ -61,6 +64,44 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(unused["cohort_pairing"]["agentcf_popularity"]
                              ["history_records_seen_by_arm"]["qwen_audited_history"],0)
 
+    def test_real_orchestrator_reuses_one_trained_state_across_policy_arms(self):
+        """FakeModel exercises the production trainer and both real campaigns."""
+        created={}
+        def fresh_model(directory, *args, **kwargs):
+            model=FakeModel()
+            created[str(directory)]=model
+            return model
+        with tempfile.TemporaryDirectory() as tmp, patch(
+                "rsi_researcher.research.scientific_comparison.create_model",
+                side_effect=fresh_model), patch(
+                "rsi_researcher.research.scientific_loop.create_model",
+                side_effect=fresh_model):
+            result=compare_development(Path(tmp)/"paired",
+                ["agentcf_popularity"],config(),
+                arms=("strong_rule","qwen_no_history"),cohort_size=4,seed=20261025)
+            pairing=result["cohort_pairing"]["agentcf_popularity"]
+            self.assertEqual(result["status"],"COMPLETED_DEVELOPMENT")
+            self.assertTrue(pairing["identical_trained_agentcf_states"])
+            self.assertTrue(result["policy_arms_share_trained_state"])
+            self.assertGreater(result["shared_training_model_usage"]["requests"],0)
+            shared=Path(tmp)/"paired/shared_training"
+            self.assertEqual(len(list(shared.glob("task-*/prepared_agentcf.json"))),1)
+            self.assertFalse(list((Path(tmp)/"paired/strong_rule").rglob("prepared_agentcf.json")))
+            for arm in ("strong_rule","qwen_no_history"):
+                episode=Path(tmp)/"paired"/arm/"episode-001"
+                evidence=json.loads((episode/"evidence.json").read_text())
+                self.assertTrue(evidence["shared_preparation_cost_accounted_separately"])
+                facts=evidence["new_agentcf_input_observations"]
+                self.assertTrue(facts["observed_training_memory_changes"])
+                self.assertIn("mean_baseline_head_excess_vs_candidate_mix",facts)
+                self.assertNotIn('"target":',json.dumps(facts))
+                ranks=json.loads((episode/"agentcf_ranking_panels.json").read_text())
+                self.assertEqual(ranks["A"]["original"][0]["origin"],
+                                 "predecision_frozen_baseline")
+                self.assertEqual(ranks["A"]["original"][0]["calls"],0)
+            self.assertNotIn("diagnosis",created[str(Path(tmp)/"paired/strong_rule")].roles)
+            self.assertIn("diagnosis",created[str(Path(tmp)/"paired/qwen_no_history")].roles)
+
     def test_invalid_comparison_fails_before_executing(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/"bad"
@@ -80,7 +121,9 @@ class ComparisonTests(unittest.TestCase):
             directory.mkdir()
             return {"status":"COMPLETED_NO_EXECUTION","executed_episodes":0}
         with tempfile.TemporaryDirectory() as tmp, patch(
-                "rsi_researcher.research.scientific_comparison.campaign",rejected):
+                "rsi_researcher.research.scientific_comparison.campaign",rejected), patch(
+                "rsi_researcher.research.scientific_comparison.prepare_shared_states",
+                return_value=({},{"requests":0,"usage_measured":False})):
             result=compare_development(Path(tmp)/"test",["agentcf_memory"],
                                        config(),arms=("qwen_no_history",),cohort_size=4)
             paired=result["cohort_pairing"]["agentcf_memory"]
@@ -103,7 +146,9 @@ class ComparisonTests(unittest.TestCase):
                 "trained_state_sha256":kwargs["arm"]}))
             return {"status":"COMPLETED_DEVELOPMENT", "executed_episodes":1}
         with tempfile.TemporaryDirectory() as tmp, patch(
-                "rsi_researcher.research.scientific_comparison.campaign", varying_memory):
+                "rsi_researcher.research.scientific_comparison.campaign", varying_memory), patch(
+                "rsi_researcher.research.scientific_comparison.prepare_shared_states",
+                return_value=({},{"requests":0,"usage_measured":False})):
             result=compare_development(Path(tmp)/"comp",["agentcf_popularity"],
                 config(),arms=("strong_rule","qwen_no_history"),cohort_size=4)
             self.assertEqual(result["status"],"COMPLETED_DEVELOPMENT")
@@ -126,7 +171,9 @@ class ComparisonTests(unittest.TestCase):
                 "independently_confirmed_discoveries":0}))
             return {"status":"COMPLETED_DEVELOPMENT","executed_episodes":1}
         with tempfile.TemporaryDirectory() as tmp, patch(
-                "rsi_researcher.research.scientific_comparison.campaign",mismatch):
+                "rsi_researcher.research.scientific_comparison.campaign",mismatch), patch(
+                "rsi_researcher.research.scientific_comparison.prepare_shared_states",
+                return_value=({},{"requests":0,"usage_measured":False})):
             with self.assertRaisesRegex(ValueError,"inputs differ"):
                 compare_development(Path(tmp)/"mismatch",["agentcf_popularity"],
                                     config(),arms=("strong_rule","qwen_no_history"),

@@ -153,8 +153,132 @@ def record_row(model, kernel, state, query, profile, label):
             **score_author_ranking(ranking, query, profile)}
 
 
-def run_fresh_agentcf(task, action, model, output, cohort):
-    """Train a new, disjoint cohort and rerank in paired counterfactual conditions."""
+def train_and_observe_agentcf(cohort, model, output):
+    """One frozen training state and pre-decision ranking observations.
+
+    Queries include a known validation target, but only candidate IDs,
+    rankings and aggregate popularity diagnostics reach the research agents.
+    No validation quality or intervention outcomes are in their evidence.
+    """
+    initial, events, queries = cohort
+    output = Path(output)
+    prompts_path = LOCAL_DATA / "author_prompts.json"
+    prompts = json.loads(prompts_path.read_text(encoding="utf8"))
+    kernel = AgentCF(model, prompts)
+    profile = author_profile(LOCAL_DATA)
+    state = deepcopy(initial)
+    training, memory_examples, item_writers = [], [], {}
+    for event in events:
+        model.scope = {"experiment_stage": "shared_training"}
+        before = model.requests
+        previous_user = state["users"][event["user"]]
+        previous_item = state["items"][event["positive"]]["memory"]
+        state = kernel.event(state, event, "original_update")
+        training.append({"event": event["event_id"], "calls": model.requests-before})
+        if state["items"][event["positive"]]["memory"] != previous_item:
+            item_writers.setdefault(event["positive"], set()).add(event["user"])
+        if len(memory_examples) < 3:
+            memory_examples.append({
+                "event_id": event["event_id"], "observed_training_user": event["user"],
+                "observed_positive_item": event["positive"],
+                "user_before": previous_user[:350],
+                "user_after": state["users"][event["user"]][:350],
+                "item_before": previous_item[:350],
+                "item_after": state["items"][event["positive"]]["memory"][:350],
+            })
+
+    rankings = {}
+    for query in queries:
+        model.scope = {"experiment_stage": "predecision_baseline", "query": query["query_id"]}
+        rankings[query["query_id"]] = kernel.rank(state, query)
+
+    user_changed = sum(initial["users"][u] != memory for u,memory in state["users"].items())
+    item_changed = {i for i in state["items"]
+                    if state["items"][i]["memory"] != initial["items"][i]["memory"]}
+    candidates = {i for q in queries for i in q["candidates"]}
+    # True shared-memory support requires a training writer DIFFERENT from
+    # the later ranking user, not just any text mutation.
+    cross_user_links = [
+        {"query_id":q["query_id"],"reading_user":q["user"],
+         "item_id":i,"other_writers":sorted(item_writers[i]-{q["user"]})}
+        for q in queries for i in q["candidates"]
+        if i in item_changed and item_writers.get(i,set())-{q["user"]}
+    ]
+    ordered_queries = sorted(queries,key=lambda q:q["query_id"])
+    half = len(ordered_queries)//2
+    cross_user_by_panel = {
+        "A":sum(q["query_id"]==x["query_id"] for q in ordered_queries[:half]
+                for x in cross_user_links),
+        "B":sum(q["query_id"]==x["query_id"] for q in ordered_queries[half:]
+                for x in cross_user_links),
+    }
+    from rsi_researcher.datasets.author import popularity_group
+    def is_head(i):
+        return popularity_group(i, profile["training_item_counts"],
+                                profile["head_min_count"], profile["tail_max_count"]) == "head"
+    head_deltas = [
+        sum(map(is_head, rankings[q["query_id"]][:5]))/5 -
+        sum(map(is_head, q["candidates"]))/len(q["candidates"])
+        for q in queries
+    ]
+    observation = {
+        **preintervention_observations(cohort),
+        "source": "trained AgentCF state and predecision baseline rankings, without relevance labels",
+        "user_memories_changed_after_training": user_changed,
+        "item_memories_changed_after_training": len(item_changed),
+        "changed_item_memories_in_query_candidates": len(item_changed & candidates),
+        "cross_user_candidate_memory_links": len(cross_user_links),
+        "cross_user_candidate_links_by_panel": cross_user_by_panel,
+        "queries_with_cross_user_memory_links": len({x["query_id"] for x in cross_user_links}),
+        "cross_user_memory_examples": cross_user_links[:3],
+        "mean_baseline_head_excess_vs_candidate_mix": mean(head_deltas),
+        "observed_training_memory_changes": memory_examples,
+        "observed_example_rankings": [
+            {"query_id":q["query_id"], "top5_ids":rankings[q["query_id"]][:5]}
+            for q in queries[:min(2,len(queries))]],
+        "interpretation": "Conditional memory/ranking observation, not proof of "
+                          "causal popularity bias or debias effectiveness. "
+                          "Unknown relevance and quality scores remain withheld.",
+    }
+    training_info = {
+        "training": training, "cohort_users": sorted(initial["users"]),
+        "completed_events": len(state["completed"]),
+        "prompts_sha256": source_digest(prompts_path),
+        "trained_state_sha256": sha256(json.dumps(
+            state, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest(),
+        "baseline_rankings_sha256": sha256(json.dumps(
+            rankings, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest(),
+        "input_sha256": scientific_input_fingerprint(cohort),
+        "cross_user_candidate_memory_links": len(cross_user_links),
+        "cross_user_candidate_links_by_panel": cross_user_by_panel,
+        "data_protocol": "author_training_only_and_one_known_validation_target",
+    }
+    prepared = {"state":state, "baseline_rankings":rankings,
+                "training":training_info, "observation":observation}
+    atomic_json(output / "prepared_agentcf.json", prepared)
+    return prepared
+
+
+def load_prepared_agentcf(path, cohort):
+    """Check that the frozen state and rankings belong to this input cohort."""
+    prepared = json.loads(Path(path).read_text(encoding="utf8"))
+    meta = prepared["training"]
+    if meta["input_sha256"] != scientific_input_fingerprint(cohort):
+        raise ValueError("prepared state was trained on different inputs")
+    state, ranks = prepared["state"], prepared["baseline_rankings"]
+    if meta["trained_state_sha256"] != sha256(json.dumps(
+            state, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest():
+        raise ValueError("frozen trained state changed")
+    if meta["baseline_rankings_sha256"] != sha256(json.dumps(
+            ranks, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest():
+        raise ValueError("frozen baseline rankings changed")
+    if set(ranks) != {q["query_id"] for q in cohort[2]}:
+        raise ValueError("prepared baseline queries differ")
+    return prepared
+
+
+def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
+    """Apply the chosen intervention on the frozen, pre-decision trained state."""
     if task not in ("agentcf_memory", "agentcf_popularity"):
         raise ValueError("not an AgentCF research task")
     if action not in task_spec(task)["actions"]:
@@ -163,31 +287,39 @@ def run_fresh_agentcf(task, action, model, output, cohort):
         raise ValueError("unsupported fresh AgentCF action")
     initial, events, queries = cohort
     output = Path(output)
-    prompts_path = LOCAL_DATA / "author_prompts.json"
-    prompts = json.loads(prompts_path.read_text(encoding="utf8"))
+    if prepared is None:
+        prepared = train_and_observe_agentcf(cohort, model, output)
+    else:
+        prepared = load_prepared_agentcf(prepared, cohort) if isinstance(prepared,(str,Path)) else prepared
+    # Audit the same training state across all arms; separate the one-time
+    # shared training/probing cost from research-arm calls.
+    atomic_json(output / "agentcf_training.json", prepared["training"])
+    state = prepared["state"]
+    originals = prepared["baseline_rankings"]
+    prompts = json.loads((LOCAL_DATA / "author_prompts.json").read_text(encoding="utf8"))
     profile = author_profile(LOCAL_DATA)
-    model.scope = {"experiment_stage": "training", "task": task}
-    kernel = AgentCF(model, prompts)
-    state = deepcopy(initial)
-    training = []
-    for event in events:
-        before = model.requests
-        state = kernel.event(state, event, "original_update")
-        training.append({"event": event["event_id"], "calls": model.requests - before})
-    atomic_json(output / "agentcf_training.json", {
-        "training": training, "cohort_users": sorted(initial["users"]),
-        "completed_events": len(state["completed"]),
-        "prompts_sha256": source_digest(prompts_path),
-        "trained_state_sha256": sha256(json.dumps(
-            state, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest(),
-        "data_protocol": "author_training_only_and_one_known_validation_target",
-    })
     modified = deepcopy(state)
     candidates = {item for q in queries for item in q["candidates"]}
     changed = sum(modified["items"][i]["memory"] != initial["items"][i]["memory"]
                   for i in candidates)
     for item in candidates:
         modified["items"][item]["memory"] = initial["items"][item]["memory"]
+    if task == "agentcf_memory" and action == "item_memory_ablation" and not (
+            prepared["training"]["cross_user_candidate_memory_links"]):
+        return {"action":action, "status":"ABSTAIN_NO_CROSS_USER_MEMORY_PATH",
+                "training_events":len(events), "users":sorted(initial["users"]),
+                "item_memories_changed":changed, "panels":{},
+                "independent_confirmation":False,
+                "reason":"No observed item memory written by another user appears "
+                         "in the evaluation candidate panels"}
+    if task == "agentcf_memory" and action == "item_memory_ablation" and any(
+            n==0 for n in prepared["training"]["cross_user_candidate_links_by_panel"].values()):
+        return {"action":action,"status":"ABSTAIN_UNSUPPORTED_CROSS_USER_REPLICATION",
+                "training_events":len(events),"users":sorted(initial["users"]),
+                "item_memories_changed":changed,"panels":{},
+                "independent_confirmation":False,
+                "reason":"At least one preregistered development panel has no "
+                         "cross-user written candidate memory to test"}
     if action == "item_memory_ablation" and changed == 0:
         return {"action":action, "status":"ABSTAIN_NO_UPDATED_CANDIDATE_MEMORY",
                 "training_events":len(events), "users":sorted(initial["users"]),
@@ -196,33 +328,36 @@ def run_fresh_agentcf(task, action, model, output, cohort):
                 "reason":"No updated Item Memory appears in the new candidate panels"}
     intervention_prompts = (author_intervention(prompts, "neutralize_rank_popularity")
                             if action == "popularity_prompt" else prompts)
-    subsets = {"A": sorted(queries, key=lambda q: q["query_id"])[:len(queries)//2],
-               "B": sorted(queries, key=lambda q: q["query_id"])[len(queries)//2:]}
-    setups = {
-        "original": (state, prompts),
-        "repeat": (state, prompts),
-        action: (modified if action == "item_memory_ablation" else state,
-                 intervention_prompts),
-    }
+    subsets = {"A": sorted(queries, key=lambda q:q["query_id"])[:len(queries)//2],
+               "B": sorted(queries, key=lambda q:q["query_id"])[len(queries)//2:]}
     panels = {}
-    for group, queries_in_group in subsets.items():
+    for group, group_queries in subsets.items():
         panels[group] = {}
-        for label, (current_state, current_prompts) in setups.items():
-            ranks = AgentCF(model, current_prompts)
-            panels[group][label] = [record_row(model, ranks, current_state, q, profile, label)
-                                    for q in queries_in_group]
+        for label in ("original", "repeat", action):
+            if label == "original":
+                panels[group][label] = [
+                    {"query_id":q["query_id"],"ranking":originals[q["query_id"]],
+                     "calls":0,"origin":"predecision_frozen_baseline",
+                     **score_author_ranking(originals[q["query_id"]],q,profile)}
+                    for q in group_queries]
+            else:
+                current_state = (modified if label == "item_memory_ablation" else state)
+                current_prompts = intervention_prompts if label == action else prompts
+                kernel = AgentCF(model, current_prompts)
+                panels[group][label] = [
+                    record_row(model,kernel,current_state,q,profile,label)
+                    for q in group_queries]
     atomic_json(output / "agentcf_ranking_panels.json", panels)
     return {"action": action, "status": "FRESH_AGENTCF_DEVELOPMENT",
-            "source": "newly trained disjoint users from the same author CDs dataset",
+            "source": "one frozen trained AgentCF state and predecision baseline",
             "training_events": len(events), "users": sorted(initial["users"]),
             "item_memories_changed": changed, "panels": panels,
             "independent_confirmation": False,
             "limitations": [
-                "same author CDs data and previously studied mechanism families",
-                "only one known positive validation item per query; other relevance unknown",
-                "new users do not establish new mechanisms or independent confirmation",
+                "author CDs data and previously studied mechanism families",
+                "only one known positive validation item; other relevance unknown",
+                "shared training removes training-state confounding, not ranking sampling noise",
             ]}
-
 
 def archive_replay(task, action):
     """Previously saved results, never a NEW scientific experiment."""
@@ -246,7 +381,7 @@ def archive_replay(task, action):
     }
 
 
-def execute(task, action, mode, model, output, cohort=None):
+def execute(task, action, mode, model, output, cohort=None, prepared=None):
     if mode == "archive":
         return archive_replay(task, action)
     if mode != "fresh":
@@ -258,7 +393,7 @@ def execute(task, action, mode, model, output, cohort=None):
         }
     if cohort is None:
         raise ValueError("fresh AgentCF requires preregistered cohort")
-    return run_fresh_agentcf(task, action, model, output, cohort)
+    return run_fresh_agentcf(task, action, model, output, cohort, prepared)
 
 
 
@@ -338,7 +473,7 @@ def panel_measurements(task, action, result):
 def independent_verdict(task, action, plan, result):
     if action != plan["action"] or plan["metric"] not in action_metrics(task, action):
         raise ValueError("frozen plan and actual result disagree")
-    if result.get("status") == "ABSTAIN_NO_UPDATED_CANDIDATE_MEMORY":
+    if result.get("status","").startswith("ABSTAIN_"):
         return {"task":task, "action":action, "forecast_metric":plan["metric"],
                 "panel_measurements":[], "forecast_passes_both_panels":False,
                 "mechanism_development_check":None, "evidence_grade":"inconclusive",

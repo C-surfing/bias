@@ -11,13 +11,40 @@ import json
 
 from rsi_researcher.research import crossbias_discovery as source
 from rsi_researcher.research.scientific_loop import campaign, digest
-from rsi_researcher.runtime.client import atomic_json
+from rsi_researcher.research import scientific_experiments as experiments
+from rsi_researcher.runtime.client import atomic_json, usage_summary
+from rsi_researcher.runtime.limits import RunLimits
 from rsi_researcher.runtime.models import create_model, model_description
 
 
 DEFAULT_ARMS=("strong_rule","qwen_no_history",
               "qwen_audited_history","qwen_shuffled_history")
 
+
+
+def prepare_shared_states(output, tasks, config, seed, cohort_size):
+    """Train/probe once per new AgentCF task, then use the same state for all arms."""
+    if not any(task.startswith("agentcf_") for task in tasks):
+        return {}, {"requests":0, "usage_measured":True}
+    folder = Path(output) / "shared_training"
+    folder.mkdir()
+    source.verify()
+    limits = RunLimits(folder, **config["budget"])
+    model = create_model(folder, limits.max_requests, limits, config)
+    prepared_by_task, excluded = {}, set()
+    for i, task in enumerate(tasks):
+        if not task.startswith("agentcf_"):
+            continue
+        cohort = experiments.prepare_cohort(excluded, seed+i, cohort_size)
+        directory = folder / f"task-{i+1:03d}-{task}"
+        directory.mkdir()
+        experiments.train_and_observe_agentcf(cohort, model, directory)
+        prepared_by_task[task] = directory / "prepared_agentcf.json"
+        excluded.update(cohort[0]["users"])
+    cost = (usage_summary(folder) if (folder/"calls.jsonl").is_file()
+            else {"requests":model.requests,"usage_measured":False,
+                  "reason":"test model without real token logs"})
+    return prepared_by_task, cost
 
 def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
                         cohort_size=6, seed=20261017, prior_campaign=None,
@@ -44,6 +71,7 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
         "arms":list(arms),"tasks":list(tasks),"cohort_size":cohort_size,
         "cohort_seed":seed,
         "same_seed_and_causal_operator_registry_across_arms":True,
+        "agentcf_training_and_predecision_baseline_shared_across_arms":True,
         "fixed_model_request_and_token_budgets":config["budget"],
         "model":model_description(config),
         "reference_protocol_hash":digest(source.RUN/"protocol.json"),
@@ -56,13 +84,20 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
     result={"status":"RUNNING","arms":{},"independent_discoveries":0}
     atomic_json(output/"comparison.json",result)
     try:
-        # Each arm is a different research-policy run, but reuses the same
-        # precisely frozen development user cohort for matched comparison.
+        # Shared training and pre-decision diagnostic ranking is a COMMON cost.
+        # All arms see the same trained state, not independent Qwen trajectories.
+        prepared_by_task, shared_cost = prepare_shared_states(
+            output, tasks, config, seed, cohort_size)
+        result["shared_training_model_usage"] = shared_cost
+        result["shared_training_state_by_task"] = {
+            task: str(path) for task,path in prepared_by_task.items()}
+        atomic_json(output/"comparison.json",result)
         for arm in arms:
             directory=output/arm
             run=campaign(directory,tasks,"fresh",max_episodes=len(tasks),
                          cohort_size=cohort_size, seed=seed, config=config, arm=arm,
-                         prior_campaign=prior_campaign, skill_library=skill_library)
+                         prior_campaign=prior_campaign, skill_library=skill_library,
+                         prepared_by_task=prepared_by_task)
             result["arms"][arm]=run
             atomic_json(output/"comparison.json",result)
         pairing={}
@@ -89,9 +124,8 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
                     executed[arm]=(audit.get("task")==task and
                         audit.get("action")==execution.get("action") and
                         audit.get("independently_confirmed_discoveries")==0 and
-                        execution.get("status") not in (
-                            "ABSTAIN_NO_UPDATED_CANDIDATE_MEMORY",
-                            "ARCHIVED_DEVELOPMENT_REPLAY"))
+                        not execution.get("status","").startswith("ABSTAIN_") and
+                        execution.get("status") != "ARCHIVED_DEVELOPMENT_REPLAY")
                 else:
                     executed[arm]=False
             all_executed=all(executed.values())
