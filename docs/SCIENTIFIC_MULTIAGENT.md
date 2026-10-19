@@ -46,7 +46,7 @@ Agent stacks.
 | Coat propensity | `propensity_shuffle` | `propensity_placebo_margin`: best shuffled Brier minus matched Brier | Negative propensity control |
 | Coat utility | `split_utility` | `brier_gain`, `ndcg_delta`, `tail_delta` | 99% quality guard |
 | Coat utility | `gamma_stress` | `gamma_reference_margin` | Separate sensitivity question |
-| AgentCF Memory | `item_memory_ablation`, `popularity_prompt` | `rank_change_excess`, `ndcg_delta`, `head_excess_delta` | Existing candidate support required |
+| AgentCF Memory | broad Item Memory, targeted cross-user Item Memory, popularity prompt | General and linked-reader rank-change excess, NDCG, head excess | Broad memory effects vs reader-specific propagation |
 | AgentCF Popularity | `popularity_prompt`, `item_memory_ablation` | Same measured paired effects | Head exposure != identified popularity bias |
 
 Python refuses any task/action/metric mismatch EVEN IF Qwen Critic approves it.
@@ -60,7 +60,7 @@ the hypothesis and its numeric intervention forecast.
 
 Each metric has a shared minimum development effect fixed by Python before
 Qwen proposes a number (Brier/gamma/placebo 0.0001, NDCG/tail/head 0.02,
-excess rank changes 0.20). A model cannot pass a prediction by setting
+excess rank changes, including linked readers, 0.20). A model cannot pass a prediction by setting
 a smaller threshold. Near-zero point estimates in tiny panels are NOT
 evidence of equivalence. These thresholds are effect screens, not p-values.
 Numbers are computed from exactly two disjoint *development* panels.
@@ -70,6 +70,38 @@ shared Item Memory also abstains when no other-user memory writer appears in
 a ranking user's candidate panel, or when one of the two development panels
 has no cross-user memory path. Such abstentions are NOT completed experiments. The randomized
 Coat *holdout* and AgentCF hidden/unlabeled relevance never enter this loop.
+
+### Scientific outcome semantics and experiment choice
+
+The independent audit now separates mechanism direction/effect evidence,
+known-target NDCG@5 utility costs, provisional debias proxy changes,
+falsification limits and independent confirmation. A measurable mechanism
+may reduce utility; the older combined quality-plus-forecast field is
+retained only for compatible consumers. Near-zero point estimates do not
+establish equivalence, and development observations do not exclude all
+competing causal explanations.
+
+The Designer can explicitly abstain BEFORE the Critic and execution when
+there is no discriminating legal experiment. Abstention is NOT counted as
+an executed or successful experiment. Otherwise, the Designer chooses one
+task-legal action with a prospective numeric forecast and explains its
+diagnostic value and cost.
+
+A new targeted cross-user Item Memory ablation reverts only a candidate
+memory written by OTHER training users, not by the current reader. User
+memories, other item memories, query candidates and prompt remain unchanged.
+Its registered primary metric measures linked-reader ranking changes
+beyond same-condition repeat noise; unlinked readers are separately
+reported as a negative-control diagnostic. Both development panels must
+contain eligible writer-reader links or the mechanism task abstains.
+This is narrower than broad Item Memory ablation; it does not identify
+the specific origin of a false negative-feedback interpretation or prove
+that changed recommendations are harmful.
+
+New science actions are defined outside code-hashed historical Cross-Bias
+task definitions. Strategy comparisons now also report whether actual
+audited history caused different frozen actions or numeric predictions.
+Neither changed wording nor observed history consumption proves RSI gains.
 
 ## Three ways to run
 

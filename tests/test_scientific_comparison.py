@@ -63,6 +63,8 @@ class ComparisonTests(unittest.TestCase):
             self.assertFalse(unused["memory_comparison_interpretable"])
             self.assertEqual(unused["cohort_pairing"]["agentcf_popularity"]
                              ["history_records_seen_by_arm"]["qwen_audited_history"],0)
+            self.assertIsNone(unused["cohort_pairing"]["agentcf_popularity"]
+                              ["audited_memory_decision_change"])
 
     def test_real_orchestrator_reuses_one_trained_state_across_policy_arms(self):
         """FakeModel exercises the production trainer and both real campaigns."""

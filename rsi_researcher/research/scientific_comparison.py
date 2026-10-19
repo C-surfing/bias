@@ -139,6 +139,24 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
                 same_users, same_inputs, matched=None, None, all_executed
             same_trained=(all(trained.values()) and len(set(trained.values()))==1
                           ) if task.startswith("agentcf_") else None
+            # A history card being visible is not evidence of RSI: record
+            # whether it actually changes the frozen experimental decision.
+            no_history=decisions.get("qwen_no_history")
+            audited=decisions.get("qwen_audited_history")
+            history_seen=(history.get("qwen_audited_history",0)>0 and
+                          history.get("qwen_no_history",0)==0)
+            if no_history is None or audited is None or not history_seen:
+                history_change=None
+            else:
+                history_change={
+                    "action_changed":no_history.get("action")!=audited.get("action"),
+                    "forecast_changed":any(
+                        no_history.get(k)!=audited.get(k)
+                        for k in ("metric","direction","minimum_abs_effect")),
+                    "both_executed":bool(executed.get("qwen_no_history") and
+                                         executed.get("qwen_audited_history")),
+                    "proves_research_improvement":False,
+                }
             pairing[task]={"identical_frozen_user_cohorts":same_users,
                            "identical_frozen_experiment_inputs":same_inputs,
                            "identical_trained_agentcf_states":same_trained,
@@ -148,6 +166,7 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
                            "all_arms_ran_experiment":all_executed,
                            "execution_by_arm":executed,
                            "history_records_seen_by_arm":history,
+                           "audited_memory_decision_change":history_change,
                            "frozen_scientific_decisions_by_arm":{
                                arm:({k:plan.get(k) for k in ("action","metric","direction",
                                                              "minimum_abs_effect")}

@@ -46,6 +46,7 @@ DEVELOPMENT_EFFECT_FLOOR = {
     "ndcg_delta": 0.02,
     "tail_delta": 0.02,
     "rank_change_excess": 0.2,
+    "linked_rank_change_excess": 0.2,
     "head_excess_delta": 0.02,
 }
 
@@ -54,20 +55,24 @@ ACTION_METRICS = {
     "propensity_shuffle": ("propensity_placebo_margin",),
     "split_utility": ("brier_gain", "ndcg_delta", "tail_delta"),
     "item_memory_ablation": ("rank_change_excess", "ndcg_delta", "head_excess_delta"),
+    "cross_user_memory_ablation": ("linked_rank_change_excess", "ndcg_delta", "head_excess_delta"),
     "popularity_prompt": ("head_excess_delta", "ndcg_delta", "rank_change_excess"),
 }
 
 
+# Extend only the new science task, never mutate the code-hashed older
+# Cross-Bias task definitions or their frozen development records.
+EXTRA_SCIENCE_ACTIONS = {"agentcf_memory": ("cross_user_memory_ablation",)}
+
+
 def action_metrics(task, action):
-    if task not in reference.CATEGORIES or action not in reference.CATEGORIES[task]["actions"]:
+    if task not in reference.CATEGORIES or action not in task_spec(task)["actions"]:
         raise ValueError("action is not registered for this task")
     return ACTION_METRICS[action]
 
 
 def metrics_by_action(task):
-    if task not in reference.CATEGORIES:
-        raise ValueError("unknown task")
-    return {a: list(action_metrics(task, a)) for a in reference.CATEGORIES[task]["actions"]}
+    return {a: list(action_metrics(task, a)) for a in task_spec(task)["actions"]}
 
 
 def task_metrics(task):
@@ -78,7 +83,8 @@ def task_metrics(task):
 def task_spec(task):
     if task not in reference.CATEGORIES:
         raise ValueError("unregistered research task")
-    return reference.CATEGORIES[task]
+    spec = reference.CATEGORIES[task]
+    return {**spec, "actions":[*spec["actions"], *EXTRA_SCIENCE_ACTIONS.get(task,())]}
 
 
 def known_prior_users():
@@ -200,9 +206,10 @@ def train_and_observe_agentcf(cohort, model, output):
     # the later ranking user, not just any text mutation.
     cross_user_links = [
         {"query_id":q["query_id"],"reading_user":q["user"],
-         "item_id":i,"other_writers":sorted(item_writers[i]-{q["user"]})}
+         "item_id":i,"other_writers":sorted(item_writers[i])}
         for q in queries for i in q["candidates"]
-        if i in item_changed and item_writers.get(i,set())-{q["user"]}
+        if i in item_changed and item_writers.get(i,set()) and
+           q["user"] not in item_writers[i]
     ]
     ordered_queries = sorted(queries,key=lambda q:q["query_id"])
     half = len(ordered_queries)//2
@@ -249,6 +256,8 @@ def train_and_observe_agentcf(cohort, model, output):
         "baseline_rankings_sha256": sha256(json.dumps(
             rankings, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest(),
         "input_sha256": scientific_input_fingerprint(cohort),
+        "item_memory_writer_users": {item:sorted(users)
+                                     for item,users in item_writers.items()},
         "cross_user_candidate_memory_links": len(cross_user_links),
         "cross_user_candidate_links_by_panel": cross_user_by_panel,
         "data_protocol": "author_training_only_and_one_known_validation_target",
@@ -283,7 +292,8 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
         raise ValueError("not an AgentCF research task")
     if action not in task_spec(task)["actions"]:
         raise ValueError("unregistered experiment action")
-    if action not in ("item_memory_ablation", "popularity_prompt"):
+    if action not in ("item_memory_ablation", "cross_user_memory_ablation",
+                      "popularity_prompt"):
         raise ValueError("unsupported fresh AgentCF action")
     initial, events, queries = cohort
     output = Path(output)
@@ -304,7 +314,8 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
                   for i in candidates)
     for item in candidates:
         modified["items"][item]["memory"] = initial["items"][item]["memory"]
-    if task == "agentcf_memory" and action == "item_memory_ablation" and not (
+    if task == "agentcf_memory" and action in (
+            "item_memory_ablation","cross_user_memory_ablation") and not (
             prepared["training"]["cross_user_candidate_memory_links"]):
         return {"action":action, "status":"ABSTAIN_NO_CROSS_USER_MEMORY_PATH",
                 "training_events":len(events), "users":sorted(initial["users"]),
@@ -312,7 +323,8 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
                 "independent_confirmation":False,
                 "reason":"No observed item memory written by another user appears "
                          "in the evaluation candidate panels"}
-    if task == "agentcf_memory" and action == "item_memory_ablation" and any(
+    if task == "agentcf_memory" and action in (
+            "item_memory_ablation","cross_user_memory_ablation") and any(
             n==0 for n in prepared["training"]["cross_user_candidate_links_by_panel"].values()):
         return {"action":action,"status":"ABSTAIN_UNSUPPORTED_CROSS_USER_REPLICATION",
                 "training_events":len(events),"users":sorted(initial["users"]),
@@ -320,7 +332,7 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
                 "independent_confirmation":False,
                 "reason":"At least one preregistered development panel has no "
                          "cross-user written candidate memory to test"}
-    if action == "item_memory_ablation" and changed == 0:
+    if action in ("item_memory_ablation","cross_user_memory_ablation") and changed == 0:
         return {"action":action, "status":"ABSTAIN_NO_UPDATED_CANDIDATE_MEMORY",
                 "training_events":len(events), "users":sorted(initial["users"]),
                 "item_memories_changed":0, "panels":{},
@@ -331,6 +343,9 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
     subsets = {"A": sorted(queries, key=lambda q:q["query_id"])[:len(queries)//2],
                "B": sorted(queries, key=lambda q:q["query_id"])[len(queries)//2:]}
     panels = {}
+    targeted_removals = {}
+    writers = {i:set(users) for i,users in
+               prepared["training"].get("item_memory_writer_users",{}).items()}
     for group, group_queries in subsets.items():
         panels[group] = {}
         for label in ("original", "repeat", action):
@@ -341,17 +356,30 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
                      **score_author_ranking(originals[q["query_id"]],q,profile)}
                     for q in group_queries]
             else:
-                current_state = (modified if label == "item_memory_ablation" else state)
                 current_prompts = intervention_prompts if label == action else prompts
                 kernel = AgentCF(model, current_prompts)
-                panels[group][label] = [
-                    record_row(model,kernel,current_state,q,profile,label)
-                    for q in group_queries]
+                rows = []
+                for q in group_queries:
+                    if label == "cross_user_memory_ablation":
+                        # Only items written by OTHER users, never by this
+                        # reader, are reverted in this reader's query.
+                        affected = [i for i in q["candidates"]
+                                    if writers.get(i) and q["user"] not in writers[i]
+                                    and state["items"][i]["memory"] != initial["items"][i]["memory"]]
+                        targeted_removals[q["query_id"]] = affected
+                        current_state = deepcopy(state)
+                        for i in affected:
+                            current_state["items"][i]["memory"] = initial["items"][i]["memory"]
+                    else:
+                        current_state = modified if label == "item_memory_ablation" else state
+                    rows.append(record_row(model,kernel,current_state,q,profile,label))
+                panels[group][label] = rows
     atomic_json(output / "agentcf_ranking_panels.json", panels)
     return {"action": action, "status": "FRESH_AGENTCF_DEVELOPMENT",
             "source": "one frozen trained AgentCF state and predecision baseline",
             "training_events": len(events), "users": sorted(initial["users"]),
             "item_memories_changed": changed, "panels": panels,
+            "targeted_cross_user_memory_removals": targeted_removals,
             "independent_confirmation": False,
             "limitations": [
                 "author CDs data and previously studied mechanism families",
@@ -461,11 +489,34 @@ def panel_measurements(task, action, result):
         shifted = mean(a["ranking"] != b["ranking"] for a,b in zip(baseline,changed))
         pre_ndcg = mean(r["ndcg_at_5"] for r in baseline)
         post_ndcg = mean(r["ndcg_at_5"] for r in changed)
+        linked_metrics = {}
+        if action == "cross_user_memory_ablation":
+            exposed = result.get("targeted_cross_user_memory_removals",{})
+            if set(exposed) != {row["query_id"] for panel in result_panels.values()
+                               for row in panel["original"]}:
+                raise ValueError("targeted ablation lacks complete query exposure mapping")
+            linked = [i for i,qid in enumerate(ids) if exposed[qid]]
+            unlinked = [i for i,qid in enumerate(ids) if not exposed[qid]]
+            if not linked:
+                raise ValueError("targeted ablation has no cross-user memory readers in panel")
+            def change_excess(indices):
+                return (mean(baseline[i]["ranking"] != changed[i]["ranking"]
+                             for i in indices)
+                        -mean(baseline[i]["ranking"] != repeat[i]["ranking"]
+                              for i in indices))
+            linked_metrics = {
+                "linked_query_count":len(linked),
+                "unlinked_query_count":len(unlinked),
+                "linked_rank_change_excess":change_excess(linked),
+                "unlinked_rank_change_excess":(
+                    change_excess(unlinked) if unlinked else None),
+            }
         per.append({"rank_change_excess": shifted-noisy,
+                    **linked_metrics,
                     "ndcg_delta": post_ndcg-pre_ndcg,
                     "head_excess_delta": mean(r["excess_popularity_exposure"] for r in changed) -
                                          mean(r["excess_popularity_exposure"] for r in baseline),
-                    "quality_gate": pre_ndcg > 0 and post_ndcg >= .99*pre_ndcg,
+                    "quality_gate": post_ndcg >= .99*pre_ndcg,
                     "baseline_repeat_change_rate": noisy})
     return per
 
@@ -476,6 +527,11 @@ def independent_verdict(task, action, plan, result):
     if result.get("status","").startswith("ABSTAIN_"):
         return {"task":task, "action":action, "forecast_metric":plan["metric"],
                 "panel_measurements":[], "forecast_passes_both_panels":False,
+                "mechanism_forecast_passes_both_panels":False,
+                "mechanism_forecast_state":"NOT_EXECUTED",
+                "known_target_quality_guard_passes_both_panels":None,
+                "debias_utility_state":"NOT_EVALUATED",
+                "falsification_state":"NOT_EXECUTED",
                 "mechanism_development_check":None, "evidence_grade":"inconclusive",
                 "independently_confirmed_discoveries":0, "reason":result["reason"]}
     panels = panel_measurements(task, action, result)
@@ -491,10 +547,29 @@ def independent_verdict(task, action, plan, result):
         if direction == "decrease":
             return value <= -threshold and value < 0
         return abs(value) <= max(0.02, threshold)
-    # A near-zero point estimate in two tiny panels does NOT establish
-    # equivalence. That would require a powered precision-bound protocol.
-    predicts = (direction != "approximately_zero" and
-                all(conforms(p[metric]) and p["quality_gate"] for p in panels))
+    # Mechanism / forecast evidence and application utility are separate.
+    # A real effect can make known-target quality worse; do not erase it.
+    predictions = [conforms(p[metric]) for p in panels]
+    predicts = direction != "approximately_zero" and all(predictions)
+    quality = all(p["quality_gate"] for p in panels)
+    # The two tiny panels cannot establish equivalence or causal attribution.
+    if direction == "approximately_zero":
+        forecast_state = "EQUIVALENCE_UNIDENTIFIED"
+    elif predicts:
+        forecast_state = "DIRECTION_REPLICATED_DEVELOPMENT"
+    elif any(predictions):
+        forecast_state = "PANEL_HETEROGENEITY_OR_NOISE"
+    else:
+        forecast_state = "PREDICTION_NOT_SUPPORTED"
+    # Head-exposure reduction is a proxy only, not independently confirmed
+    # improvement to the user's utility or causal population popularity bias.
+    proxy_improved = (
+        task == "agentcf_popularity" and action == "popularity_prompt" and
+        metric == "head_excess_delta" and direction == "decrease" and predicts)
+    debias_state = ("PROXY_GAIN_WITH_QUALITY_GUARD_DEVELOPMENT_ONLY"
+                    if proxy_improved and quality else
+                    "PROXY_GAIN_WITH_UTILITY_COST" if proxy_improved else
+                    "NO_REGISTERED_DEBIAS_GAIN")
     # Development forecast and action-specific falsification are distinct.
     # Both MUST remain independent of any language-model reflection.
     mechanism = (reference.assess(task, action, result)
@@ -506,7 +581,15 @@ def independent_verdict(task, action, plan, result):
             "predeclared_direction": direction,
             "model_predicted_minimum_effect": plan["minimum_abs_effect"],
             "evaluation_minimum_effect": threshold,
-            "panel_measurements": panels, "forecast_passes_both_panels": predicts,
+            "panel_measurements": panels,
+            "forecast_passes_both_panels": bool(predicts and quality),
+            "mechanism_forecast_passes_both_panels": bool(predicts),
+            "mechanism_forecast_state": forecast_state,
+            "panel_forecast_matches": predictions,
+            "known_target_quality_guard_passes_both_panels": quality,
+            "debias_utility_state": debias_state,
+            "falsification_state": ("DEVELOPMENT_PATTERN_ONLY_ALTERNATIVE_NOT_EXCLUDED"
+                                   if predicts else "COMPETING_EXPLANATION_UNRESOLVED"),
             "mechanism_development_check": mechanism,
             "evidence_grade": "previous_development_only" if result.get("execution_kind") == "ARCHIVED_DEVELOPMENT_REPLAY"
                               else "new_unconfirmed_development",

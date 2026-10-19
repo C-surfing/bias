@@ -88,7 +88,7 @@ def public_evidence(task, experience, arm="qwen_audited_history", skill_library=
         raise ValueError("promoted-skill arm requires a validated eligible skill")
     return {
         "question": source.CATEGORIES[task]["question"],
-        "registered_actions": list(source.CATEGORIES[task]["actions"]),
+        "registered_actions": list(experiments.task_spec(task)["actions"]),
         "registered_metrics": list(experiments.task_metrics(task)),
         "action_metric_contracts": experiments.metrics_by_action(task),
         "minimum_development_effect_by_metric": experiments.DEVELOPMENT_EFFECT_FLOOR,
@@ -120,8 +120,9 @@ def public_evidence(task, experience, arm="qwen_audited_history", skill_library=
 
 
 def review_plan(task, plan, critique):
-    spec = source.CATEGORIES[task]
-    if plan["action"] not in spec["actions"]:
+    if plan["action"] == "abstain":
+        return "ABSTAIN_NO_DISCRIMINATING_EXPERIMENT"
+    if plan["action"] not in experiments.task_spec(task)["actions"]:
         return "REJECTED_UNREGISTERED_ACTION"
     if plan["metric"] not in experiments.action_metrics(task, plan["action"]):
         return "REJECTED_ACTION_METRIC_MISMATCH"
@@ -201,8 +202,18 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             context = {"evidence": ctx, "diagnosis": diag,
                        "constraint": "single registered action; numeric forecast frozen before execution"}
             plan = designer.propose(
-                context, eid, source.CATEGORIES[task]["actions"],
+                context, eid, experiments.task_spec(task)["actions"],
                 experiments.task_metrics(task))
+            if plan["action"] == "abstain":
+                store_new(directory / "frozen_plan.json", {
+                    "task":task,"proposal":plan,
+                    "decision":"ABSTAIN_NO_DISCRIMINATING_EXPERIMENT",
+                    "frozen_at":utc()})
+                status.update(status="ABSTAIN_NO_DISCRIMINATING_EXPERIMENT",
+                              reason=plan["budget_justification"],
+                              model_calls=model.requests-calls_before)
+                atomic_json(directory / "status.json",status)
+                return status
             review = CriticAgent(model).act(
                 {"evidence": ctx, "proposal": plan, "diagnosis": diag}, eid)
             revisions = []
@@ -211,8 +222,20 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
                 plan = designer.propose(
                     {**context, "critic_feedback": review,
                      "action_metric_contracts": ctx["action_metric_contracts"]}, eid,
-                    source.CATEGORIES[task]["actions"],
+                    experiments.task_spec(task)["actions"],
                     experiments.task_metrics(task))
+                if plan["action"] == "abstain":
+                    store_new(directory / "design_review.json", {
+                        "revisions": revisions, "final_review": review})
+                    store_new(directory / "frozen_plan.json", {
+                        "task":task, "proposal":plan,
+                        "decision":"ABSTAIN_NO_DISCRIMINATING_EXPERIMENT",
+                        "frozen_at":utc()})
+                    status.update(status="ABSTAIN_NO_DISCRIMINATING_EXPERIMENT",
+                                  reason=plan["budget_justification"],
+                                  model_calls=model.requests-calls_before)
+                    atomic_json(directory / "status.json",status)
+                    return status
                 review = CriticAgent(model).act(
                     {"evidence": ctx, "proposal": plan, "diagnosis": diag,
                      "previous_rejection": revisions[0]}, eid)
@@ -278,6 +301,9 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
                       proposal_origin=selected_by,
                       suggested_next_task=reflection["suggested_next_task"],
                       development_forecast_pass=bool(audit["forecast_passes_both_panels"]),
+                      mechanism_forecast_pass=bool(
+                          audit.get("mechanism_forecast_passes_both_panels")),
+                      debias_utility_state=audit.get("debias_utility_state"),
                       independently_confirmed_discoveries=0)
     except Exception as exc:
         status.update(status="FAILED", error_type=type(exc).__name__,

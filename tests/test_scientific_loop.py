@@ -14,11 +14,12 @@ from rsi_researcher.research.scientific_agents import (
 from rsi_researcher.research.scientific_loop import campaign, review_plan, fixed_rule_proposal
 
 class FakeModel:
-    def __init__(self, reject=False, next_task="stop"):
+    def __init__(self, reject=False, next_task="stop", abstain=False):
         self.requests = 0
         self.scope = {}
         self.reject = reject
         self.next_task = next_task
+        self.abstain = abstain
         self.roles = []
 
     def ask(self, prompt, schema, context):
@@ -33,7 +34,9 @@ class FakeModel:
                     "why_this_matters": "Isolates a proposed prompt intervention from ranking noise."}
         if stage == "design":
             actions = properties["action"]["enum"]
-            action = "popularity_prompt" if "popularity_prompt" in actions else actions[0]
+            action = ("abstain" if self.abstain else
+                      "popularity_prompt" if "popularity_prompt" in actions else
+                      next(x for x in actions if x != "abstain"))
             return {"action": action,
                     "hypothesis": "The registered intervention changes ranking behavior.",
                     "competing_explanation": "Model sampling noise explains observed rank changes.",
@@ -171,6 +174,54 @@ class MultiAgentTests(unittest.TestCase):
             audit = json.loads((out/"episode-001/audit.json").read_text())
             self.assertEqual(audit["independently_confirmed_discoveries"], 0)
 
+    def test_designer_may_abstain_before_expensive_intervention(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model=FakeModel(abstain=True)
+            result=campaign(Path(tmp)/"abstained", ["coat_propensity"],
+                            "fresh", model)
+            self.assertEqual(result["status"], "COMPLETED_NO_EXECUTION")
+            self.assertEqual(result["episodes"][0]["status"],
+                             "ABSTAIN_NO_DISCRIMINATING_EXPERIMENT")
+            self.assertNotIn("critic", model.roles)
+            self.assertNotIn("rank", model.roles)
+            self.assertFalse((Path(tmp)/"abstained/episode-001/execution.json").exists())
+
+    def test_zero_baseline_target_ndcg_does_not_block_utility_improvement(self):
+        panels={}
+        for group in ("A","B"):
+            original={"query_id":group,"ranking":["a","b","c"],
+                      "ndcg_at_5":0.0,"excess_popularity_exposure":.4}
+            changed={**original,"ndcg_at_5":.3,"excess_popularity_exposure":.1}
+            panels[group]={"original":[original],"repeat":[original],
+                           "popularity_prompt":[changed]}
+        audit=ex.independent_verdict("agentcf_popularity","popularity_prompt",
+            {"action":"popularity_prompt","metric":"head_excess_delta",
+             "direction":"decrease","minimum_abs_effect":.02},
+            {"status":"FRESH_AGENTCF_DEVELOPMENT","panels":panels})
+        self.assertTrue(audit["known_target_quality_guard_passes_both_panels"])
+        self.assertEqual(audit["debias_utility_state"],
+                         "PROXY_GAIN_WITH_QUALITY_GUARD_DEVELOPMENT_ONLY")
+
+    def test_mechanism_effect_remains_visible_with_known_target_quality_harm(self):
+        rows={}
+        for group in ("A","B"):
+            original={"query_id":group,"ranking":["a","b","c","d","e"],
+                      "ndcg_at_5":1.0,"excess_popularity_exposure":.4}
+            repeat=dict(original)
+            changed={**original,"ranking":["e","d","c","b","a"],
+                     "ndcg_at_5":0.4,"excess_popularity_exposure":.1}
+            rows[group]={"original":[original],"repeat":[repeat],
+                         "popularity_prompt":[changed]}
+        plan={"action":"popularity_prompt","metric":"head_excess_delta",
+              "direction":"decrease","minimum_abs_effect":.02}
+        audit=ex.independent_verdict("agentcf_popularity","popularity_prompt",
+                plan,{"status":"FRESH_AGENTCF_DEVELOPMENT","panels":rows})
+        self.assertTrue(audit["mechanism_forecast_passes_both_panels"])
+        self.assertFalse(audit["known_target_quality_guard_passes_both_panels"])
+        self.assertFalse(audit["forecast_passes_both_panels"])
+        self.assertEqual(audit["debias_utility_state"],"PROXY_GAIN_WITH_UTILITY_COST")
+        self.assertEqual(audit["independently_confirmed_discoveries"],0)
+
     def test_missing_memory_support_is_inconclusive_not_discovery(self):
         plan = {"action":"item_memory_ablation", "metric":"rank_change_excess",
                 "direction":"increase", "minimum_abs_effect":0.1}
@@ -244,6 +295,63 @@ class MultiAgentTests(unittest.TestCase):
         self.assertFalse(verdict["forecast_passes_both_panels"])
         self.assertEqual(verdict["model_predicted_minimum_effect"],0.0)
         self.assertEqual(verdict["evaluation_minimum_effect"],.02)
+
+    def test_cross_user_only_ablation_exposes_traceable_reader_specific_changes(self):
+        # This is execution of the real author-CDs training and rank adapters
+        # with deterministic inference; it does not claim Qwen discovery.
+        with tempfile.TemporaryDirectory() as tmp:
+            model=FakeModel()
+            cohort=ex.prepare_cohort(set(),20270001,12)
+            prepared=ex.train_and_observe_agentcf(cohort,model,Path(tmp))
+            support=prepared["training"]["cross_user_candidate_links_by_panel"]
+            self.assertGreater(support["A"],0)
+            self.assertGreater(support["B"],0)
+            output=Path(tmp)/"targeted"
+            output.mkdir()
+            result=ex.run_fresh_agentcf("agentcf_memory",
+                "cross_user_memory_ablation",model,output,cohort,prepared)
+            self.assertEqual(result["status"],"FRESH_AGENTCF_DEVELOPMENT")
+            readers={q["query_id"]:q for q in cohort[2]}
+            writers={k:set(v) for k,v in
+                     prepared["training"]["item_memory_writer_users"].items()}
+            restored=result["targeted_cross_user_memory_removals"]
+            self.assertTrue(any(restored.values()))
+            for qid,items in restored.items():
+                user=readers[qid]["user"]
+                self.assertTrue(set(items)<=set(readers[qid]["candidates"]))
+                for item in items:
+                    self.assertTrue(writers[item])
+                    self.assertNotIn(user,writers[item])
+            audit=ex.independent_verdict("agentcf_memory",
+                "cross_user_memory_ablation",
+                {"action":"cross_user_memory_ablation","metric":"linked_rank_change_excess",
+                 "direction":"increase","minimum_abs_effect":.2},result)
+            self.assertEqual(audit["independently_confirmed_discoveries"],0)
+            self.assertTrue(all(p["linked_query_count"]>0
+                                for p in audit["panel_measurements"]))
+            self.assertIn("mechanism_forecast_state",audit)
+            self.assertIn("debias_utility_state",audit)
+
+    def test_designer_can_select_cross_user_specific_falsifier(self):
+        class FocusedModel(FakeModel):
+            def ask(self,prompt,schema,context):
+                result=super().ask(prompt,schema,context)
+                if context["stage"]=="design":
+                    result.update(action="cross_user_memory_ablation",
+                                  metric="linked_rank_change_excess",
+                                  minimum_abs_effect=.2,direction="increase")
+                return result
+        with tempfile.TemporaryDirectory() as tmp:
+            model=FocusedModel()
+            result=campaign(Path(tmp)/"targeted",["agentcf_memory"],"fresh",
+                            model,cohort_size=12,seed=20270001)
+            self.assertEqual(result["executed_episodes"],1)
+            episode=Path(tmp)/"targeted/episode-001"
+            self.assertEqual(json.loads((episode/"frozen_plan.json").read_text())
+                             ["proposal"]["action"],"cross_user_memory_ablation")
+            self.assertIn("cross_user_memory_ablation",
+                json.loads((episode/"evidence.json").read_text())
+                ["action_metric_contracts"])
 
     def test_shared_memory_without_cross_user_read_abstains_not_finds_bias(self):
         with tempfile.TemporaryDirectory() as tmp:

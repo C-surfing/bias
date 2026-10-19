@@ -36,7 +36,7 @@ REFLECTION = strict({
 
 def design_schema(actions, metrics):
     return strict({
-        "action": {"type": "string", "enum": sorted(actions)},
+        "action": {"type": "string", "enum": sorted([*actions, "abstain"])},
         "hypothesis": TEXT,
         "competing_explanation": TEXT,
         "falsifier": TEXT,
@@ -89,7 +89,11 @@ class DesignerAgent(ResearchAgent):
         "strong falsifier and cost justification. Use only the supplied allowed "
         "actions and metrics. Your predicted direction must match the falsifier; "
         "do not claim the predicted result already happened. The minimum "
-        "effect must meet the evaluator's fixed threshold for your metric."
+        "effect must meet the evaluator's fixed threshold for your metric. "
+        "Compare the diagnostic value of legal actions. Abstain if available "
+        "evidence cannot support a discriminating intervention. Explain why "
+        "the chosen action distinguishes the competing mechanism, or why "
+        "neither does, in the budget_justification and falsifier."
     )
 
     def propose(self, observation, episode_id, actions, metrics):
