@@ -37,14 +37,17 @@ class FakeModel:
             action = ("abstain" if self.abstain else
                       "popularity_prompt" if "popularity_prompt" in actions else
                       next(x for x in actions if x != "abstain"))
+            valid_metrics = properties["metric"]["enum"]
+            selected_metric = next(
+                (metric for metric in ex.ACTION_METRICS.get(action,())
+                 if metric in valid_metrics),valid_metrics[0])
             return {"action": action,
                     "hypothesis": "The registered intervention changes ranking behavior.",
                     "competing_explanation": "Model sampling noise explains observed rank changes.",
                     "falsifier": "No paired effect beyond repeat noise in both cohorts.",
-                    "metric": properties["metric"]["enum"][0],
+                    "metric": selected_metric,
                     "direction": "decrease" if action == "popularity_prompt" else "increase",
-                    "minimum_abs_effect": ex.DEVELOPMENT_EFFECT_FLOOR[
-                        properties["metric"]["enum"][0]],
+                    "minimum_abs_effect": ex.DEVELOPMENT_EFFECT_FLOOR[selected_metric],
                     "budget_justification": "One bounded developmental intervention using fixed cohorts."}
         if stage == "critic":
             return {"decision": "reject" if self.reject else "approve",
@@ -352,6 +355,110 @@ class MultiAgentTests(unittest.TestCase):
             self.assertIn("cross_user_memory_ablation",
                 json.loads((episode/"evidence.json").read_text())
                 ["action_metric_contracts"])
+
+    def test_feedback_semantics_prompt_changes_only_memory_writing(self):
+        prompts=json.loads((ex.LOCAL_DATA/"author_prompts.json").read_text())
+        neutral=ex.neutral_feedback_prompts(prompts)
+        changed={k for k in prompts if neutral[k]!=prompts[k]}
+        self.assertEqual(changed,{
+            "user_prompt_template","user_prompt_template_true",
+            "item_prompt_template","item_prompt_template_true"})
+        self.assertEqual(
+            neutral["system_prompt_template_evaluation_basic"],
+            prompts["system_prompt_template_evaluation_basic"])
+        self.assertIn("unknown exposure",neutral["item_prompt_template_true"])
+        self.assertIn("no dislike",neutral["user_prompt_template_true"].lower())
+
+    def test_real_feedback_semantics_path_uses_original_training_repeat_control(self):
+        class PromptSensitiveModel(FakeModel):
+            def ask(self,prompt,schema,context):
+                answer=super().ask(prompt,schema,context)
+                if context["stage"]=="item_update":
+                    # Deterministic oracle for prompt routing, NOT a real
+                    # measurement of how Qwen interprets false negatives.
+                    if "sampled comparison CD" in prompt:
+                        answer={"first_memory":"Neutral semantic Item Memory.",
+                                "second_memory":"Neutral semantic Item Memory."}
+                if context["stage"]=="rank":
+                    candidates=schema["properties"]["ranking"]["items"]["enum"]
+                    answer={"ranking":list(reversed(candidates))
+                            if "Neutral semantic Item Memory." in prompt
+                            else candidates}
+                return answer
+
+        with tempfile.TemporaryDirectory() as tmp:
+            model=PromptSensitiveModel()
+            cohort=ex.prepare_cohort(set(),20270001,12)
+            prepared=ex.train_and_observe_agentcf(cohort,model,Path(tmp))
+            out=Path(tmp)/"semantic"
+            out.mkdir()
+            run=ex.run_fresh_agentcf("agentcf_memory",
+                "neutral_feedback_memory_propagation",model,out,cohort,prepared)
+            self.assertEqual(run["status"],"FRESH_AGENTCF_DEVELOPMENT")
+            self.assertTrue(run["training_repeat_control_used"])
+            protocol=json.loads((out/"feedback_semantics_protocol.json").read_text())
+            self.assertEqual(len(protocol["intervened_memory_writing_template_keys"]),4)
+            self.assertGreater(sum(protocol["changed_readers_by_panel"].values()),0)
+            self.assertEqual(set(protocol["linked_readers_by_panel"]),{"A","B"})
+            self.assertEqual(protocol["original_training_state_sha256"],
+                             prepared["training"]["trained_state_sha256"])
+            self.assertTrue(all("writer_user" in event and
+                                "observed_positive_item" in event
+                                for event in protocol["neutral_feedback_training_calls"]))
+            self.assertTrue(all("sampling" not in key for key in protocol))
+            for panel in run["panels"].values():
+                self.assertIn("training_repeat",panel)
+                self.assertEqual(len(panel["original"]),len(panel["training_repeat"]))
+            plan={"action":"neutral_feedback_memory_propagation",
+                  "metric":"feedback_semantic_excess_over_training_repeat",
+                  "direction":"increase","minimum_abs_effect":.2}
+            verdict=ex.independent_verdict("agentcf_memory",plan["action"],plan,run)
+            self.assertEqual(len(verdict["panel_measurements"]),2)
+            for panel in verdict["panel_measurements"]:
+                self.assertGreater(panel["linked_query_count"],0)
+                self.assertEqual(panel["unchanged_training_repeat_change_rate"],0)
+                self.assertGreaterEqual(panel["feedback_semantic_excess_over_training_repeat"],.2)
+            self.assertTrue(verdict["mechanism_forecast_passes_both_panels"])
+            self.assertEqual(verdict["independently_confirmed_discoveries"],0)
+
+    def test_training_noise_can_explain_apparent_feedback_semantic_rank_change(self):
+        original={"query_id":"q1","ranking":["a","b","c"],
+                  "ndcg_at_5":1.0,"excess_popularity_exposure":0.0}
+        reversed_row={**original,"ranking":["c","b","a"]}
+        result={"action":"neutral_feedback_memory_propagation",
+                "status":"FRESH_AGENTCF_DEVELOPMENT",
+                "eligible_readers_by_query":{"q1":["a"]},
+                "panels":{group:{
+                    "original":[original],"repeat":[original],
+                    "training_repeat":[reversed_row],
+                    "neutral_feedback_memory_propagation":[reversed_row]}
+                    for group in ("A","B")}}
+        plan={"action":"neutral_feedback_memory_propagation",
+              "metric":"feedback_semantic_excess_over_training_repeat",
+              "direction":"increase","minimum_abs_effect":.2}
+        audit=ex.independent_verdict("agentcf_memory",plan["action"],plan,result)
+        self.assertEqual([x["feedback_semantic_excess_over_training_repeat"]
+                          for x in audit["panel_measurements"]],[0,0])
+        self.assertFalse(audit["mechanism_forecast_passes_both_panels"])
+        self.assertEqual(audit["independently_confirmed_discoveries"],0)
+
+    def test_feedback_semantics_without_memory_effect_abstains(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model=FakeModel()
+            cohort=ex.prepare_cohort(set(),20270001,12)
+            prepared=ex.train_and_observe_agentcf(cohort,model,Path(tmp))
+            out=Path(tmp)/"no_effect"
+            out.mkdir()
+            result=ex.run_fresh_agentcf("agentcf_memory",
+                "neutral_feedback_memory_propagation",model,out,cohort,prepared)
+            self.assertEqual(result["status"],
+                             "ABSTAIN_NO_FEEDBACK_SEMANTIC_MEMORY_CHANGE")
+            self.assertEqual(ex.independent_verdict("agentcf_memory",
+                    "neutral_feedback_memory_propagation",
+                    {"action":"neutral_feedback_memory_propagation",
+                     "metric":"feedback_semantic_excess_over_training_repeat",
+                     "direction":"increase","minimum_abs_effect":.2},result)
+                             ["independently_confirmed_discoveries"],0)
 
     def test_shared_memory_without_cross_user_read_abstains_not_finds_bias(self):
         with tempfile.TemporaryDirectory() as tmp:

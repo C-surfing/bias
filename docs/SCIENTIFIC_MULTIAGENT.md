@@ -98,6 +98,45 @@ This is narrower than broad Item Memory ablation; it does not identify
 the specific origin of a false negative-feedback interpretation or prove
 that changed recommendations are harmful.
 
+**Feedback interpretation and memory propagation:** the registered
+neutral_feedback_memory_propagation action addresses a more precise
+question than erasing learned memories. In author CDs, the unselected
+comparison item was sampled, NOT documented as shown, disliked or
+listened to. Original BOTH User Reflection and Item Update prompts
+treat that comparator as disliked. Correcting only User Reflection would
+leave Item Update's direct false-dislike assertion as a confounder.
+
+This action changes only sampled-comparator semantics in the two USER
+reflection and two ITEM update templates (existing user reflection
+operator plus verified item-template edits in the new science adapter).
+Selection/ranking prompts, training-event order, positive feedback and
+candidate panels are unchanged. The original trained state is frozen;
+two additional training branches start from the same initial state and
+events: (1) unchanged original prompts to estimate training-generation
+noise, (2) neutral user+item feedback semantics. For each downstream
+reader, retain original User Memory, rank with the same original
+ranking prompt and graft only eligible different-writer Item Memories
+from the respective branch. A separate same-state ranking repeat
+captures ranking-generation noise.
+
+The primary feedback_semantic_excess_over_training_repeat metric equals
+the exposed-reader semantic ranking-change rate minus the LARGER of
+unchanged-prompt retraining and same-state ranking repeat change rates.
+Exposure is defined using original pre-treatment writer links, not
+chosen after seeing the intervention outcome. Both A/B panels must
+contain eligible readers. Changed Item Memory counts, training
+event-to-writer provenance, NDCG deltas and unexposed-reader ranking
+changes are reported. No propagating semantic memory difference means
+an explicit abstention.
+
+This is development mechanism evidence, not a verified causal debiased
+recommendation system. Stochastic simulation choices and update text
+can diverge; one retraining repeat does not establish uncertainty bounds.
+Correcting both memory-writing stages tests the JOINT semantic treatment,
+not the separate effect of User Reflection or Item Update. Known-target
+NDCG does not measure full recommendation utility. Reusing development
+seeds to chase positive effects would invalidate independent confirmation.
+
 New science actions are defined outside code-hashed historical Cross-Bias
 task definitions. Strategy comparisons now also report whether actual
 audited history caused different frozen actions or numeric predictions.

@@ -47,6 +47,7 @@ DEVELOPMENT_EFFECT_FLOOR = {
     "tail_delta": 0.02,
     "rank_change_excess": 0.2,
     "linked_rank_change_excess": 0.2,
+    "feedback_semantic_excess_over_training_repeat": 0.2,
     "head_excess_delta": 0.02,
 }
 
@@ -56,13 +57,15 @@ ACTION_METRICS = {
     "split_utility": ("brier_gain", "ndcg_delta", "tail_delta"),
     "item_memory_ablation": ("rank_change_excess", "ndcg_delta", "head_excess_delta"),
     "cross_user_memory_ablation": ("linked_rank_change_excess", "ndcg_delta", "head_excess_delta"),
+    "neutral_feedback_memory_propagation": ("feedback_semantic_excess_over_training_repeat",),
     "popularity_prompt": ("head_excess_delta", "ndcg_delta", "rank_change_excess"),
 }
 
 
 # Extend only the new science task, never mutate the code-hashed older
 # Cross-Bias task definitions or their frozen development records.
-EXTRA_SCIENCE_ACTIONS = {"agentcf_memory": ("cross_user_memory_ablation",)}
+EXTRA_SCIENCE_ACTIONS = {"agentcf_memory": (
+    "cross_user_memory_ablation", "neutral_feedback_memory_propagation")}
 
 
 def action_metrics(task, action):
@@ -286,6 +289,174 @@ def load_prepared_agentcf(path, cohort):
     return prepared
 
 
+def neutral_feedback_prompts(prompts):
+    """Correct one false-negative *semantics* at both memory-writing stages.
+
+    Keep simulation selection, observed positive feedback, candidate order and
+    ranking instructions byte-identical. The older author experiment only
+    neutralizes USER reflection; Item Update has its own false-dislike claim.
+    """
+    changed = author_intervention(prompts,"unseen_neutral_user_reflection")
+    replacements = {
+        "item_prompt_template": (
+            ("However, the user found that he actually doesn't enjoy the CD that he previously chosen. Conversely, he finds the CD that he didn't choose before, titled '$pos_item_title', more appealing. This indicates that he made an unsuitable choice. This may be because the user was misled by the descriptions of these two candidate CDs.",
+             "The only observed positive feedback concerns '$pos_item_title'. The other CD ('$neg_item_title') was sampled for comparison; its exposure and listening history are unknown, so no dislike should be inferred."),
+            ("while he dislikes the other CD ('$neg_item_title') because it possesses features that he disliked.",
+             "while the sampled comparison CD ('$neg_item_title') has no observed dislike or rejection signal."),
+            ("Explore the user disliked CD's new features that aligns with the user's dislikes and goes against with his preferences. In this case, the differences between the descriptions of these two items should be amplified.",
+             "For the sampled comparison CD, preserve existing factual descriptions and infer no new dislike, since exposure and preference are unknown."),
+        ),
+        "item_prompt_template_true": (
+            ("while he rejected the other CD ('$neg_item_title') because it possesses features that he disliked.",
+             "while the sampled comparison CD ('$neg_item_title') has unknown exposure and no observed dislike."),
+            ("Explore the rejected CD's new features that aligns with the user's dislikes and goes against with his preferences. In this case, the differences between the descriptions of these two items should be amplified.",
+             "Do not infer dislike-related new features for the sampled comparison CD; preserve its factual descriptions."),
+        ),
+    }
+    for key,pairs in replacements.items():
+        for old,new in pairs:
+            if changed[key].count(old) != 1:
+                raise ValueError("unmatched feedback semantic anchor: "+key)
+            changed[key] = changed[key].replace(old,new)
+    expected={"user_prompt_template","user_prompt_template_true",
+              "item_prompt_template","item_prompt_template_true"}
+    if {k for k in changed if changed[k]!=prompts[k]}!=expected:
+        raise ValueError("feedback semantics changed an unrelated prompt")
+    return changed
+
+
+def run_feedback_semantic_propagation(model, output, cohort, prepared, prompts, profile):
+    """Test complete sampled-negative semantics through changed shared Item Memory.
+
+    Both training branches start at exactly the same initial state and use the
+    same observed events/candidates, but fresh LLM draws can diverge. An
+    unchanged-prompt retraining is a necessary training-variance comparator.
+    Ranking readers always keep the ORIGINAL trained User Memory.
+    """
+    initial, events, queries = cohort
+    output = Path(output)
+    original = prepared["state"]
+    writers = {i:set(users) for i,users in
+               prepared["training"]["item_memory_writer_users"].items()}
+    neutral_prompts = neutral_feedback_prompts(prompts)
+    changed_keys = sorted(k for k in prompts if neutral_prompts[k] != prompts[k])
+
+    def retrain(condition, templates):
+        kernel = AgentCF(model, templates)
+        state = deepcopy(initial)
+        event_calls = []
+        for event in events:
+            model.scope = {"experiment_stage":"feedback_semantics_training",
+                           "condition":condition,"event":event["event_id"]}
+            before = model.requests
+            prior_user = state["users"][event["user"]]
+            prior_item = state["items"][event["positive"]]["memory"]
+            state = kernel.event(state, event, "original_update")
+            event_calls.append({
+                "event":event["event_id"],"writer_user":event["user"],
+                "observed_positive_item":event["positive"],
+                "sampled_comparator_not_observed_negative":event["negative"],
+                "user_memory_changed":prior_user!=state["users"][event["user"]],
+                "positive_item_memory_changed":(
+                    prior_item!=state["items"][event["positive"]]["memory"]),
+                "calls":model.requests-before})
+        return state, event_calls
+
+    # One extra original trajectory captures training-time nondeterminism,
+    # which a same-state repeat ranking alone could never reveal.
+    repeated, control_calls = retrain("unchanged_training_repeat",prompts)
+    neutral, neutral_calls = retrain("unknown_exposure_feedback_semantics",neutral_prompts)
+
+    subsets = {"A":sorted(queries,key=lambda q:q["query_id"])[:len(queries)//2],
+               "B":sorted(queries,key=lambda q:q["query_id"])[len(queries)//2:]}
+    exposures, changes, panels = {}, {}, {}
+    for name, panel in subsets.items():
+        panels[name] = {}
+        for label in ("original","repeat","training_repeat",
+                      "neutral_feedback_memory_propagation"):
+            rows = []
+            kernel = AgentCF(model,prompts)
+            for q in panel:
+                if label == "original":
+                    ranking = prepared["baseline_rankings"][q["query_id"]]
+                    row = {"query_id":q["query_id"],"ranking":ranking,"calls":0,
+                           "origin":"frozen_predecision_baseline",
+                           **score_author_ranking(ranking,q,profile)}
+                else:
+                    state = original
+                    if label in ("training_repeat","neutral_feedback_memory_propagation"):
+                        source = (repeated if label=="training_repeat" else neutral)
+                        state = deepcopy(original)
+                        eligible = [item for item in q["candidates"]
+                                    if writers.get(item) and q["user"] not in writers[item]]
+                        if label == "neutral_feedback_memory_propagation":
+                            exposures[q["query_id"]] = eligible
+                            changes[q["query_id"]] = [
+                                item for item in eligible
+                                if source["items"][item]["memory"] !=
+                                   original["items"][item]["memory"]]
+                        for item in eligible:
+                            # Hold the reader's learned user preferences fixed.
+                            # Transfer only a memory written by OTHER users.
+                            state["items"][item]["memory"] = source["items"][item]["memory"]
+                    row = record_row(model,kernel,state,q,profile,label)
+                rows.append(row)
+            panels[name][label] = rows
+
+    counts = {name:sum(bool(exposures.get(q["query_id"])) for q in panel)
+              for name,panel in subsets.items()}
+    changed_counts = {name:sum(bool(changes.get(q["query_id"])) for q in panel)
+                      for name,panel in subsets.items()}
+    protocol = {
+        "action":"neutral_feedback_memory_propagation",
+        "training_difference":"user and item memory-writing prompts consistently treat sampled comparator as unobserved, never disliked",
+        "original_training_state_sha256":prepared["training"]["trained_state_sha256"],
+        "original_prompts_sha256":source_digest(LOCAL_DATA/"author_prompts.json"),
+        "intervened_memory_writing_template_keys":changed_keys,
+        "unchanged_training_repeat_calls":control_calls,
+        "neutral_feedback_training_calls":neutral_calls,
+        "training_states_sha256":{
+            "unchanged_repeat":sha256(json.dumps(repeated,sort_keys=True,
+                       ensure_ascii=False).encode("utf8")).hexdigest(),
+            "unknown_exposure":sha256(json.dumps(neutral,sort_keys=True,
+                       ensure_ascii=False).encode("utf8")).hexdigest()},
+        "eligible_cross_user_candidate_items_by_query":exposures,
+        "semantically_changed_cross_user_items_by_query":changes,
+        "linked_readers_by_panel":counts,
+        "changed_readers_by_panel":changed_counts,
+        "explanation":"Selection/update calls are fresh and may differ between "
+                      "training branches; a single retraining control is not "
+                      "a statistical guarantee. Relevance labels are not "
+                      "used to decide which memory to transfer.",
+    }
+    atomic_json(output/"feedback_semantics_protocol.json",protocol)
+    if any(n==0 for n in counts.values()):
+        return {"action":protocol["action"],
+                "status":"ABSTAIN_NO_SHARED_MEMORY_READER_PANEL",
+                "reason":"One panel lacks a different-user memory reader",
+                "panels":{},"independent_confirmation":False}
+    if not any(changed_counts.values()):
+        return {"action":protocol["action"],
+                "status":"ABSTAIN_NO_FEEDBACK_SEMANTIC_MEMORY_CHANGE",
+                "reason":"Neutral feedback semantics produced no changed cross-user candidate Item Memory",
+                "panels":{},"independent_confirmation":False}
+    atomic_json(output/"agentcf_ranking_panels.json",panels)
+    return {"action":protocol["action"],"status":"FRESH_AGENTCF_DEVELOPMENT",
+            "source":"paired same-input feedback-semantics developmental comparison",
+            "training_events":len(events),"users":sorted(initial["users"]),
+            "panels":panels,"eligible_readers_by_query":exposures,
+            "changed_readers_by_query":changes,
+            "training_repeat_control_used":True,
+            "independent_confirmation":False,
+            "limitations":[
+                "only sampled comparison negatives, no exposure/dislike truth",
+                "same initial events but independent stochastic model training",
+                "one unchanged-prompt retraining and one same-state ranking repeat are weak noise controls",
+                "the reader User Memory is original in every ranking condition",
+                "one known positive target does not fully measure recommendation utility",
+            ]}
+
+
 def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
     """Apply the chosen intervention on the frozen, pre-decision trained state."""
     if task not in ("agentcf_memory", "agentcf_popularity"):
@@ -293,7 +464,7 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
     if action not in task_spec(task)["actions"]:
         raise ValueError("unregistered experiment action")
     if action not in ("item_memory_ablation", "cross_user_memory_ablation",
-                      "popularity_prompt"):
+                      "neutral_feedback_memory_propagation","popularity_prompt"):
         raise ValueError("unsupported fresh AgentCF action")
     initial, events, queries = cohort
     output = Path(output)
@@ -308,6 +479,9 @@ def run_fresh_agentcf(task, action, model, output, cohort, prepared=None):
     originals = prepared["baseline_rankings"]
     prompts = json.loads((LOCAL_DATA / "author_prompts.json").read_text(encoding="utf8"))
     profile = author_profile(LOCAL_DATA)
+    if action == "neutral_feedback_memory_propagation":
+        return run_feedback_semantic_propagation(
+            model, output, cohort, prepared, prompts, profile)
     modified = deepcopy(state)
     candidates = {item for q in queries for item in q["candidates"]}
     changed = sum(modified["items"][i]["memory"] != initial["items"][i]["memory"]
@@ -490,6 +664,34 @@ def panel_measurements(task, action, result):
         pre_ndcg = mean(r["ndcg_at_5"] for r in baseline)
         post_ndcg = mean(r["ndcg_at_5"] for r in changed)
         linked_metrics = {}
+        if action == "neutral_feedback_memory_propagation":
+            exposure = result.get("eligible_readers_by_query",{})
+            training_repeat = conditions["training_repeat"]
+            if ids != [r["query_id"] for r in training_repeat]:
+                raise ValueError("training repeat is not aligned with paired queries")
+            linked = [i for i,qid in enumerate(ids) if exposure.get(qid)]
+            unlinked = [i for i,qid in enumerate(ids) if not exposure.get(qid)]
+            if not linked:
+                raise ValueError("no cross-user readers in feedback panel")
+            def change_rate(indices,other):
+                return mean(baseline[i]["ranking"] != other[i]["ranking"] for i in indices)
+            semantic = change_rate(linked,changed)
+            sampling = change_rate(linked,repeat)
+            training_noise = change_rate(linked,training_repeat)
+            linked_metrics = {
+                "linked_query_count":len(linked),
+                "unlinked_query_count":len(unlinked),
+                "semantic_rank_change_rate":semantic,
+                "unchanged_rank_repeat_change_rate":sampling,
+                "unchanged_training_repeat_change_rate":training_noise,
+                "feedback_semantic_excess_over_training_repeat":
+                    semantic-max(sampling,training_noise),
+                "linked_known_target_ndcg_delta":
+                    mean(changed[i]["ndcg_at_5"]-baseline[i]["ndcg_at_5"]
+                         for i in linked),
+                "unlinked_rank_change_rate":(
+                    change_rate(unlinked,changed) if unlinked else None),
+            }
         if action == "cross_user_memory_ablation":
             exposed = result.get("targeted_cross_user_memory_removals",{})
             if set(exposed) != {row["query_id"] for panel in result_panels.values()
