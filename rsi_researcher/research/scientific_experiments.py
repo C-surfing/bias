@@ -6,6 +6,8 @@ arbitrary tools. Fresh training/rank inference requires a supplied Qwen model.
 from __future__ import annotations
 
 from copy import deepcopy
+from csv import DictReader
+from random import Random
 from hashlib import sha256
 from pathlib import Path
 from statistics import mean
@@ -33,6 +35,20 @@ def scientific_input_fingerprint(cohort):
 
 # A registered action MUST expose the metrics that actually measure that action.
 # No generic Brier delta can substitute for a gamma or placebo falsifier.
+# Minimum development signals fixed by the evaluator, never chosen by Qwen.
+# These are practical-effect thresholds, NOT power analyses or p-values.
+# Legacy Coat margins use the frozen 1e-4 sensitivity convention; for the
+# small AgentCF panels no tiny positive change counts as a discovery signal.
+DEVELOPMENT_EFFECT_FLOOR = {
+    "gamma_reference_margin": 1e-4,
+    "propensity_placebo_margin": 1e-4,
+    "brier_gain": 1e-4,
+    "ndcg_delta": 0.02,
+    "tail_delta": 0.02,
+    "rank_change_excess": 0.2,
+    "head_excess_delta": 0.02,
+}
+
 ACTION_METRICS = {
     "gamma_stress": ("gamma_reference_margin",),
     "propensity_shuffle": ("propensity_placebo_margin",),
@@ -70,25 +86,62 @@ def known_prior_users():
     fresh = SOURCE / "runs/agentcf-newstate-forecast-20261017/protocol.json"
     old = json.loads(prior.read_text(encoding="utf8"))["initial"]["users"]
     newer = json.loads(fresh.read_text(encoding="utf8"))["cohort_users"]
-    return set(old) | set(newer)
+    # Frozen October 17 paired pilot; the four users are development evidence.
+    # This specific archived run predates the scientific comparison protocol.
+    paired = Path(__file__).resolve().parents[2] / (
+        "runs/live-science-policy-comparison-20261017-01/"
+        "strong_rule/episode-001/cohort_frozen.json")
+    paired_users = json.loads(paired.read_text(encoding="utf8"))["users"] if paired.is_file() else []
+    return set(old) | set(newer) | set(paired_users)
 
 
 def prepare_cohort(excluded_users, seed, count=6, events_per_user=2):
     if count < 4 or count % 2:
         raise ValueError("fresh cohort must contain at least four users and split equally")
+    excluded = known_prior_users() | set(excluded_users)
+    # Apply seeded sampling in the NEW scientific adapter only: author.py
+    # belongs to a historical code-hashed forecast protocol.
+    with (LOCAL_DATA / "CDs-100-user-dense.train.inter").open(encoding="utf8") as stream:
+        ordered = list(dict.fromkeys(row["user_id:token"]
+                    for row in DictReader(stream, delimiter="\t")))
+    eligible = [u for u in ordered if u not in excluded]
+    if len(eligible) < count:
+        raise ValueError("insufficient fresh AgentCF training users")
+    chosen = set(Random(seed).sample(eligible, count))
+    selected_exclusions = excluded | (set(eligible) - chosen)
     state, events, queries = author_data(
         LOCAL_DATA, count, events_per_user, seed, "exclude_known",
-        excluded_users=known_prior_users() | set(excluded_users),
+        excluded_users=selected_exclusions,
     )
     if len(queries) != count or len(events) != count * events_per_user:
         raise ValueError("incomplete or unbalanced author cohort")
-    if set(state["users"]) & (known_prior_users() | set(excluded_users)):
+    if set(state["users"]) & excluded:
         raise ValueError("cohort overlaps historical research")
     return state, events, queries
 
 
 def source_digest(path):
     return sha256(Path(path).read_bytes()).hexdigest()
+
+
+def preintervention_observations(cohort):
+    """Measured input support, not a learned-effect or held-out-label oracle."""
+    initial, events, queries = cohort
+    trained_items = {event["positive"] for event in events}
+    candidate_items = {item for q in queries for item in q["candidates"]}
+    return {
+        "source": "real AgentCF training events and unlabeled candidate IDs",
+        "training_events": len(events),
+        "training_users": len(initial["users"]),
+        "distinct_training_positive_items": len(trained_items),
+        "distinct_query_candidates": len(candidate_items),
+        "trained_items_in_query_candidates": len(trained_items & candidate_items),
+        "queries_with_training_positive_candidate": sum(
+            bool(trained_items & set(q["candidates"])) for q in queries),
+        "query_count": len(queries),
+        "interpretation": "Observational support only, before Qwen training; "
+                          "no ranking behavior, intervention outcome, or relevance label observed.",
+    }
 
 
 def record_row(model, kernel, state, query, profile, label):
@@ -125,6 +178,8 @@ def run_fresh_agentcf(task, action, model, output, cohort):
         "training": training, "cohort_users": sorted(initial["users"]),
         "completed_events": len(state["completed"]),
         "prompts_sha256": source_digest(prompts_path),
+        "trained_state_sha256": sha256(json.dumps(
+            state, sort_keys=True, ensure_ascii=False).encode("utf8")).hexdigest(),
         "data_protocol": "author_training_only_and_one_known_validation_target",
     })
     modified = deepcopy(state)
@@ -289,7 +344,8 @@ def independent_verdict(task, action, plan, result):
                 "mechanism_development_check":None, "evidence_grade":"inconclusive",
                 "independently_confirmed_discoveries":0, "reason":result["reason"]}
     panels = panel_measurements(task, action, result)
-    metric, threshold, direction = (plan["metric"], plan["minimum_abs_effect"], plan["direction"])
+    metric, direction = plan["metric"], plan["direction"]
+    threshold = max(plan["minimum_abs_effect"], DEVELOPMENT_EFFECT_FLOOR[metric])
     if len(panels) != 2:
         raise ValueError("prospective replication requires two development panels")
     def conforms(value):
@@ -300,7 +356,10 @@ def independent_verdict(task, action, plan, result):
         if direction == "decrease":
             return value <= -threshold and value < 0
         return abs(value) <= max(0.02, threshold)
-    predicts = all(conforms(p[metric]) and p["quality_gate"] for p in panels)
+    # A near-zero point estimate in two tiny panels does NOT establish
+    # equivalence. That would require a powered precision-bound protocol.
+    predicts = (direction != "approximately_zero" and
+                all(conforms(p[metric]) and p["quality_gate"] for p in panels))
     # Development forecast and action-specific falsification are distinct.
     # Both MUST remain independent of any language-model reflection.
     mechanism = (reference.assess(task, action, result)
@@ -309,7 +368,9 @@ def independent_verdict(task, action, plan, result):
     # Existing reference.assess understands Coat; fresh AgentCF evidence
     # has the same panel schema but is not upgraded to a confirmed finding.
     return {"task": task, "action": action, "forecast_metric": metric,
-            "predeclared_direction": direction, "predeclared_minimum_effect": threshold,
+            "predeclared_direction": direction,
+            "model_predicted_minimum_effect": plan["minimum_abs_effect"],
+            "evaluation_minimum_effect": threshold,
             "panel_measurements": panels, "forecast_passes_both_panels": predicts,
             "mechanism_development_check": mechanism,
             "evidence_grade": "previous_development_only" if result.get("execution_kind") == "ARCHIVED_DEVELOPMENT_REPLAY"

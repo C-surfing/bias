@@ -91,6 +91,7 @@ def public_evidence(task, experience, arm="qwen_audited_history", skill_library=
         "registered_actions": list(source.CATEGORIES[task]["actions"]),
         "registered_metrics": list(experiments.task_metrics(task)),
         "action_metric_contracts": experiments.metrics_by_action(task),
+        "minimum_development_effect_by_metric": experiments.DEVELOPMENT_EFFECT_FLOOR,
         "original_mechanism_falsifier": source.CATEGORIES[task]["falsifier"],
         "old_development_observations": raw["coat" if task.startswith("coat_") else "agentcf"],
         "relevant_prior_numeric_evidence": relevant,
@@ -124,6 +125,8 @@ def review_plan(task, plan, critique):
         return "REJECTED_UNREGISTERED_ACTION"
     if plan["metric"] not in experiments.action_metrics(task, plan["action"]):
         return "REJECTED_ACTION_METRIC_MISMATCH"
+    if plan.get("minimum_abs_effect",experiments.DEVELOPMENT_EFFECT_FLOOR[plan["metric"]]) < experiments.DEVELOPMENT_EFFECT_FLOOR[plan["metric"]]:
+        return "REJECTED_BELOW_PREDECLARED_EFFECT_FLOOR"
     if (task, plan["action"], plan["metric"]) == ("agentcf_popularity", "popularity_prompt", "head_excess_delta") and plan.get("direction") != "decrease":
         return "REJECTED_PREDECLARED_DIRECTION_MISMATCH"
     if critique["decision"] != "approve":
@@ -143,6 +146,15 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
     try:
         ctx = public_evidence(task, verified_experience(directory.parent, prior_campaign),
                               arm, skill_library)
+        cohort = None
+        if mode == "fresh" and task.startswith("agentcf_"):
+            cohort = experiments.prepare_cohort(excluded_users, seed, cohort_size)
+            frozen = {"users": sorted(cohort[0]["users"]), "events":len(cohort[1]),
+                      "queries":len(cohort[2]), "seed":seed,
+                      "no_validation_targets_in_research_prompt":True,
+                      "scientific_input_sha256":experiments.scientific_input_fingerprint(cohort)}
+            store_new(directory / "cohort_frozen.json", frozen)
+            ctx["new_agentcf_input_observations"] = experiments.preintervention_observations(cohort)
         store_new(directory / "evidence.json", ctx)
         eid = directory.name
 
@@ -214,15 +226,6 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
                     "origin":selected_by, "rejected_qwen_plan":decision,
                     "predeclared_rule":source.RULE[task], "control_plan":plan})
 
-        cohort = None
-        if mode == "fresh" and task.startswith("agentcf_"):
-            cohort = experiments.prepare_cohort(excluded_users, seed, cohort_size)
-            # Freeze cohort IDs before training; never disclose validation target to agents.
-            frozen = {"users": sorted(cohort[0]["users"]), "events":len(cohort[1]),
-                      "queries":len(cohort[2]), "seed":seed,
-                      "no_validation_targets_in_research_prompt":True,
-                      "scientific_input_sha256":experiments.scientific_input_fingerprint(cohort)}
-            store_new(directory / "cohort_frozen.json", frozen)
         # The fixed-rule fallback must obey the same registry and metric contract.
         if plan["metric"] not in experiments.action_metrics(task, plan["action"]):
             raise ValueError("refused experiment with mismatched action/metric")

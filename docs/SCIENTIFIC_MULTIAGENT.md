@@ -50,6 +50,16 @@ Agent stacks.
 | AgentCF Popularity | `popularity_prompt`, `item_memory_ablation` | Same measured paired effects | Head exposure != identified popularity bias |
 
 Python refuses any task/action/metric mismatch EVEN IF Qwen Critic approves it.
+Diagnosis now sees genuine *pre-training input support* (training events,
+candidate coverage and overlapping positive items), never validation targets
+or an intervention result. This does not yet constitute diagnosis from
+learned rankings and memory changes.
+
+Each metric has a shared minimum development effect fixed by Python before
+Qwen proposes a number (Brier/gamma/placebo 0.0001, NDCG/tail/head 0.02,
+excess rank changes 0.20). A model cannot pass a prediction by setting
+a smaller threshold. Near-zero point estimates in tiny panels are NOT
+evidence of equivalence. These thresholds are effect screens, not p-values.
 Numbers are computed from exactly two disjoint *development* panels.
 Unchanged repeat rankings estimate stochastic noise. Changes without sufficient
 training-memory candidate overlap terminate as inconclusive. The randomized
@@ -92,13 +102,19 @@ by a separately labeled predeclared control, not to claim Qwen success.
 Each arm gets the SAME model-request/token/time ceiling, cohort seed, dataset
 and numerical audit. For AgentCF, paired status requires matching frozen
 initial state, training events, queries and prompts (one SHA-256 fingerprint);
-matching user IDs alone is insufficient. If an arm does not actually execute,
-the comparison is INCOMPLETE, not a successful paired study. Actual model
+matching user IDs alone is insufficient. After independently training AgentCF
+for each arm, a SECOND hash records whether trained User/Item Memory states
+are identical. When trained states differ, the matched-input end-to-end
+comparison may still be reported, but isolated research-policy causal effect
+is NOT established. If an arm does not actually execute, the comparison is
+INCOMPLETE. Actual model
 calls and token usage are reported, not treated as equal because the caps are
 equal. An arm with rejected Qwen
 proposals is recorded as not executed. Without a frozen prior campaign,
 `qwen_audited_history` and `qwen_no_history` may be identical:
-`memory_comparison_interpretable=false`, **no RSI memory claim**.
+`memory_comparison_interpretable=false`, **no RSI memory claim**. Even with a prior campaign path, the history arm
+must actually receive audited numeric records before memory comparison
+becomes interpretable.
 `qwen_promoted_skill` requires a provenance-verified skill library.
 
 ## Memory, research Skill evolution and independent confirmation

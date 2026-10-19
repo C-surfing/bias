@@ -11,8 +11,7 @@ from rsi_researcher.research import scientific_experiments as ex
 from rsi_researcher.research.scientific_agents import (
     DiagnosisAgent, DesignerAgent, CriticAgent, ReflectionAgent,
 )
-from rsi_researcher.research.scientific_loop import campaign
-
+from rsi_researcher.research.scientific_loop import campaign, review_plan
 
 class FakeModel:
     def __init__(self, reject=False, next_task="stop"):
@@ -41,7 +40,8 @@ class FakeModel:
                     "falsifier": "No paired effect beyond repeat noise in both cohorts.",
                     "metric": properties["metric"]["enum"][0],
                     "direction": "decrease" if action == "popularity_prompt" else "increase",
-                    "minimum_abs_effect": 0.01,
+                    "minimum_abs_effect": ex.DEVELOPMENT_EFFECT_FLOOR[
+                        properties["metric"]["enum"][0]],
                     "budget_justification": "One bounded developmental intervention using fixed cohorts."}
         if stage == "critic":
             return {"decision": "reject" if self.reject else "approve",
@@ -112,6 +112,13 @@ class MultiAgentTests(unittest.TestCase):
             self.assertIn("rank", model.roles)
             self.assertTrue((out/"episode-001/cohort_frozen.json").exists())
             self.assertTrue((out/"episode-001/audit.json").exists())
+            facts=json.loads((out/"episode-001/evidence.json").read_text())
+            observation=facts["new_agentcf_input_observations"]
+            self.assertEqual(observation["training_events"],8)
+            self.assertIn("trained_items_in_query_candidates",observation)
+            self.assertNotIn("target", json.dumps(observation).lower())
+            training=json.loads((out/"episode-001/agentcf_training.json").read_text())
+            self.assertEqual(len(training["trained_state_sha256"]),64)
 
     def test_rejected_design_never_executes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -180,6 +187,54 @@ class MultiAgentTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 campaign(Path(tmp)/"bad2", ["agentcf_memory","agentcf_memory"],
                          "archive",FakeModel())
+
+    def test_cohort_seed_samples_distinct_training_only_users(self):
+        a=ex.prepare_cohort(set(),20261019,4)
+        b=ex.prepare_cohort(set(),20261019,4)
+        c=ex.prepare_cohort(set(),20261020,4)
+        first, repeat, another=(set(cohort[0]["users"]) for cohort in (a,b,c))
+        self.assertEqual(first,repeat)
+        self.assertNotEqual(first,another)
+        self.assertFalse(first & ex.known_prior_users())
+
+    def test_historical_inverted_popularity_prediction_is_rejected(self):
+        plan={"action":"popularity_prompt","metric":"head_excess_delta",
+              "direction":"increase", "minimum_abs_effect":.05}
+        self.assertEqual(review_plan("agentcf_popularity",plan,{"decision":"approve"}),
+                         "REJECTED_PREDECLARED_DIRECTION_MISMATCH")
+
+    def test_proposal_below_fixed_metric_floor_is_rejected(self):
+        plan={"action":"item_memory_ablation","metric":"rank_change_excess",
+              "direction":"increase","minimum_abs_effect":.001}
+        self.assertEqual(review_plan("agentcf_memory",plan,{"decision":"approve"}),
+                         "REJECTED_BELOW_PREDECLARED_EFFECT_FLOOR")
+
+    def test_null_point_estimate_cannot_establish_equivalence(self):
+        row={"query_id":"1","ranking":["a","b","c","d","e"],
+             "ndcg_at_5":1.0,"excess_popularity_exposure":0.0}
+        result={"status":"FRESH_AGENTCF_DEVELOPMENT","panels":{
+            name:{"original":[row], "repeat":[row], "popularity_prompt":[row]}
+            for name in ("A","B")}}
+        plan={"action":"popularity_prompt","metric":"head_excess_delta",
+              "direction":"approximately_zero", "minimum_abs_effect":.02}
+        audit=ex.independent_verdict("agentcf_popularity","popularity_prompt",
+                                     plan,result)
+        self.assertFalse(audit["forecast_passes_both_panels"])
+        self.assertEqual(audit["independently_confirmed_discoveries"],0)
+
+    def test_qwen_cannot_make_tiny_change_pass_with_zero_threshold(self):
+        base={"query_id":"q1","ranking":["a","b","c","d","e"],
+              "ndcg_at_5":1.0,"excess_popularity_exposure":0.0}
+        shifted={**base,"excess_popularity_exposure":0.01}
+        panels={name:{"original":[base],"repeat":[base],
+                      "item_memory_ablation":[shifted]} for name in ("A","B")}
+        proposal={"action":"item_memory_ablation","metric":"head_excess_delta",
+                  "direction":"increase","minimum_abs_effect":0.0}
+        verdict=ex.independent_verdict("agentcf_memory","item_memory_ablation",
+                  proposal,{"status":"FRESH_AGENTCF_DEVELOPMENT","panels":panels})
+        self.assertFalse(verdict["forecast_passes_both_panels"])
+        self.assertEqual(verdict["model_predicted_minimum_effect"],0.0)
+        self.assertEqual(verdict["evaluation_minimum_effect"],.02)
 
     def test_independent_python_audit_rejects_malformed_numeric_plan(self):
         with self.assertRaises(ValueError):

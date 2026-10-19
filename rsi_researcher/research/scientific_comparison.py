@@ -67,13 +67,21 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
             atomic_json(output/"comparison.json",result)
         pairing={}
         for i,task in enumerate(tasks,1):
-            users, inputs, executed = {}, {}, {}
+            users, inputs, trained, executed, history, decisions = {}, {}, {}, {}, {}, {}
             for arm in arms:
                 episode=output/arm/f"episode-{i:03d}"
                 freeze=episode/"cohort_frozen.json"
                 info=json.loads(freeze.read_text(encoding="utf8")) if freeze.is_file() else {}
                 users[arm]=info.get("users")
                 inputs[arm]=info.get("scientific_input_sha256")
+                training_file=episode/"agentcf_training.json"
+                trained[arm]=(json.loads(training_file.read_text(encoding="utf8"))
+                              .get("trained_state_sha256") if training_file.is_file() else None)
+                evidence_file, plan_file=episode/"evidence.json",episode/"frozen_plan.json"
+                evidence=json.loads(evidence_file.read_text(encoding="utf8")) if evidence_file.is_file() else {}
+                history[arm]=len(evidence.get("relevant_prior_numeric_evidence", []))
+                decisions[arm]=(json.loads(plan_file.read_text(encoding="utf8"))
+                                .get("proposal") if plan_file.is_file() else None)
                 audit_path, execution_path=episode/"audit.json",episode/"execution.json"
                 if audit_path.is_file() and execution_path.is_file():
                     audit=json.loads(audit_path.read_text(encoding="utf8"))
@@ -95,11 +103,22 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
                     raise ValueError("experiment inputs differ across policy arms")
             else:
                 same_users, same_inputs, matched=None, None, all_executed
+            same_trained=(all(trained.values()) and len(set(trained.values()))==1
+                          ) if task.startswith("agentcf_") else None
             pairing[task]={"identical_frozen_user_cohorts":same_users,
                            "identical_frozen_experiment_inputs":same_inputs,
+                           "identical_trained_agentcf_states":same_trained,
+                           "matched_training_state_for_policy_comparison":bool(
+                               all_executed and matched and same_trained),
                            "matched_for_development_comparison":matched,
                            "all_arms_ran_experiment":all_executed,
                            "execution_by_arm":executed,
+                           "history_records_seen_by_arm":history,
+                           "frozen_scientific_decisions_by_arm":{
+                               arm:({k:plan.get(k) for k in ("action","metric","direction",
+                                                             "minimum_abs_effect")}
+                                    if plan else None)
+                               for arm,plan in decisions.items()},
                            "users_by_arm":users,
                            "not_an_independent_confirmation":True}
         completed=all(p["all_arms_ran_experiment"] and p["matched_for_development_comparison"]
@@ -111,7 +130,14 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
                       cohort_pairing=pairing,
                       memory_comparison_interpretable=bool(
                           completed and prior_campaign and
+                          all(row["matched_training_state_for_policy_comparison"] and
+                              row["history_records_seen_by_arm"].get("qwen_audited_history",0)>0 and
+                              row["history_records_seen_by_arm"].get("qwen_no_history",0)==0
+                              for row in pairing.values()) and
                           {"qwen_no_history","qwen_audited_history"}.issubset(arms)),
+                      policy_arms_share_trained_state=bool(
+                          completed and all(row["matched_training_state_for_policy_comparison"]
+                                            for row in pairing.values())),
                       equal_budget_ceiling=True,
                       measured_usage_by_arm=usage,
                       independently_confirmed_scientific_discoveries=0,

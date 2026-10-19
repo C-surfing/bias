@@ -88,7 +88,8 @@ class DesignerAgent(ResearchAgent):
         "with a machine-checkable metric, effect direction, minimum magnitude, "
         "strong falsifier and cost justification. Use only the supplied allowed "
         "actions and metrics. Your predicted direction must match the falsifier; "
-        "do not claim the predicted result already happened."
+        "do not claim the predicted result already happened. The minimum "
+        "effect must meet the evaluator's fixed threshold for your metric."
     )
 
     def propose(self, observation, episode_id, actions, metrics):

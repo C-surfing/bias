@@ -29,6 +29,8 @@ class ComparisonTests(unittest.TestCase):
             (ep/"audit.json").write_text(json.dumps({
                 "task":"agentcf_popularity","action":"popularity_prompt",
                 "independently_confirmed_discoveries":0}))
+            (ep/"agentcf_training.json").write_text(json.dumps({
+                "trained_state_sha256":"c"*64}))
             called.append((kwargs["arm"],kwargs["seed"],kwargs["config"]["budget"]))
             return {"status":"COMPLETED_DEVELOPMENT","executed_episodes":1,
                     "independently_confirmed_discoveries":0}
@@ -47,9 +49,17 @@ class ComparisonTests(unittest.TestCase):
             self.assertTrue(result["cohort_pairing"]["agentcf_popularity"]
                             ["identical_frozen_experiment_inputs"])
             self.assertEqual(result["status"],"COMPLETED_DEVELOPMENT")
+            self.assertTrue(result["policy_arms_share_trained_state"])
             self.assertEqual(result["independently_confirmed_scientific_discoveries"],0)
             with self.assertRaises(FileExistsError):
                 compare_development(out,["agentcf_popularity"],config(),cohort_size=4)
+            # A prior-campaign PATH does not prove the Qwen history arm saw a record.
+            unused=compare_development(Path(tmp)/"empty_history",["agentcf_popularity"],
+                config(),arms=("qwen_no_history","qwen_audited_history"),
+                cohort_size=4,prior_campaign="dummy-previous-run")
+            self.assertFalse(unused["memory_comparison_interpretable"])
+            self.assertEqual(unused["cohort_pairing"]["agentcf_popularity"]
+                             ["history_records_seen_by_arm"]["qwen_audited_history"],0)
 
     def test_invalid_comparison_fails_before_executing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -77,6 +87,30 @@ class ComparisonTests(unittest.TestCase):
             self.assertFalse(paired["all_arms_ran_experiment"])
             self.assertFalse(paired["identical_frozen_user_cohorts"])
             self.assertEqual(result["status"],"INCOMPLETE_DEVELOPMENT_COMPARISON")
+
+    def test_equal_inputs_but_different_trained_memories_only_support_end_to_end(self):
+        def varying_memory(directory,tasks,mode,**kwargs):
+            ep=Path(directory)/"episode-001"
+            ep.mkdir(parents=True)
+            (ep/"cohort_frozen.json").write_text(json.dumps({
+                "users":["a","b","c","d"], "scientific_input_sha256":"b"*64}))
+            (ep/"execution.json").write_text(json.dumps({
+                "action":"popularity_prompt", "status":"FRESH_AGENTCF_DEVELOPMENT"}))
+            (ep/"audit.json").write_text(json.dumps({
+                "task":"agentcf_popularity", "action":"popularity_prompt",
+                "independently_confirmed_discoveries":0}))
+            (ep/"agentcf_training.json").write_text(json.dumps({
+                "trained_state_sha256":kwargs["arm"]}))
+            return {"status":"COMPLETED_DEVELOPMENT", "executed_episodes":1}
+        with tempfile.TemporaryDirectory() as tmp, patch(
+                "rsi_researcher.research.scientific_comparison.campaign", varying_memory):
+            result=compare_development(Path(tmp)/"comp",["agentcf_popularity"],
+                config(),arms=("strong_rule","qwen_no_history"),cohort_size=4)
+            self.assertEqual(result["status"],"COMPLETED_DEVELOPMENT")
+            self.assertFalse(result["policy_arms_share_trained_state"])
+            pair=result["cohort_pairing"]["agentcf_popularity"]
+            self.assertTrue(pair["identical_frozen_experiment_inputs"])
+            self.assertFalse(pair["identical_trained_agentcf_states"])
 
     def test_same_users_but_different_inputs_is_not_a_paired_comparison(self):
         def mismatch(directory,tasks,mode,**kwargs):
