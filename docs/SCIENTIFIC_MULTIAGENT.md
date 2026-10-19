@@ -90,8 +90,12 @@ by a separately labeled predeclared control, not to claim Qwen success.
 ```
 
 Each arm gets the SAME model-request/token/time ceiling, cohort seed, dataset
-and numerical audit. Actual model calls and token usage are reported, not
-treated as equal because the caps are equal. An arm with rejected Qwen
+and numerical audit. For AgentCF, paired status requires matching frozen
+initial state, training events, queries and prompts (one SHA-256 fingerprint);
+matching user IDs alone is insufficient. If an arm does not actually execute,
+the comparison is INCOMPLETE, not a successful paired study. Actual model
+calls and token usage are reported, not treated as equal because the caps are
+equal. An arm with rejected Qwen
 proposals is recorded as not executed. Without a frozen prior campaign,
 `qwen_audited_history` and `qwen_no_history` may be identical:
 `memory_comparison_interpretable=false`, **no RSI memory claim**.

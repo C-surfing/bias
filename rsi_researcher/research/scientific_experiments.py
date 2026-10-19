@@ -18,8 +18,18 @@ from rsi_researcher.research import crossbias_discovery as reference
 from rsi_researcher.evaluation.author import score_author_ranking
 from rsi_researcher.runtime.client import atomic_json
 
-# Frozen historical inputs are read from the canonical project, not a worktree.
+# Historical development records remain tied to their frozen original source.
+# New AgentCF experiments read tracked data from the current Git worktree.
+# Mixing mutable mainline data into fresh experiments is not reproducible.
 SOURCE = Path("/data/cjh/rsi/project")
+LOCAL_DATA = Path(__file__).resolve().parents[2] / "data"
+
+
+def scientific_input_fingerprint(cohort):
+    """Same initial memories, events, queries and prompts across policy arms."""
+    raw = json.dumps([*cohort, source_digest(LOCAL_DATA / "author_prompts.json")],
+                     ensure_ascii=False, sort_keys=True).encode("utf8")
+    return sha256(raw).hexdigest()
 
 # A registered action MUST expose the metrics that actually measure that action.
 # No generic Brier delta can substitute for a gamma or placebo falsifier.
@@ -67,7 +77,7 @@ def prepare_cohort(excluded_users, seed, count=6, events_per_user=2):
     if count < 4 or count % 2:
         raise ValueError("fresh cohort must contain at least four users and split equally")
     state, events, queries = author_data(
-        SOURCE / "data", count, events_per_user, seed, "exclude_known",
+        LOCAL_DATA, count, events_per_user, seed, "exclude_known",
         excluded_users=known_prior_users() | set(excluded_users),
     )
     if len(queries) != count or len(events) != count * events_per_user:
@@ -100,9 +110,9 @@ def run_fresh_agentcf(task, action, model, output, cohort):
         raise ValueError("unsupported fresh AgentCF action")
     initial, events, queries = cohort
     output = Path(output)
-    prompts_path = SOURCE / "data/author_prompts.json"
+    prompts_path = LOCAL_DATA / "author_prompts.json"
     prompts = json.loads(prompts_path.read_text(encoding="utf8"))
-    profile = author_profile(SOURCE / "data")
+    profile = author_profile(LOCAL_DATA)
     model.scope = {"experiment_stage": "training", "task": task}
     kernel = AgentCF(model, prompts)
     state = deepcopy(initial)

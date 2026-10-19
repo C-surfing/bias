@@ -21,8 +21,14 @@ class ComparisonTests(unittest.TestCase):
             directory=Path(directory)
             directory.mkdir()
             (directory/"episode-001").mkdir()
-            (directory/"episode-001/cohort_frozen.json").write_text(
-                json.dumps({"users":["a","b","c","d"]}))
+            ep=directory/"episode-001"
+            (ep/"cohort_frozen.json").write_text(json.dumps({
+                "users":["a","b","c","d"],"scientific_input_sha256":"a"*64}))
+            (ep/"execution.json").write_text(json.dumps({
+                "action":"popularity_prompt","status":"FRESH_AGENTCF_DEVELOPMENT"}))
+            (ep/"audit.json").write_text(json.dumps({
+                "task":"agentcf_popularity","action":"popularity_prompt",
+                "independently_confirmed_discoveries":0}))
             called.append((kwargs["arm"],kwargs["seed"],kwargs["config"]["budget"]))
             return {"status":"COMPLETED_DEVELOPMENT","executed_episodes":1,
                     "independently_confirmed_discoveries":0}
@@ -38,6 +44,9 @@ class ComparisonTests(unittest.TestCase):
             self.assertTrue(result["cohort_pairing"]["agentcf_popularity"]
                             ["identical_frozen_user_cohorts"])
             self.assertFalse(result["memory_comparison_interpretable"])
+            self.assertTrue(result["cohort_pairing"]["agentcf_popularity"]
+                            ["identical_frozen_experiment_inputs"])
+            self.assertEqual(result["status"],"COMPLETED_DEVELOPMENT")
             self.assertEqual(result["independently_confirmed_scientific_discoveries"],0)
             with self.assertRaises(FileExistsError):
                 compare_development(out,["agentcf_popularity"],config(),cohort_size=4)
@@ -67,7 +76,29 @@ class ComparisonTests(unittest.TestCase):
             paired=result["cohort_pairing"]["agentcf_memory"]
             self.assertFalse(paired["all_arms_ran_experiment"])
             self.assertFalse(paired["identical_frozen_user_cohorts"])
+            self.assertEqual(result["status"],"INCOMPLETE_DEVELOPMENT_COMPARISON")
 
+    def test_same_users_but_different_inputs_is_not_a_paired_comparison(self):
+        def mismatch(directory,tasks,mode,**kwargs):
+            ep=Path(directory)/"episode-001"
+            ep.mkdir(parents=True)
+            (ep/"cohort_frozen.json").write_text(json.dumps({
+                "users":["a","b","c","d"],
+                "scientific_input_sha256":kwargs["arm"]*4}))
+            (ep/"execution.json").write_text(json.dumps({
+                "action":"popularity_prompt","status":"FRESH_AGENTCF_DEVELOPMENT"}))
+            (ep/"audit.json").write_text(json.dumps({
+                "task":"agentcf_popularity","action":"popularity_prompt",
+                "independently_confirmed_discoveries":0}))
+            return {"status":"COMPLETED_DEVELOPMENT","executed_episodes":1}
+        with tempfile.TemporaryDirectory() as tmp, patch(
+                "rsi_researcher.research.scientific_comparison.campaign",mismatch):
+            with self.assertRaisesRegex(ValueError,"inputs differ"):
+                compare_development(Path(tmp)/"mismatch",["agentcf_popularity"],
+                                    config(),arms=("strong_rule","qwen_no_history"),
+                                    cohort_size=4)
+            saved=json.loads((Path(tmp)/"mismatch/comparison.json").read_text())
+            self.assertEqual(saved["status"],"FAILED_CLOSED")
 
 if __name__=="__main__":
     unittest.main()

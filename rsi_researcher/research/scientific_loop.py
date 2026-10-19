@@ -220,7 +220,8 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             # Freeze cohort IDs before training; never disclose validation target to agents.
             frozen = {"users": sorted(cohort[0]["users"]), "events":len(cohort[1]),
                       "queries":len(cohort[2]), "seed":seed,
-                      "no_validation_targets_in_research_prompt":True}
+                      "no_validation_targets_in_research_prompt":True,
+                      "scientific_input_sha256":experiments.scientific_input_fingerprint(cohort)}
             store_new(directory / "cohort_frozen.json", frozen)
         # The fixed-rule fallback must obey the same registry and metric contract.
         if plan["metric"] not in experiments.action_metrics(task, plan["action"]):

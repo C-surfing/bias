@@ -67,24 +67,53 @@ def compare_development(output, tasks, config, arms=DEFAULT_ARMS, *,
             atomic_json(output/"comparison.json",result)
         pairing={}
         for i,task in enumerate(tasks,1):
-            episode=f"episode-{i:03d}"
-            users={}
+            users, inputs, executed = {}, {}, {}
             for arm in arms:
-                f=output/arm/episode/"cohort_frozen.json"
-                users[arm]=json.loads(f.read_text(encoding="utf8"))["users"] if f.is_file() else None
-            completed=[tuple(u) for u in users.values() if u is not None]
-            matching=bool(completed) and len(set(completed))==1
-            if len(completed)==len(arms) and not matching:
-                raise ValueError("completed comparison arms used different user cohorts")
-            pairing[task]={"identical_frozen_user_cohorts":matching,
-                           "all_arms_ran_experiment":len(completed)==len(arms),
+                episode=output/arm/f"episode-{i:03d}"
+                freeze=episode/"cohort_frozen.json"
+                info=json.loads(freeze.read_text(encoding="utf8")) if freeze.is_file() else {}
+                users[arm]=info.get("users")
+                inputs[arm]=info.get("scientific_input_sha256")
+                audit_path, execution_path=episode/"audit.json",episode/"execution.json"
+                if audit_path.is_file() and execution_path.is_file():
+                    audit=json.loads(audit_path.read_text(encoding="utf8"))
+                    execution=json.loads(execution_path.read_text(encoding="utf8"))
+                    executed[arm]=(audit.get("task")==task and
+                        audit.get("action")==execution.get("action") and
+                        audit.get("independently_confirmed_discoveries")==0 and
+                        execution.get("status") not in (
+                            "ABSTAIN_NO_UPDATED_CANDIDATE_MEMORY",
+                            "ARCHIVED_DEVELOPMENT_REPLAY"))
+                else:
+                    executed[arm]=False
+            all_executed=all(executed.values())
+            if task.startswith("agentcf_"):
+                same_users=all(users.values()) and len({tuple(u) for u in users.values()})==1
+                same_inputs=all(inputs.values()) and len(set(inputs.values()))==1
+                matched=bool(same_users and same_inputs)
+                if all_executed and not matched:
+                    raise ValueError("experiment inputs differ across policy arms")
+            else:
+                same_users, same_inputs, matched=None, None, all_executed
+            pairing[task]={"identical_frozen_user_cohorts":same_users,
+                           "identical_frozen_experiment_inputs":same_inputs,
+                           "matched_for_development_comparison":matched,
+                           "all_arms_ran_experiment":all_executed,
+                           "execution_by_arm":executed,
                            "users_by_arm":users,
                            "not_an_independent_confirmation":True}
-        # A zero-execution Qwen arm is a meaningful failure: do not fill in
-        # fake metrics or silently substitute a fixed-rule outcome.
-        result.update(status="COMPLETED_DEVELOPMENT",cohort_pairing=pairing,
-                      memory_comparison_interpretable=bool(prior_campaign),
+        completed=all(p["all_arms_ran_experiment"] and p["matched_for_development_comparison"]
+                      for p in pairing.values())
+        usage={arm:result["arms"][arm].get("model_usage")
+               for arm in arms}
+        result.update(status=("COMPLETED_DEVELOPMENT" if completed
+                              else "INCOMPLETE_DEVELOPMENT_COMPARISON"),
+                      cohort_pairing=pairing,
+                      memory_comparison_interpretable=bool(
+                          completed and prior_campaign and
+                          {"qwen_no_history","qwen_audited_history"}.issubset(arms)),
                       equal_budget_ceiling=True,
+                      measured_usage_by_arm=usage,
                       independently_confirmed_scientific_discoveries=0,
                       no_evidence_of_rsi_self_improvement_yet=True)
     except Exception as exc:
