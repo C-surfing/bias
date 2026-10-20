@@ -65,6 +65,9 @@ def main(argv=None):
     if requested and requested[0]=="science":
         from rsi_researcher.research.scientific_loop import main as run_science
         return run_science(requested[1:])
+    if requested and requested[0]=="bias-five":
+        from rsi_researcher.research.five_bias_development import main as run_five_bias
+        return run_five_bias(requested[1:])
     if requested and requested[0]=="science-compare":
         from rsi_researcher.research.scientific_comparison import main as compare_science
         return compare_science(requested[1:])

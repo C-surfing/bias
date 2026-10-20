@@ -2,10 +2,19 @@
 import unittest
 from rsi_researcher.research import crossbias_discovery as baseline
 from rsi_researcher.research import scientific_experiments as experiments
-from rsi_researcher.research.scientific_loop import review_plan
+from rsi_researcher.research.scientific_loop import review_plan, public_evidence
 
 
 class ScientificContractTests(unittest.TestCase):
+    def test_agent_research_question_uses_frozen_five_bias_targets(self):
+        memory=public_evidence("agentcf_memory",[],"qwen_no_history")
+        self.assertIsNone(memory["formal_five_bias_target"])
+        self.assertTrue(memory["auxiliary_mechanism_not_debias_goal"])
+        self.assertEqual(len(memory["five_bias_registry_scope"]),5)
+        selection=public_evidence("coat_utility",[],"qwen_no_history")
+        self.assertEqual(selection["formal_five_bias_target"],"selection")
+        self.assertFalse(selection["auxiliary_mechanism_not_debias_goal"])
+
     def test_coat_each_action_uses_its_own_numeric_counterfactual(self):
         expected = {
             "gamma_stress": "gamma_reference_margin",

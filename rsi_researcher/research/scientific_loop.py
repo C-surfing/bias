@@ -93,6 +93,12 @@ def public_evidence(task, experience, arm="qwen_audited_history", skill_library=
         raise ValueError("promoted-skill arm requires a validated eligible skill")
     return {
         "question": source.CATEGORIES[task]["question"],
+        "formal_five_bias_target": experiments.EXPERIMENT_BIAS_TARGET[task],
+        "five_bias_registry_scope": [
+            {"id":t["bias_id"],"maturity":t["maturity"],
+             "current_experiment_adapters":t["existing_experimental_tasks"]}
+            for t in experiments.five_bias_coverage()],
+        "auxiliary_mechanism_not_debias_goal": task=="agentcf_memory",
         "registered_actions": list(experiments.task_spec(task)["actions"]),
         "registered_metrics": list(experiments.task_metrics(task)),
         "action_metric_contracts": experiments.metrics_by_action(task),
