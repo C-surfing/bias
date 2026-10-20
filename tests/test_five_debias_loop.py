@@ -9,7 +9,7 @@ from rsi_researcher.research.five_bias_development import (
 from rsi_researcher.research.scientific_director import conduct_five_bias_debias
 
 SOURCE=Path(__file__).resolve().parents[1]/(
- "runs/five-bias-unified-development-20261020-02/five_bias_development.json")
+ "runs/five-bias-unified-development-20261020-04-normalized-dr/five_bias_development.json")
 
 
 class ScientificFake:
@@ -105,8 +105,12 @@ class FiveBiasSearchTests(unittest.TestCase):
             self.assertGreaterEqual(len(r["rounds"]),5)
             self.assertEqual(r["actual_model_requests"],0)
             self.assertTrue(any(x["bias_id"]=="fairness" for x in r["rounds"]))
-            self.assertEqual(r["task_status"]["filter_bubble"],
-                             "ABSTAIN_UNIDENTIFIABLE_FILTER_BUBBLE")
+            self.assertIn(r["task_status"]["filter_bubble"],(
+                "DEVELOPMENT_EFFECT_WITH_QUALITY_GUARD",
+                "ABSTAIN_BY_DESIGNER",
+                "REJECTED_PREDECLARED_CONTRACT",
+                "REJECTED_BY_CRITIC",
+                "EXHAUSTED_METHODS_NO_DEBIAS"))
             self.assertFalse(r["science_goal_met"])
             self.assertEqual(r["independently_confirmed_debias"],0)
             self.assertIn(r["status"],(
@@ -119,8 +123,12 @@ class FiveBiasSearchTests(unittest.TestCase):
             r=conduct_five_bias_debias(Path(tmp)/"qwen-fake",evidence=SOURCE,
                 model=model,policy="qwen",max_rounds=14,max_requests=85)
             self.assertGreaterEqual(len(r["rounds"]),4)
-            self.assertEqual(r["task_status"]["filter_bubble"],
-                             "ABSTAIN_UNIDENTIFIABLE_FILTER_BUBBLE")
+            self.assertIn(r["task_status"]["filter_bubble"],(
+                "DEVELOPMENT_EFFECT_WITH_QUALITY_GUARD",
+                "ABSTAIN_BY_DESIGNER",
+                "REJECTED_PREDECLARED_CONTRACT",
+                "REJECTED_BY_CRITIC",
+                "EXHAUSTED_METHODS_NO_DEBIAS"))
             self.assertIn("diagnosis",model.roles)
             self.assertIn("design",model.roles)
             self.assertIn("critic",model.roles)

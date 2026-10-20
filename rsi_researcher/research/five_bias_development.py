@@ -15,7 +15,7 @@ from random import Random
 import argparse
 import json
 
-from rsi_researcher.research import bias_registry, exposure_synthetic
+from rsi_researcher.research import bias_registry, exposure_synthetic, feedback_pair_control
 from rsi_researcher.research.coat_selection import (
     DATA, SEED, THRESHOLD, fit_item_mean, estimated_p_matrix, metrics,
 )
@@ -162,6 +162,16 @@ def popularity_coat(ds):
     max_count=max(counts.values())
     by_user=defaultdict(list)
     for row in dev:by_user[row["user"]].append(row)
+    # In the same randomly rated candidate panels, how frequent are head
+    # items AMONG KNOWN RELEVANT rated candidates? Without this reference a
+    # smaller head share may simply suppress legitimately desired items.
+    reference=[]
+    for user,rows in by_user.items():
+        positives=[r for r in rows if r["rating"]>=THRESHOLD]
+        if positives:
+            reference.append(sum(r["item"] in head for r in positives)/
+                             len(positives))
+    relevant_head_opportunity=mean(reference) if reference else None
     variants={}
     for strength in (0.0,0.05,0.1,0.2):
         ranks={}
@@ -187,6 +197,11 @@ def popularity_coat(ds):
                                  for p in ("A","B")},
             "mean_quality_users":base["quality_users"],
             "intervention_strength":strength,
+            "known_relevant_head_opportunity_rate":relevant_head_opportunity,
+            "head_exposure_excess_over_known_relevance":(
+                sum(numerators.values())/sum(denominators.values())-
+                relevant_head_opportunity if relevant_head_opportunity is not None
+                else None),
         }
     baseline=variants["0.0"]
     for key,row in variants.items():
@@ -204,6 +219,8 @@ def popularity_coat(ds):
         "fixed_strength_grid":[0.0,0.05,0.1,0.2],
         "policies":variants,
         "independent_relevance_reference":"randomly rated (partial candidate) Coat development",
+        "relevance_opportunity_defined_as":"mean among users of fraction of randomized-rated positive candidate items that are training-popular head",
+        "known_positive_reference_users":len(reference),
         "identifies_unjustified_popularity_causally":False,
         "independent_confirmation":False,
         "limitations":"Fixed development candidate sets (usually small). Head exposure reduction "
@@ -265,6 +282,40 @@ def fairness_coat(ds):
             }
         return summary
     before=evaluate(False);after=evaluate(True)
+    # A genuinely different Debias design from groupwise intercept nudging:
+    # blend TRAIN-fitted unweighted and propensity-weighted item scores.
+    # No group membership is used during scoring; compare predictive error
+    # parity and every group's quality, NOT an opportunity-fairness claim.
+    unweighted,_=fit_item_mean(train,items,None,None)
+    methods={"original_propensity_weighted":base}
+    for blend in (.25,.5,.75,1.):
+        methods[f"global_blend_unweighted_{blend}"]={
+            item:(1-blend)*base[item]+blend*unweighted[item]
+            for item in items}
+    def audit_probability_scores(scores):
+        data={g:[0,0.] for g in ("men","women")}
+        for row in dev:
+            group=groups.get(row["user"])
+            if group not in data:continue
+            err=(scores[row["item"]]-int(row["rating"]>=THRESHOLD))**2
+            data[group][0]+=1
+            data[group][1]+=err
+        groupwise={g:data[g][1]/data[g][0] if data[g][0] else None
+                   for g in data}
+        return {"group_brier":groupwise,
+                "absolute_gap":abs(groupwise["men"]-groupwise["women"]),
+                "total_brier":sum(v[1] for v in data.values())/
+                              sum(v[0] for v in data.values())}
+    candidates={k:audit_probability_scores(v) for k,v in methods.items()}
+    original=candidates["original_propensity_weighted"]
+    for name,metric in candidates.items():
+        metric["gap_reduction"]=original["absolute_gap"]-metric["absolute_gap"]
+        metric["no_group_error_loss_over_0_001"]=all(
+            metric["group_brier"][g]<=original["group_brier"][g]+.001
+            for g in ("men","women"))
+        metric["accepted_development_candidate"]=bool(
+            metric["gap_reduction"]>=.0005 and
+            metric["no_group_error_loss_over_0_001"])
     if any(x["development_ratings"]<30 for x in before.values()):
         status="ABSTAIN_INSUFFICIENT_RANDOM_REFERENCE_PER_GROUP"
     else:
@@ -283,6 +334,8 @@ def fairness_coat(ds):
         "absolute_brier_gap_before":gap(before),
         "absolute_brier_gap_after":gap(after),
         "recommendation_rank_change":False,
+        "global_model_blend_train_only_candidates":candidates,
+        "blends_are_development_only":True,
         "independent_confirmation":False,
         "limits":["Self-selected training group residuals may be MNAR",
                   "Group labels from one dataset do not define universal fairness",
@@ -370,6 +423,7 @@ def run(output):
         KUAIRAND/"log_standard_4_22_to_5_08_pure.csv")
     controlled=exposure_synthetic.evaluate(reps=32,events=3000)
     exposure["synthetic_known_propensity_control"]={
+        "cross_sample_dr":exposure_synthetic.evaluate_dr(reps=32,events=3000),
         "oracle_vs_estimators":{
             t:{"naive_rmse":v["naive_logged_click_rate"]["rmse"],
                "ips_rmse":v["IPS"]["rmse"],"snips_rmse":v["SNIPS"]["rmse"]}
@@ -407,6 +461,8 @@ def run(output):
             KUAIRAND/"log_standard_4_22_to_5_08_pure.csv"),
         "fairness":fairness_coat(ds),
     }
+    data["filter_bubble"]["controlled_matched_simulation"]=(
+        feedback_pair_control.evaluate())
     if set(data)!={t.id for t in bias_registry.TASKS}:
         raise ValueError("five-bias registry coverage mismatch")
     output.mkdir(parents=True)
@@ -424,28 +480,68 @@ def run(output):
     return result
 
 
+def evaluate_joint_coat_design(alpha, beta):
+    """Controlled composite experiment: train-only propensity mixture and popularity penalty."""
+    if not isinstance(alpha,(int,float)) or not isinstance(beta,(int,float)) or not 0<=alpha<=1 or not 0<=beta<=.15:
+        raise ValueError("unregistered numeric composition")
+    ds=load_coat(DATA,split_seed=SEED)
+    train,dev,items=ds["train"],ds["development"],ds["item_ids"]
+    counts=Counter(x["item"] for x in train)
+    no,_=fit_item_mean(train,items,None,None)
+    weighted,_=fit_item_mean(train,items,estimated_p_matrix(),100)
+    scores={i:(1-alpha)*no[i]+alpha*weighted[i] for i in items}
+    before=metrics(dev,no,counts,items)
+    after=metrics(dev,scores,counts,items)
+    users=defaultdict(list)
+    for r in dev:users[r["user"]].append(r)
+    maximum=max(counts.values())
+    rankings={u:sorted([r["item"] for r in rows],
+        key=lambda i:(-scores[i]+beta*log1p(counts[i])/log1p(maximum),i))
+        for u,rows in users.items()}
+    result=evaluate_observed(dev,rankings,counts,catalog_items=items,k=5,
+                             positive_threshold=THRESHOLD,gain_floor=1)
+    relevant={u for u,rs in users.items() if any(r["rating"]>=THRESHOLD for r in rs)}
+    hit=sum(any(r["rating"]>=THRESHOLD and r["item"] in rankings[u][:5]
+                for r in users[u]) for u in relevant)/len(relevant)
+    gain=before["Brier_random_development"]-after["Brier_random_development"]
+    quality=(result["ndcg"]>=.99*before["NDCG5_random_development"]
+             and hit>=before["Hit5_random_development"]-.02)
+    return {"parameters":{"alpha":alpha,"beta":beta},"brier_gain":gain,
+            "ndcg":result["ndcg"],"hit":hit,"head_share":result["head_share"],
+            "quality_guard_passes":quality,
+            "registered_effect_passes":gain>=.002,
+            "development_candidate":bool(gain>=.002 and quality),
+            "independently_confirmed":False,
+            "source":"original Coat development ratings only; no holdout"}
+
+
 # Scientific Director chooses actions; this module alone owns outcome
 # interpretation. All numeric outcomes below are from frozen REAL development
 # data or a predeclared non-identifiable abstention. Never inspect holdouts.
 DEBIAS_ACTIONS = {
     "selection": ("estimated_propensity_clip_5",
                   "estimated_propensity_clip_20",
-                  "estimated_propensity_clip_100"),
+                  "estimated_propensity_clip_100",
+                  "joint_propensity_popularity_design"),
     "exposure": ("random_equal_budget", "random_reference"),
     "popularity": ("penalty_0.05","penalty_0.1","penalty_0.2"),
-    "fairness": ("group_calibrated",),
-    "filter_bubble": (),
+    "fairness": ("group_calibrated",
+                 "global_blend_unweighted_0.25",
+                 "global_blend_unweighted_0.5",
+                 "global_blend_unweighted_0.75",
+                 "global_blend_unweighted_1.0"),
+    "filter_bubble": ("controlled_uniform_exploration_0.22",),
 }
 DEBIAS_METRICS = {
     "selection": ("brier_gain", .002),
     "exposure": ("random_reference_common_brier_gain", .01),
     "popularity": ("head_top20_share_reduction", .003),
     "fairness": ("group_brier_gap_reduction", .0005),
-    "filter_bubble": ("unsupported_trajectory", 1.),
+    "filter_bubble": ("simulated_longitudinal_entropy_gain", .08),
 }
 
 
-def evaluate_debias_action(frozen, bias, action):
+def evaluate_debias_action(frozen, bias, action, *, parameters=None):
     """Independently compute action validity/utility on frozen development data.
 
     No LLM output enters numerical measurements; unsupported causal claims
@@ -457,16 +553,27 @@ def evaluate_debias_action(frozen, bias, action):
     metric,floor=DEBIAS_METRICS[bias]
     confidence="DEVELOPMENT_ONLY_NO_INDEPENDENT_CONFIRMATION"
     if bias=="selection":
-        base=entry["policies"]["unweighted"]
-        proposed=entry["policies"][action]
-        value=base["brier"]-proposed["brier"]
-        quality=(proposed["ndcg_at_5"]>=.99*base["ndcg_at_5"]
-                 and proposed["hit_at_5"]>=base["hit_at_5"]-.02)
+        if action=="joint_propensity_popularity_design":
+            if not isinstance(parameters,dict) or set(parameters)!={"alpha","beta"}:
+                raise ValueError("new design needs exactly two frozen coefficients")
+            composed=evaluate_joint_coat_design(**parameters)
+            value=composed["brier_gain"]
+            quality=composed["quality_guard_passes"]
+            constraints={"numeric_composition":composed,
+                         "author_propensity_is_estimated_not_known":True}
+        else:
+            if parameters is not None:
+                raise ValueError("fixed methods cannot receive free coefficients")
+            base=entry["policies"]["unweighted"]
+            proposed=entry["policies"][action]
+            value=base["brier"]-proposed["brier"]
+            quality=(proposed["ndcg_at_5"]>=.99*base["ndcg_at_5"]
+                     and proposed["hit_at_5"]>=base["hit_at_5"]-.02)
+            constraints={"ndcg_at_least_99pct_baseline":quality,
+                         "hit_at_5_loss_at_most_two_percentage_points":quality,
+                         "author_propensity_is_estimated_not_known":True}
         identifiable=True
         label="SELECTION_RANDOM_REFERENCE_DEBIAS_CANDIDATE"
-        constraints={"ndcg_at_least_99pct_baseline":quality,
-                     "hit_at_5_loss_at_most_two_percentage_points":quality,
-                     "author_propensity_is_estimated_not_known":True}
     elif bias=="exposure":
         base=entry["policies"]["standard_only"]
         proposed=entry["policies"][action]
@@ -497,15 +604,30 @@ def evaluate_debias_action(frozen, bias, action):
                        proposed["tail_relevant_recall"]>=.99*base["tail_relevant_recall"]),
                      "causal_popularity_effect_identified":identifiable}
     elif bias=="fairness":
-        value=(entry["absolute_brier_gap_before"]-
-               entry["absolute_brier_gap_after"])
-        before=entry["unadjusted"]; after=entry["group_calibrated"]
-        quality=all(after[g]["brier"]<=before[g]["brier"]+.001
-                    for g in ("men","women"))
+        if action=="group_calibrated":
+            value=(entry["absolute_brier_gap_before"]-
+                   entry["absolute_brier_gap_after"])
+            before=entry["unadjusted"]; after=entry["group_calibrated"]
+            quality=all(after[g]["brier"]<=before[g]["brier"]+.001
+                        for g in ("men","women"))
+        else:
+            candidate=entry["global_model_blend_train_only_candidates"][
+                action]
+            value=candidate["gap_reduction"]
+            quality=candidate["no_group_error_loss_over_0_001"]
         identifiable=entry["status"]=="GROUP_PREDICTION_CALIBRATION_DEVELOPMENT"
         label="FAIRNESS_ERROR_PARITY_METHOD_TEST"
         constraints={"no_group_brier_loss_over_0_001":quality,
                      "predeclared_group":"Coat dataset men/women only"}
+    elif bias=="filter_bubble":
+        evidence=entry["controlled_matched_simulation"]
+        value=evidence["panels"]["unseen_simulation"]["entropy_gain"]["mean"]
+        quality=all(evidence["fixed_acceptance"].values())
+        identifiable=bool(evidence["same_initial_state"] and
+                          evidence["same_exogenous_uniforms_across_policies"])
+        label="SYNTHETIC_SEQUENTIAL_FILTER_BUBBLE_CONTROL_ONLY"
+        constraints={"paired_unseen_simulation":quality,
+                     "real_world_potential_outcomes_identified":False}
     effect=value>=floor
     return {
         "bias_id":bias, "registered_method":action, "metric":metric,
@@ -514,8 +636,14 @@ def evaluate_debias_action(frozen, bias, action):
         "quality_guard_passes":quality,
         "mechanism_identification_sufficient":identifiable,
         "development_effect_passes":bool(effect and quality),
-        "development_debias_candidate":bool(effect and quality and identifiable
-                                            and bias=="selection"),
+        "development_debias_candidate":bool(
+            effect and quality and identifiable and
+            bias in ("selection","fairness")),
+        "candidate_scope":(
+            "Coat groupwise predictive-error parity, NOT exposure/opportunity fairness"
+            if bias=="fairness" else
+            "Coat random-rating prediction and ranking safeguards"
+            if bias=="selection" else "proxy_or_simulation_only"),
         "evidence_class":label,
         "constraints":constraints,
         "scientific_scope":confidence,
@@ -541,7 +669,8 @@ def public_debias_context(frozen, bias, previous):
     elif bias=="fairness":
         controls={"baseline_group_gap":base["absolute_brier_gap_before"]}
     else:
-        controls={"matched_longitudinal_experiment_exists":False}
+        controls={"matched_longitudinal_real_experiment_exists":False,
+                  "controlled_synthetic_paired_experiment_available":True}
     return {"five_bias_target":bias,
             "bias_definition":task.definition,
             "allowable_interventions":list(task.allowable_interventions),

@@ -150,6 +150,83 @@ def evaluate(reps=REPS,events=EVENTS,seed=SEED):
       ]}
 
 
+def evaluate_dr(reps=32,events=3000,seed=SEED):
+    """IPS / SNIPS / cross-fitted-by-sample DR in known-propensity simulation.
+
+    Independent logged training data estimates reward features; evaluators
+    see ONLY selected logged outcomes and p_log, never oracle q(u,i).
+    Truth q is used strictly in the separate report's reference oracle.
+    Target policies depend on user/item identifiers alone, not hidden q.
+    """
+    from collections import defaultdict
+    if reps<4 or events<200:
+        raise ValueError("insufficient synthetic DR power")
+    logging=logging_distribution()
+    def pi(user,policy):
+        if policy=="uniform":
+            return [1/ITEMS]*ITEMS
+        if policy=="head_capped":
+            # Fixed, label-free relevance-agnostic exposure intervention.
+            # 10 bottom + 10 top items: 10*.06 + 10*.04 = 1.
+            return [(.04 if j>=ITEMS//2 else .06)
+                    for j in range(ITEMS)]
+        raise ValueError("unknown target policy")
+    target_names=("uniform","head_capped")
+    truth={t:sum(sum(pi(u,t)[i]*q(u,i) for i in range(ITEMS))
+                   for u in range(USERS))/USERS for t in target_names}
+    runs={t:{"IPS":[],"SNIPS":[],"DR":[],"naive_logged":[]} for t in target_names}
+    for repeat in range(reps):
+        rng_train=Random(seed+200003+repeat)
+        train=[]
+        for _ in range(events):
+            u=rng_train.randrange(USERS)
+            i=choose(logging,rng_train)
+            train.append((u,i,int(rng_train.random()<q(u,i))))
+        prior=sum(y for _,_,y in train)/events
+        sums=defaultdict(int);n=defaultdict(int)
+        for u,i,y in train:
+            key=(u%10,i%5)
+            sums[key]+=y;n[key]+=1
+        def qhat(u,i):
+            k=(u%10,i%5)
+            return (sums[k]+20*prior)/(n[k]+20)
+        dm={t:sum(sum(pi(u,t)[i]*qhat(u,i) for i in range(ITEMS))
+                  for u in range(USERS))/USERS for t in target_names}
+        rng_eval=Random(seed+300007+repeat)
+        tally={t:[0.,0.,0.] for t in target_names}
+        raw=0
+        for _ in range(events):
+            u=rng_eval.randrange(USERS)
+            i=choose(logging,rng_eval)
+            reward=int(rng_eval.random()<q(u,i))
+            raw+=reward
+            for t in target_names:
+                w=pi(u,t)[i]/logging[i]
+                tally[t][0]+=w*reward
+                tally[t][1]+=w
+                tally[t][2]+=w*(reward-qhat(u,i))
+        for t in target_names:
+            ips,weight,correction=tally[t]
+            runs[t]["IPS"].append(ips/events)
+            runs[t]["SNIPS"].append(ips/weight)
+            runs[t]["DR"].append(dm[t]+correction/events)
+            runs[t]["naive_logged"].append(raw/events)
+    return {
+        "status":"SYNTHETIC_KNOWN_PROPENSITY_DR_CROSS_SAMPLE",
+        "logging_min_propensity":min(logging),
+        "logging_probabilities_observed_by_evaluator":True,
+        "reward_model_training_separate_from_evaluation":True,
+        "target_policy_uses_hidden_true_reward":False,
+        "repetitions":reps,"training_and_evaluation_each":events,
+        "methods":{t:{"oracle_value":truth[t],
+                      "estimators":{k:stats(v,truth[t])
+                                    for k,v in estimates.items()}}
+                   for t,estimates in runs.items()},
+        "real_KuaiRand_identification":False,
+        "conclusion_scope":"Known-propensity simulator only; not real-world OPE",
+    }
+
+
 def run(output, *, reps=REPS,events=EVENTS,seed=SEED):
     output=Path(output).resolve()
     if not output.is_relative_to(ROOT/"runs"):

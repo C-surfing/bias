@@ -350,7 +350,7 @@ from rsi_researcher.research.five_bias_development import (
     public_debias_context,
 )
 from rsi_researcher.research.scientific_agents import (
-    DiagnosisAgent, DesignerAgent, CriticAgent, ReflectionAgent,
+    DiagnosisAgent, DesignerAgent, CriticAgent, ReflectionAgent, strict, TEXT,
 )
 from rsi_researcher.research.scientific_loop import utc, digest
 from rsi_researcher.runtime.client import atomic_json, usage_summary
@@ -360,7 +360,8 @@ from rsi_researcher.runtime.models import create_model, model_description
 
 def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                             policy="qwen", max_rounds=14, max_requests=90,
-                            min_development_debias_tasks=1):
+                            min_development_debias_tasks=1,
+                            joint_design_only=False):
     """Continue until real development Debias goal or honest bounded exhaustion.
 
     Method candidates, effect floors, evaluation data, and stop criteria are
@@ -388,6 +389,7 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
     protocol={
         "version":"five-bias-constrained-scientific-debias-v1",
         "policy":policy,"max_rounds":max_rounds,
+        "joint_design_only":joint_design_only,
         "hard_max_requests":max_requests,
         "min_development_debias_tasks":min_development_debias_tasks,
         "five_bias_tasks":list(DEBIAS_ACTIONS),
@@ -407,7 +409,10 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
         limits=RunLimits(output,**{**config["budget"],
                                     "max_requests":max_requests})
         model=create_model(output,max_requests,limits,config)
-    actions_left={k:list(v) for k,v in DEBIAS_ACTIONS.items()}
+    actions_left={k:(
+        ["joint_propensity_popularity_design"] if k=="selection" else []
+        ) if joint_design_only else list(v)
+        for k,v in DEBIAS_ACTIONS.items()}
     attempted={k:0 for k in DEBIAS_ACTIONS}
     completed=set()
     pending=list(DEBIAS_ACTIONS)
@@ -438,7 +443,7 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
             # One scientific episode needs diagnosis + design + review +
             # reflection. Do not start an episode without its call budget.
             if model.requests >= max_requests or (
-                    policy=="qwen" and model.requests+4>max_requests):
+                    policy=="qwen" and model.requests+5>max_requests):
                 state["status"]="STOP_MODEL_REQUEST_BUDGET"
                 break
             bias=pending.pop(0)
@@ -459,6 +464,8 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
             if policy=="strong_rule":
                 choice["action"]=actions_left[bias][0]
                 choice["status"]="FIXED_RULE_PREDECLARED"
+                if choice["action"]=="joint_propensity_popularity_design":
+                    choice["joint_parameters"]={"alpha":.75,"beta":.05}
             else:
                 diag=DiagnosisAgent(model).act(context,round_id)
                 design=DesignerAgent(model).propose(
@@ -480,9 +487,24 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                 if proposed not in actions_left[bias]:
                     raise ValueError("Qwen proposed unregistered method")
                 choice["action"]=proposed
+                if proposed=="joint_propensity_popularity_design":
+                    values=DesignerAgent(model).act({
+                        "legal_expression":"(1-alpha)*unweighted_item_probability + alpha*propensity_weighted_item_probability; ranking subtracts beta*log(1+training_frequency)/normalizer",
+                        "unknown_development_outcome":True,
+                        "predeclared_goal":"Brier improvement >=0.002, NDCG >=99% of baseline, Hit loss <=0.02",
+                        "alpha_range":[0,1],"beta_range":[0,.15],
+                        "no_holdout_labels_visible":True
+                    },round_id,schema=strict({
+                        "alpha":{"type":"number","minimum":0,"maximum":1},
+                        "beta":{"type":"number","minimum":0,"maximum":.15},
+                        "mechanism":TEXT,"falsifier":TEXT}))
+                    choice["joint_parameters"]={"alpha":values["alpha"],
+                                                "beta":values["beta"]}
+                    choice["joint_hypothesis"]=values
                 critique=CriticAgent(model).act({
                     "five_bias_task":context,
                     "frozen_design":design,
+                    "joint_parameters":choice.get("joint_parameters"),
                     "real_numeric_results_hidden":True,
                     "registered_evaluation_guards":{
                         "metric":metric,"minimum_effect":threshold,
@@ -501,7 +523,9 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                                        "REJECTED_BY_CRITIC"):
                 if digest(evidence)!=protocol["evidence_sha256"]:
                     raise ValueError("frozen numeric action source changed during research")
-                measurement=evaluate_debias_action(frozen,bias,choice["action"])
+                measurement=evaluate_debias_action(
+                    frozen,bias,choice["action"],
+                    parameters=choice.get("joint_parameters"))
                 choice["numeric_audit"]=measurement
                 choice["numeric_audit_source_sha256"]=digest(evidence)
                 choice["status"]=("DEVELOPMENT_EFFECT_WITH_QUALITY_GUARD"
@@ -574,6 +598,7 @@ def debias_main(argv=None):
     parser.add_argument("--max-rounds",type=int,default=14)
     parser.add_argument("--max-requests",type=int,default=90)
     parser.add_argument("--min-development-debias-tasks",type=int,default=1)
+    parser.add_argument("--joint-design-only",action="store_true")
     args=parser.parse_args(argv)
     conf=json.loads(Path(args.config).read_text()) if args.config else None
     if args.policy=="qwen":
@@ -589,12 +614,14 @@ def debias_main(argv=None):
             args.output,evidence=args.evidence,model=ZeroModel(),
             policy="strong_rule",max_rounds=args.max_rounds,
             max_requests=args.max_requests,
-            min_development_debias_tasks=args.min_development_debias_tasks))
+            min_development_debias_tasks=args.min_development_debias_tasks,
+            joint_design_only=args.joint_design_only))
     return _print_debias(conduct_five_bias_debias(
         args.output,evidence=args.evidence,config=conf,
         policy=args.policy,max_rounds=args.max_rounds,
         max_requests=args.max_requests,
-        min_development_debias_tasks=args.min_development_debias_tasks))
+        min_development_debias_tasks=args.min_development_debias_tasks,
+        joint_design_only=args.joint_design_only))
 
 
 def _print_debias(result):
