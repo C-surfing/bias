@@ -1,0 +1,19 @@
+{
+  "mode": "single_use_independent_random_rating_holdout",
+  "bias_id": "selection",
+  "development_source_sha256": "3e5560d7fade30fd4b2e0bab0c2fc81d1740ea1dbbc26986edfecd7617bf083a",
+  "primary_policy": "estimated_propensity_clip_100",
+  "baseline_policy": "unweighted",
+  "holdout_split_seed": 20261014,
+  "min_brier_gain": 0.002,
+  "min_relative_ndcg": 0.99,
+  "max_hit_loss": 0.02,
+  "paired_bootstrap_confidence": 0.95,
+  "bootstrap_seed": 20261014,
+  "one_shot_use": true,
+  "limitations": [
+    "Independent random rating pairs but known-user population; not new-user validation.",
+    "Estimated propensities are not verified logging probabilities.",
+    "Only this preselected policy may be judged on the holdout; no post-hoc tuning."
+  ]
+}
