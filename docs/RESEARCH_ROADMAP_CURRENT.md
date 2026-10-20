@@ -1,41 +1,34 @@
-# RSI 下一阶段科研路线（2026-10-17）
+# RSI × Debias 下一阶段科研路线（2026-10-20）
 
-**研究命题 A**：能否在可识别的记录策略和独立参考面板上确认推荐去偏，而非代理指标改善？
-**研究命题 B**：Research Agent 的策略记忆/修订能否在未见任务、等预算下超越强固定基线？
+**已完成工程基础**：五类 Bias Registry、Coat/KuaiRand/AgentCF 与合成世界实验任务、真实 Qwen3-8B 的 Diagnosis/Designer/Critic/Reflection、合法动作执行、独立审计、证据存储、预算型树搜索与 Outer Director、历史失败复盘。软件能执行科学研究，不代表研究方法已证明有效。
 
-## 当前已交付
-- 统一主工程 + 合并前快照 + 10/16 冻结 AgentCF 源码/测试保留。
-- 统一 Bias Registry / Coat CPU Benchmark / Evidence Gate / Planner / Research Memory。
-- 第二类 KuaiRand Bias 的真实可识别性审计：能够正确拒绝无依据因果确认。
-- Coat 估计倾向稳健性：gamma 0.75/1/1.25，最佳截断 100/100/20，非完全稳定。
-- 这些结果都是开发观察，绝非独立去偏或 RSI 自我提升证明。
+**已知负结论必须保留**：Coat 预注册 Selection 保留集联合质量门槛失败；真实 KuaiRand Exposure 无可靠部署 OPE；Popularity 不可仅以 head-share 下降宣称去偏；两期 Filter Bubble 趋势随样本量配平变号；旧 Fairness 群体截距使两组变差；真实 Qwen 组合设计未通过 Hit 质量约束；固定规则目前优于 Qwen 的开发发现/调用成本。
 
-## 下一批任务（按顺序）
-1. P0 质量门槛：全量软件测试、固定 SHA、源码版本控制、重要路径源追踪。
-2. P1 研究评价：对 Coat 的倾向估计/有效样本量/权重截断和排序长尾损害做稳定性统计；
-   需要提前冻结新的敏感性协议，避免同一开发划分上反复选赢家。
-3. P2 新科研任务集：准备独立专家标注或可控合成真值，冻结机制任务、预期反证及动作集合。
-4. P3 五组等预算：强规则/无历史 Qwen/相关历史/可修订策略/无关或打乱历史。
-   固定工具权限、可执行实验数、模型调用预算，测独立有效发现与每单位成本。
-5. P4 KuaiRand 有可识别性条件的真实 Exposure 或受控曝光模拟；AgentCF 作为 Memory/Popularity
-   机制试验台，同时校准双人盲审 60 条记录。
-6. P5 独立确认：用户和共享物品记忆完全隔离，统计效能与实验版本预注册后才能解除保留集。
+## P0：冻结可复核的现阶段证据与入口
+- 以 `main` 当前的 `scientific_*`、`five_bias_development`、`bias_registry` 为标准研发路径；README 和架构只描述一套现状。
+- 开发与确认数据绝对分离，保留单次 Coat 保留集已被使用的事实；所有原始实验文件只追加、不可覆盖。
+- 旧 ExperimentJournal/ResearchMemory/历史演示只用于旧研究复核；不继续扩展其协议。
 
-**停止做**：不新增 Planner V3/V4，不在 outputs/ 建第二套 Agent，不让 Qwen 自判自己的科学成功，
-不把无标注的机制探针/用户头尾质量差称为已证实经典偏差。
+## P1：有识别前提的新科学任务与新独立数据
+- 独立新 Coat 用户或新可用偏差基准；新 confirmation 分区需由未接触样本预注册，避免利用已开封保留集优化。
+- KuaiRand 若缺已知 logging propensity 和目标策略 positivity，仅做预测迁移/支持集审计；不可强行标 OPE。
+- AgentCF 预先选具跨用户 Item Memory writer-reader 支持的新训练面板，固定重复测量，区分真实干预效应与模型噪声。
+- 真实纵向 Filter Bubble 需同初态多轮 matched policy 干预；无则明确弃权。
 
-## 受控 Exposure P1 的补充进展
+## P2：可信的强基线与成本公平
+- 等数据、等划分、严格复现 IPS/SNIPS/DR 与 **AutoDebias 官方实现**；隔离依赖，不污染服务器共用 Python。
+- 比较 strong fixed rule、no-history、audited-memory、shuffled-history、Linear、Tree/Director 的相同总预算，报告真实 GPU 秒/Token/实验次数。
+- 对失败实验保留 denominator，不只汇报“最好的找到的那一次”。
 
-已有合成 logging propensity 和可解析 oracle policy value，可直接用作 IPS/SNIPS/abstention 基础单元测试；下一轮需要先冻结扰动机制与成本，再在这类有真实参照的任务上比较 Qwen 的研究决策（不得泄漏 oracle 到 Planner）。
+## P3：统计性证伪与可确认科学结果
+- 明确零假设、最小重要效应、统计功效、独立确认单位、置信区间、多重检验校正及序贯停机规则。
+- 借 POPPER 的主动反证思想，不能直接宣称已实现其 e-value/I 类错误保证；对独立可识别任务设置审计。
+- 任何验证标签都不得回流到 Designer 的后续开发选择；失败时换新独立任务，不复用保留集。
 
-## 决策 Pilot 的负面结果（2026-10-17）
+## P4：RSI 真正自我改进
+- 对候选 Research Skill 先进行跨任务、未见机制的盲测；只有外部批准才能提升可复用科研策略。
+- 借 DiscoPER 的周期性二阶反思与 AI Scientist-v2 的树搜索，改进研究假设与实验选择的样本效率，而非无限生成候选。
+- 报告主要终点：**每单位真实计算成本的独立确认去偏发现数**，辅助统计：拒绝/弃权、失败率、效用损害、机制覆盖和证据可追溯性。
 
-14 个合成未见配置；强规则平均 regret 0.001141、Qwen 无历史 0.001263、相关历史 0.001917、策略修订 0.002474、打乱历史 0.005275；不能证明 RSI 优于规则。禁止用这批题继续选提示词；下一轮转向独立机制家族与科研发现数/成本。详见 DECISION_PILOT_20261017.md。
-
-## Cross-Bias Qwen 真实反证实验（2026-10-17）
-
-Coat Selection + AgentCF Popularity/Item Memory 共四项研究任务，Qwen 无历史与相关历史各 4 次提案 + 4 次复盘，外加共享的 44 次新 Qwen 排序调用。总 60 调用、51,292 prompt tokens + 5,303 completion tokens。开发信号：固定规则1，无历史2，相关历史2；独立确认有效科学发现各为0。两个 Qwen 组四项行动完全相同，未证明 Memory 提升。独立审核发现至少两项复盘措辞与数值不符，生成的 5 张新 Research Memory 均为来源验证的发展期事实卡，非独立确认。此四任务与现有开发/作者状态均已使用，不得重复作为未见测试。下一步转为结构化反证预测合同与独立新训练状态。详情见 CROSSBIAS_DISCOVERY_PILOT_20261017.md。
-
-## 新 cohort 的条件性负面结果（2026-10-17）
-
-六位与旧 20 人不重叠的新作者数据用户完成 12 条真实 Qwen-AgentCF 训练事件，两组三人面板执行 Item Memory/Popularity 两种消融并与同条件重复对照。所有研究预测在训练前正式冻结；固定规则、无历史和经过审查的 Research Memory Qwen 各 0/2 预测通过跨面板方向、最小效应和 NDCG 质量门槛。92 次模型调用，78,030+11,607 tokens，确认级科学发现=0。需要更大的新 cohort、多训练种子与独立确认面板，不能以该六人样本继续调提示词。
+## 不做的事
+不重造五套 Agent，不让 Qwen 自行修改评分程序，不把模拟数据说成真实因果结果，不为反复验证而增加无价值框架，不删除真实科学实验记录，不在已开封 Coat holdout 上“试到过关”。

@@ -1,192 +1,72 @@
-# 当前唯一主工程入口（2026-10-17）
+# RSI Researcher：推荐系统偏差的可证伪多智能体科研系统
 
-后续研发请进入 `/data/cjh/rsi/project`，只使用 `rsi_researcher` 包。
-旧 outputs/、experiments/ 和冻结 releases/ 都是历史证据，不是新版本源代码入口。
+> 当前主线：`/data/cjh/rsi/project` · 分支 `main`。2026-10-20 已将 `feat/rsi-multiagent-20261017` 快进整合至主线。
 
-- 当前架构：[ARCHITECTURE_CURRENT](docs/ARCHITECTURE_CURRENT.md)
-- 下一阶段研究：[RESEARCH_ROADMAP_CURRENT](docs/RESEARCH_ROADMAP_CURRENT.md)
+## 科学目标
 
-命令：
+将 Selection、Exposure、Popularity、Filter Bubble、Fairness 五类经典推荐偏差转化为具有**可识别前提、合法实验、预设反证、独立评价与停止条件**的研究任务。Qwen3-8B 可提出假设与方案，但**不得修改实验执行器、评估代码、数据划分或科学通过标准**。
+
+核心研究问题不是“模型能否给出更高 NDCG”，而是：**在未见任务和匹配成本下，证据驱动的多智能体研究能否比固定规则和强去偏算法找到更多独立确认的有效去偏发现？**
+
+## 当前真正运行的架构
+
+```text
+Bias Task Registry / 固定数据与评价协议
+    │
+Outer Research Director（任务组合、全局预算、停止条件）
+    │
+Evidence-Guided Scientific Tree（假设分叉、frontier、父节点、局部预算）
+    │
+Diagnosis → Designer → Critic → 受控 Python Executor → Independent Numeric Evaluator → Reflection
+    │                               │                                  │
+    └── Verified Development Audit / Research Memory ←────────────────┘
+                    │
+          Candidate Research Skill（未确认）
+                    │
+      预注册未见数据 / 独立统计确认 / 外部批准后才可升级
+```
+
+- 五类 Bias 的概念定义见 `research/bias_registry.py` 与 `configs/bias_tasks.json`。
+- 四个科研 Agent 的职责与结构化调用见 `research/scientific_agents.py`。
+- 单回合科学协议在 `research/scientific_loop.py`；树搜索在 `scientific_tree.py`；全局任务与预算调度在 `scientific_director.py`。
+- 注册干预、冻结 AgentCF 与独立实验测量在 `scientific_experiments.py`；五类开发数据在 `five_bias_development.py`。
+- 策略对照在 `scientific_comparison.py`；候选科研技能在 `scientific_skills.py`。
+- `recommenders/agentcf.py` 的 User/Item Memory 是研究**对象与干预机制**；旧 `research/memory.py` 属于历史科研入口，当前权威科研记忆使用来源可验证的独立数值审计，二者不可混淆。
+
+## 运行（已有开发数据，无需启动 GPU）
 
 ```bash
 cd /data/cjh/rsi/project
 /data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-tasks
-/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-coat --output runs/my-new-coat
-/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-exposure --output runs/my-new-exposure
-/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-coat-sensitivity --output runs/my-new-sensitivity
-/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-exposure-sim --output runs/my-new-exposure-synthetic
-/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-decision-freeze --output runs/new-frozen-decision-task
-/data/cjh/rsi/envs/research/bin/python -B -m unittest discover -s tests -t .
+/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher bias-five --output runs/UNIQUE_FIVE_BIAS_RUN
+/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher science-debias --help
+/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher science-tree --help
+/data/cjh/rsi/envs/research/bin/python -B -m unittest discover -s tests -t . -q
 ```
 
-以上 Bias 子命令只运行 CPU 开发证据；不会启动新 Qwen、调用 GPU 或评价确认标签。
-原有 author-check、study、run、validate 命令依旧存在，按各自配置可能实际调用模型。
+真实 Qwen 研究需已有获授权的本地 vLLM 服务、相应配置与独立计算预算；**上述命令不会擅自启动 GPU 服务**。所有运行输出必须写入新的、互不覆盖的目录；切勿用同一 Coat 保留集重新挑选候选。
 
----
+## 可复核证据与科研结论
 
-## 历史 README（2026-10-15，原样留存）
+| 主题 | 开发阶段的发现 | 科学边界 |
+|---|---|---|
+| Coat Selection | cap=100 开发 Brier 改善 0.003735；冻结保留集改善 0.0034348 | 保留 NDCG 比例仅 0.980697，未达到 0.99，联合验收失败 |
+| KuaiRand Exposure | 等量随机曝光训练 Brier 0.145696 vs 标准日志 0.226810（共同支持集） | 是随机参考分布上的预测证据；真实 logging propensity 不完整，非部署因果 OPE |
+| Coat Popularity | \u03bb=0.10 时头部曝光 0.21931→0.21379 | 已知相关候选机会参照不支持直接宣称“纠正了不合理热门偏差” |
+| Filter Bubble | 配对受控模拟熵 +0.174780；期望点击率 -0.017689 | 真实 KuaiRand 两期结果无法识别匹配的多轮因果干预 |
+| Coat Fairness | Brier 差距 0.005924→0.004623；总体 Brier 0.149546→0.148983 | 仅开发集的二元群体预测误差 parity 候选，未独立确认 |
+| Qwen 科学搜索 | 四角色、受控实验、独立审计、Outer Director / Tree 均已实际运行 | 固定规则在当前组合任务的开发门槛和调用成本上优于 Qwen；无 RSI 优越性证明 |
 
-# 推荐系统研究员（RSI Researcher）
+**独立确认的有效去偏发现数量：0。** 不把模拟机制有效、局部代理改善、程序测试通过或研究 Agent 语言表述算作独立科研发现。
 
-**当前推进范围（2026-10-15）：只用 AgentCF 作者的 CDs-100-user-dense 数据与本地 Qwen3-8B。** 真实入口是 `author-check`，不是人工场景配置 `qwen_agentcf.json`，也不是下面保留的历史 ItemCF `study`。
+不可覆盖的来源：`runs/coat-selection-preregistered-holdout-20261020-01`、`runs/five-bias-unified-development-20261020-04-normalized-dr`、`runs/five-bias-{fixed,qwen}-two-goals-20261020-01`。最新独立工作树的相关原始报告已按相同文件名复制到主工程的 `runs/` 以供检查；既有目录只读、不得复用为新确认。
 
-在服务器 `/data/cjh/rsi/project` 中，启动项目自己的 vLLM 服务后运行：
+## 文档
 
-```bash
-python -m rsi_researcher author-check --config configs/qwen_agentcf_author.json --output runs/qwen-author-check
-```
+- [现行整体架构](docs/ARCHITECTURE_CURRENT.md)
+- [下一阶段科研路线](docs/RESEARCH_ROADMAP_CURRENT.md)
+- [真实五类开发与冻结确认结果](docs/FIVE_BIAS_CONFIRMED_RESEARCH_20261020.md)
+- [本地 Qwen 与树/线性对照](docs/SCIENTIFIC_REAL_QWEN_RUN_20261020.md)
+- [论文与源代码参照](docs/SCIENTIFIC_RESEARCH_REFERENCES.md)
 
-默认检查 2 名用户、每人 5 条真实训练事件，按作者配置使用 **9 个陪选＋1 个目标**。输出 `report.md`、数据说明、每条记忆更新和实际请求日志。只读 train/valid，不读取 test；不会退回付费后端。这一步确认真实流程可运行，不能证明去偏或 RSI。详细说明见 [AgentCF 实际推进](docs/AgentCF实际推进_2026-10-15.md)。
-
-以下第五、六版内容保留为历史记录，其中 Coat、KuaiRand 和人工世界均不用于当前实际实验。
-
-第六版增加 Qwen3-8B 自部署后端。先读 [服务器部署与接入](docs/Qwen3-8B部署与后端替换.md) 和 [真实流程改进说明](docs/真实流程改进说明_2026-10-15.md)。`study` 默认使用 Qwen 新配置；旧 DeepSeek 配置仍保留用于复核原实验。两者的代码、实际状态和结果分别记录。
-
-```bash
-python -m rsi_researcher check-model --config configs/qwen_backend_comparison.json --output runs/qwen-check
-python -m rsi_researcher study --config configs/qwen_research_v2.json --output runs/qwen-study
-```
-
-这两条连接已启动的本地 vLLM 服务，不会回退到 DeepSeek。Qwen 服务尚未就绪时不要启动整批研究。
-
-第五版增加官方真实数据研究入口。使用 Cornell 作者发布的 Coat 和 KuaiRand 官方随机曝光数据，传统 ItemCF 推荐器在 CPU 上执行；真实模型负责提出假设、选择改法、阅读实际结果和修订下一任务的研究策略。已完成真实模型研究与独立评分，主批和补充检查合计 30 次请求。第五版源码当时 **176 项程序检查通过**；检查与研究效果见[实际验证报告](docs/真实数据验证报告_2026-10-14.md)；通过流程检查不等于已证实 RSI。
-
-```powershell
-python -m rsi_researcher fetch-data --dataset coat --output data/external/coat
-python -m rsi_researcher fetch-data --dataset kuairand-pure --output data/external/kuairand-pure
-python -m rsi_researcher study --config configs/official_study.json --output runs/my-official-study
-```
-
-前两条只下载及核验公开数据，第三条会调用付费模型，默认最多 30 次请求（包括重试）。密钥由当前进程的 `DEEPSEEK_API_KEY` 提供；Windows 已保存用户变量时可在本机终端先执行 `$env:DEEPSEEK_API_KEY = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY','User')`，值不需要打印。
-
-先读 [真实数据应用说明](docs/真实数据应用说明.md) 和 [官方数据选择](docs/官方数据选择.md)。本版比较带历史研究员、无历史研究员及固定改法，并把实际生成的研究策略迁移到第二份数据，与原策略使用相同轮数。真实数据只评价已观察的随机候选面板；缺失评分不补成负例。推荐器改善、自主研究闭环和研究策略改进分别记录，不能因流程完成就宣称 RSI 成立。
-
-从 AgentCF 出发，研究“推荐变好了，为什么也更偏向热门物品”，并让 Agent 根据实验结果继续查原因、提出改法、验证效果。
-
-项目按职责组织为一个 Python 包。研究流程、被研究的推荐器、独立评分、数据和模型接口分别放在自己的目录；测试、配置和说明也独立存放。统一入口是 `python -m rsi_researcher`。
-
-## 先运行一个完整的离线闭环
-
-在项目根目录运行：
-
-```powershell
-python -m pip install -r requirements.txt
-python -m unittest discover -s tests -t .
-python -m rsi_researcher demo --output outputs/structured-demo
-```
-
-演示使用固定回复，不读取 API 密钥、不联网、不产生模型费用。输出路径必须是新目录。它依次执行：
-
-1. **开发快环**：提出解释和竞争解释，设计候选，执行并评分。
-2. **独立验证环**：冻结已有候选，在 4 个事先指定的新环境中分别比较原版与候选。
-3. **证据回流**：把验证结果写进共同日志，再运行一轮研究，检查下一轮是否确实读到这些结果。
-
-演示证明程序连接正确，不能证明真实模型具有研究能力，也不能证明去偏已经有效。程序检查数量和最新通过情况见本次交付验证记录。
-
-## 目录与责任
-
-```text
-rsi_researcher/
-├─ __main__.py、cli.py       统一命令入口
-├─ paths.py                 统一查找配置和数据
-├─ research/                问题、候选、证据、日志与独立验证
-├─ recommenders/            AgentCF、笔记依赖与修复执行
-├─ evaluation/              固定规则评分与结果分析
-├─ datasets/                可控研究环境和作者输入
-├─ runtime/                 真实/离线模型、预算与源码快照
-├─ experiments/             成组机制实验、历史试运行工具
-└─ diagnostics/             排名格式和模型接口专项检查
-tests/                      程序检查
-configs/                    开发配置、独立验证协议
-data/                       小数据、作者提示词及来源说明
-docs/                       代码导读、工作流解释与论文对照
-scripts/build_code_bundle.py  完整源码打包与核验
-pyproject.toml              项目依赖与命令声明
-```
-
-研究流程调用实验工具，工具调用推荐器；评分程序用固定评价规则检验结果。模型提出解释和改法，程序保存实际状态与排名，模型不能替自己改分数。新增一种推荐改法，应集中修改候选执行模块，而不是同时重写整个研究流程。
-
-## 明确对照 Google 的工作
-
-参考工作是 [Self-Evolving Recommendation System: End-To-End Autonomous Model Optimization With LLM Agents](https://research.google/pubs/self-evolving-recommendation-system-end-to-end-autonomous-model-optimization-with-llm-agents/)。逐节借鉴和适配说明见 [Google工作对照](docs/Google工作对照.md)。
-
-| 借鉴点 | 本项目的具体实现 |
-|---|---|
-| 快环快速提出并检验候选 | `research/workflow.py` 组织诊断、设计、复核、执行、评分与总结。 |
-| 慢环在不同条件下验证候选 | `research/validation.py` 冻结动作与参数，在预定新环境重新执行原版与候选。 |
-| 两环共享实验历史 | `research/journal.py` 关联候选、失败证据和验证结果，提供下一轮研究历史。 |
-| 修改学习组件时保留固定评价 | 推荐规则可以改，`evaluation/` 的质量与偏差评价保持独立。 |
-
-Google 工作的慢环包括真实线上用户实验；这里实现的是**独立验证环**。我们尚无真实线上流量，不能把换模拟种子称作在线 A/B，也不能继承该论文的生产效果。
-
-本项目面向推荐系统研究员：不只问“分数有没有提高”，还问“是否引入偏差、哪种解释成立、怎样用对照推翻解释”。AgentCF 是第一种研究对象，不是预设的最终算法。
-
-## 一次研究怎样走完
-
-```mermaid
-flowchart LR
-    A[观察质量收益与偏差代价] --> B[解释和竞争解释]
-    B --> C[设计、复核、实施候选]
-    C --> D[独立程序评价]
-    D --> E[冻结候选并验证新条件]
-    E --> F[共同日志：收益、损失、失败条件]
-    F --> B
-```
-
-四类研究职责是诊断、设计、反证复核和总结。当前可以由同一个模型在不同步骤扮演，靠结构化记录交流。研究员看到的证据包含逐条推荐变化和笔记变化，隐藏偏好参照只供评分使用。
-
-目前已实现的动作包括未知反馈保护、笔记依赖重放、固定热门重排、切断共享和交换输入位置。它们是研究工具；选择一个动作或更换提示词，本身不足以证明论文创新。探索需要新曝光和真实反馈，固定日志不能凭空提供；跨环境依赖重放还需要可迁移的根事件选择规则。
-
-## 怎样读演示结果
-
-打开 `outputs/structured-demo/report.md`，再按下面的顺序读：
-
-| 目录或文件 | 看什么 |
-|---|---|
-| `trials/0001`、`trials/0002` | 快环为什么提出候选、实际改了什么、哪些结果支持或反驳解释。 |
-| `validation/report.md` | 4 个新环境各自的质量、偏差和执行情况，不能只看平均值。 |
-| `journal.json` | 同一候选的开发与验证证据怎样关联。 |
-| `next_discovery/trials/0001` | 后续研究是否读到了验证反馈。 |
-| `archive.json` | 各轮记录与两个环的执行汇总。 |
-
-`execution_status` 说明程序有没有完成；`research_status` 说明研究得到了什么结论。跑完也可能得到“证据不足”或“改法不成立”。复用同一实验结果会注明来源，不算新的独立重复。
-
-## 真实模型运行
-
-下面命令会调用付费模型。密钥从当前进程的 `DEEPSEEK_API_KEY` 环境变量读取，不写入源码和配置。
-
-```powershell
-python -m rsi_researcher run --config configs/research_workflow.json --output runs/my-discovery --journal runs/journal.json
-python -m rsi_researcher validate --source runs/my-discovery --trial 0002 --protocol configs/validation.json --output runs/my-validation --journal runs/journal.json
-python -m rsi_researcher journal --path runs/journal.json
-```
-
-`run` 运行开发快环；`validate` 独立验证指定候选；同一个 `--journal` 让下一批研究读到已有开发与验证证据。候选轮次必须对应实际存在的产物。给 `validate` 增加 `--offline` 可以用固定回复检查流程。`inspect` 回看已有结果，不调用模型。各命令参数可通过 `--help` 查看。
-
-依赖见 `requirements.txt`。`python -m pip install -e .` 可以增加 `rsi-researcher` 短命令；这是可编辑安装，仍从源码工程读取配置和小数据。当前交付方式是完整源码包。
-
-## 阅读路线与代码交付
-
-1. [代码导读](docs/代码导读.md)：从入口到两个环，解释每个模块读什么、做什么、留下什么。
-2. [Google工作对照](docs/Google工作对照.md)：论文的设计、本项目的适配、尚未实现的能力。
-3. [研究员工作流说明](docs/研究员工作流说明.md)：研究目的、偏差分类、AgentCF 与研究问题。
-4. [数据与作者来源](data/README.md)：输入的来源和使用限制。
-
-生成保留目录结构的完整代码包：
-
-```powershell
-python scripts/build_code_bundle.py --offline-demo outputs/structured-demo
-python scripts/build_code_bundle.py --verify outputs/<实际包名>.zip
-```
-
-包内包括业务源码、全部测试、配置、文档、作者小数据和明确标记的离线演示；不包括真实请求日志、密钥、历史输出、论文 PDF 和完整作者仓库。`source_manifest.json` 记录每个文件的指纹，供 ZIP 内文件核验。
-
-下一步研究重点是检验真实模型看到反证后是否改变下一项实验，并与固定规则、单角色和无历史版本比较。结构化源码和双环连接是研究基础，还不是稳定去偏收益或自主算法发现的实验结论。
-
-## 最新 Cross-Bias 研究试验
-
-见 docs/CROSSBIAS_DISCOVERY_PILOT_20261017.md。科研 Agent 真实提出假设、选择 Coat/AgentCF 反证，独立执行与审计已完成。严格的独立科学发现数仍为 0，不能认为 RSI 已被证实。源码与结果均已记录；Qwen 服务退出、GPU 已释放。
-
-## 新用户 AgentCF 结构化预测复核
-
-新六人 cohort、12 次真实训练事件、四种配对排序条件与数值预测审查已完成。三种研究策略的两项事前预测均 0/2 通过；未获独立科学发现。详见 docs/AGENTCF_NEWSTATE_FORECAST_20261017.md。
+`docs/` 中其余日期化记录及旧 `demo/run/study` 等 CLI 仍用于**历史实验重现**，不属于当前推荐的科研开发路径。不应误以为历史 ExperimentJournal/ResearchMemory 或旧 AgentCF 机制任务是新增的正式 Bias 类型。

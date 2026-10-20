@@ -1,68 +1,47 @@
-# RSI 当前架构和归档边界（2026-10-17）
+# RSI 当前唯一研究架构（2026-10-20）
 
-## 代码入口与目录职责
+本文件描述 `main` 上的当前科学工作流，不覆盖历史原始运行与旧报告。代码合并提交点为 `746a849`，主工程为 `/data/cjh/rsi/project`。
 
-项目唯一可编辑主包：`/data/cjh/rsi/project/rsi_researcher`。
-冻结 AgentCF 发布版：`project/releases/20261016-five-bias-validation/`。
-合并前原版备份：`project/releases/20261017-pre-consolidation/`。
-独立真实研究历史：`experiments/classic-five-20261016`；
-旧 Planner 实验：`outputs/research-planner-v2-20261016`、
-`outputs/research-planner-integration-20261016`；全部保持原样，不直接继续扩张。
-统一 CPU 原型历史：`experiments/unified-research-20261017-chatgpt`。
+## 设计裁决
 
-## 主包职责
+- **偏差定义**：`bias_registry.py` / `configs/bias_tasks.json` 独占五类 Bias 的科学语义和任务前提。AgentCF Memory/Position/Conformity 是机制研究，不作为第六种正式 Bias。
+- **研究智能体**：Diagnosis（解释和竞争假设）、Designer（可证伪行动/数值预测）、Critic（识别与混杂审查）、Reflection（基于独立数值审计生成条件性经验）。这是四种结构化真实 Qwen 调用，不是四个孤立脚本。
+- **单回合权威**：`scientific_loop.py` 负责冻结计划、证据边界、执行合法性和预算；`scientific_experiments.py` 拥有数值执行/判断；LLM 不计算自己的真值。
+- **两层调度**：`scientific_tree.py` 保存多候选与失败分支；`scientific_director.py` 按已注册任务和实际资源上限安排连续轮次，停止条件明确。不创建新的总控 Agent。
+- **科研证据所有权**：只有绑定原始路径/SHA256 和独立数值结果的已核验**开发证据**进入后续科研 Memory；`scientific_skills.py` 的自动科研策略仍是候选，不会自动晋升。
+- **公平性与独立确认**：`five_bias_development.py` 的开发评分与 `selection_confirmation.py` 的冻结单次保留集处于不同证据等级。显著性与跨任务优越性需未来另行预注册。
 
-- `research/bias_registry.py` + `configs/bias_tasks.json`：五类经典任务冻结注册表，
-  Popularity / Exposure / Selection / Filter Bubble / Fairness；AgentCF Position/Conformity/Memory 只是机制诊断。
-- `datasets/`：沿用作者数据来源，Coat 评分 0 是缺失、不作负例。
-- `research/planner.py`：EvidenceRef / ResearchSituation / ResearchProposal / review 及可拒绝行动前提。
-- `research/planner_adapters.py`、`planner_tools.py`：发展期真实证据与只读 CPU 诊断。
-- `research/planner_integration.py`：冻结 AgentCF 设计审查及外部签名执行许可边界，
-  DESIGN_ACCEPTED 不意味着 GPU 或独立确认可执行。
-- `research/coat_selection.py` + `research/unified.py`：Coat 真实开发评分与
-  固定规则/旧 Qwen 提案重放。支持最多 3 个外部提案，先由审查门槛检查，不自行调用模型。
-- `research/kuairand_transfer.py`：KuaiRand Exposure 证据审计；
-  不满足共同支持和记录策略识别前提时退出。
-- `research/coat_sensitivity.py`：Coat 估计倾向在预声明 gamma 扰动下的稳健性。
-- `research/memory.py` 和 `research/journal.py`：
-  具有来源约束的开发记忆与旧 ExperimentJournal；持久结构的最终收敛仍待继续。
-- `research/agentcf_loop.py`、`recommenders/agentcf.py`、`evaluation/`：
-  复用 10 月 16 日已经验证的 AgentCF 反馈/记忆/干预和独立质量测量。
+## 总架构
 
-## 目前确实验证过的结论
+```mermaid
+flowchart TB
+  R["Bias Registry / Frozen Task Protocol"] --> D["Outer Scientific Director<br/>global task/budget/stop"]
+  D --> T["Evidence-Guided Tree<br/>frontier, branching, local budget"]
+  T --> X["Diagnosis → Designer → Critic"]
+  X -->|registered plan| E["Frozen Executor: Coat / AgentCF / Controlled Simulator"]
+  E --> V["Independent Evaluator / Falsifier<br/>utility, proxy, identifiability"]
+  V --> F["Reflection"]
+  F --> M["SHA-verified Development Research Memory"]
+  M --> D
+  F --> K["Candidate Research Skill (unverified)"]
+  K -. only after new tasks & independent confirmation .-> P["External Approval / Promotion"]
+```
 
-Coat：训练 6,960 / 随机开发 2,065 / 保留随机确认 2,209。
-原始估计倾向截断 100 使 Brier 相对未加权约降 2.44%，但 Hit、长尾召回有损。
-预声明 gamma 0.75/1.0/1.25 的最佳 cap 分别 100/100/20；开发超参不稳健。
-没有使用随机保留分区调参或评价，也无法以作者估计倾向当成已知处理赋值概率。
+## 执行证据的等级
 
-KuaiRand：普通/随机日志共同物品数 201、Jaccard 0.0767，缺确切同用户同物品跨策略匹配，
-不构成可识别的因果去偏结果。
+1. **软件实现**：合法 schema、模型真实调用、冻结执行、审计日志、预算停机；真实 Qwen 证据已具备。
+2. **开发期机制或预测证据**：Coat、KuaiRand 随机参考、AgentCF 和匹配合成世界已经有结果，也有反例和弃权。
+3. **冻结独立确认**：Coat Selection cap=100 单次保留集未达到预注册联合质量约束；不能在该保留集继续调参寻找正结果。
+4. **未见数据科学发现和 RSI 优越性**：尚无严格、可迁移且经统计控制的独立确认；真实发现计数保持 0。
 
-Qwen：旧决策动作先导六题无历史 4/6、有历史 3/6；新构造八题为 6/8 与 7/8；
-参考答案不是外部金标准。Coat 固定网格与有历史 Qwen 均可选 100，
-**尚无跨任务 RSI 增益证据**。
+## 依赖和数据边界
 
-## 工程与安全
+- `datasets/coat.py`：6,960 条非随机训练评分、随机评分开发 2,065 条、保留 2,209 条。Coat 的 0 表示未观察评分，不是负例。
+- `datasets/kuairand.py`：标准与随机曝光双日志；共享 item×tab 支持集审计，绝不编造 propensity。
+- `recommenders/agentcf.py`：原作者 CDs 模拟交互、User/Item Memory 与固定状态排名；User/Item Memory 是被研究的行为，不等于新的 Research Memory。
+- `research/feedback_pair_control.py` / `exposure_synthetic.py`：可操控机制真值的受控世界；不能以模拟结论替代真实世界因果证据。
+- 配置与新运行结果分别留在 `configs/`、`runs/`。旧 `releases/`、日期化报告和此前开发工作树保留为可追溯历史，不用删真实科学证据换取文件数量好看。
 
-- 新 CPU 输出一律放在 project/runs/ 下不同的新目录。
-- 冻结版本、归档 Qwen 原始回复、测试保留集、模型权重不被改写。
-- 模型不具有任意 Shell 权限，不能自己改变评价器和科学成功标准。
-- 对外报告必须区分「程序执行成功」、「指标有变化」与「独立证实科学效果」。
-- 迁移记录详见 docs/CONSOLIDATION_MANIFEST_20261017.json。
+## 哪些还不是完整成果
 
-## 新增受控曝光基准
-
-- research/exposure_synthetic.py：已知正概率随机曝光、真实潜在偏好由合成机制定义。
-- 在相同随机日志上计算两个目标策略的 IPS、SNIPS、Naive 和已知策略真值；独立随机种子重复。
-- 对隐藏 propensity 的条件明确 ABSTAIN_NO_PROPENSITY，不输出伪 IPS。
-- CLI: python -m rsi_researcher bias-exposure-sim --output runs/new-unique-name。
-- 只用于离线估计量校准，不给 KuaiRand 日志添加不存在的真实倾向概率。
-
-## RSI 决策实验补充
-
-research/decision_benchmark.py 生成开发/评价分离的 OPE 研究动作任务；research/decision_qwen_pilot.py 使用本地 Qwen 开展有上限的四组对照；research/decision_analysis.py 进行七类机制配对复核。方法、完整消极结果见 docs/DECISION_PILOT_20261017.md。
-
-## 新增可执行科研假设闭环
-
-research/crossbias_discovery.py 冻结 Coat / AgentCF 四项研究任务、动作与反证准入；research/crossbias_runner.py 本地 Qwen 自主提案与冻结状态重排序，research/crossbias_audit.py 做独立数字一致性/成本审计，research/crossbias_memory.py 只把有真实数值来源、按 SHA 验证的条件性事实写入 ResearchMemory。全部运行在 project/runs/crossbias-discovery-pilot-20261017，旧实验、原持久化环境及确认数据保留原状。此阶段不是新 Agent 框架，也未创造已验证的经典因果 Debias 发现。
+POPPER 式 Type-I 错误控制、AutoDebias 官方强基线复现、独立未见数据对照、纵向真实 Filter Bubble 可识别性、完善的 Skill promotion 都还没有完成。参考 `RESEARCH_ROADMAP_CURRENT.md`。
