@@ -68,10 +68,14 @@ def main(argv=None):
     if requested and requested[0]=="science-compare":
         from rsi_researcher.research.scientific_comparison import main as compare_science
         return compare_science(requested[1:])
+    if requested and requested[0]=="science-tree":
+        from rsi_researcher.research.scientific_tree import main as run_scientific_tree
+        return run_scientific_tree(requested[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("science", help="Qwen multi-agent bias research with independent development audit")
     sub.add_parser("science-compare", help="paired-budget comparison of research strategies")
+    sub.add_parser("science-tree", help="bounded best-first development experiment search")
     demo = sub.add_parser("demo", help="完整离线双循环演示，不访问网络或读取密钥")
     demo.add_argument("--config", default=str(ROOT / "configs/research_workflow.json"))
     demo.add_argument("--validation-protocol", default=str(ROOT / "configs/validation.json"))

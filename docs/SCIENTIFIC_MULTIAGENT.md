@@ -142,6 +142,73 @@ task definitions. Strategy comparisons now also report whether actual
 audited history caused different frozen actions or numeric predictions.
 Neither changed wording nor observed history consumption proves RSI gains.
 
+## Bounded Agentic Tree Search: scientific development only
+
+The existing scientific episode remains the **only** executor, Critic,
+numeric auditor and Reflection writer. scientific_tree.py owns only
+the frontier, parent-child experiment-search lineage, node selection,
+branch rejection, budget/termination and tree_index.json. A Node is a
+frozen proposal linked to the eventual episode files, not another copy
+of state, evaluator or Research Memory.
+
+**A genuine search**, not renamed linear episodes: the Designer expands
+an ancestor into at most two DIFFERENT registered experiments; every
+candidate retains its parent ID and frozen proposal before any execution.
+The scheduler selects a frontier node and invokes the original scientific
+episode, with frozen proposal and prior diagnosis. The node still must pass
+the normal Qwen Critic and Python metric/action checks. If a completed
+development ancestor has unresolved mechanism predictions, its next
+falsification branch gets priority; otherwise the stable priority considers
+depth then creation order. This is an auditable, deterministic, lightweight
+best-first rule, NOT MCTS or a learned scientific value function. Another
+queued sibling can later be selected, producing observable backtracking.
+
+For AgentCF, shared_states/state-001/prepared_agentcf.json is trained
+ONCE before proposals; all later node episodes load that same state and
+same pre-decision baseline. Parent_id means only hypothesis lineage:
+a child must NOT inherit any modified User/Item Memory from a parent
+intervention. Parent numeric DEVELOPMENT audit is visible only once
+produced; it is allowed to guide **new development** experiments but
+never to masquerade as an untouched holdout or independent result.
+No model receives hidden validation relevance labels in its proposal.
+
+Run via the existing CLI (requires an **already authorized** Qwen vLLM
+service; the command will NOT launch or stop any GPU jobs):
+
+~~~bash
+cd /data/cjh/rsi/experiments/rsi-multiagent-20261017-chatgpt
+/data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher science-tree   --config configs/qwen_scientific_loop.json   --task agentcf_memory --mode fresh --arm qwen_no_history   --cohort-size 12 --seed 20261017 --width 2   --max-depth 2 --max-nodes 4 --max-proposals 6   --max-requests 180 --output runs/UNIQUE_TREE_RUN
+~~~
+
+For a NO-NEW-SCIENCE archive search, use mode archive on an existing
+Coat task; only actions supported by historical numeric artifacts are
+proposable. This can test search behavior but not produce new mechanisms.
+
+The persistent run has protocol.json + digest, tree_index.json,
+search_decisions.jsonl, immutable plans/Nxxx.json proposals and
+nodes/Nxxx/{diagnosis,frozen_plan,design_review,execution,audit,
+reflection}.json, as applicable. Rejected proposals remain visible.
+AgentCF has shared_states/state-001. The frontier and tree index are
+owned by the scheduler; the node-local audit is the ONLY numeric truth.
+A crash marks an attempted failing node FAILED_CLOSED and does not
+rewrite archived runs. The queue may retain unexecuted proposals when
+the node/request budget is hit.
+
+Science distinctions remain strict: attempted nodes, executed new
+development nodes, archived replay nodes, rejected nodes and waiting
+frontier are separate. Mechanism/utility/confirmation audits are still
+independent of Qwen. The number of independently confirmed scientific
+discoveries is always zero in this development-only mode.
+
+**Current limitations:** no hyperparameter search stage yet; new
+legitimate actions remain from the registered experiments. The
+Tree-vs-Linear cost-matched independent comparison remains future
+research and MUST be measured before claiming search benefit. A
+predeclared node budget is NOT a matched token or GPU budget:
+record actual requests and measured model usage, and do not compare
+searches merely by node count. All offline tests with deterministic
+FakeModel are software regressions only, not Qwen results.
+
 ## Three ways to run
 
 **Offline regression:** `/data/cjh/rsi/envs/research/bin/python -B -m unittest

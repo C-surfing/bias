@@ -154,7 +154,8 @@ def fixed_rule_proposal(task):
 def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             allowed_next_tasks=(), rule_fallback=False,
             arm="qwen_audited_history", skill_library=None, prior_campaign=None,
-            prepared_state=None):
+            prepared_state=None, tree_proposal=None, tree_diagnosis=None,
+            tree_parent=None):
     directory.mkdir(parents=True, exist_ok=False)
     begin = perf_counter()
     calls_before = model.requests
@@ -184,10 +185,14 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             ctx["new_agentcf_input_observations"] = prepared["observation"]
             ctx["predecision_baseline_fingerprint"] = prepared["training"]["baseline_rankings_sha256"]
             ctx["shared_preparation_cost_accounted_separately"] = shared_cost
+        if tree_parent is not None:
+            # Only already-audited ancestry, never a sibling's future outcome.
+            ctx["tree_parent_development_evidence"] = tree_parent
         store_new(directory / "evidence.json", ctx)
         eid = directory.name
 
-        selected_by = "qwen_accepted_design"
+        selected_by = ("tree_frozen_designer_proposal" if tree_proposal is not None
+                       else "qwen_accepted_design")
         if arm == "strong_rule":
             # Strong fixed rule does not pay or receive credit for scientific-agent calls.
             plan = fixed_rule_proposal(task)
@@ -196,14 +201,17 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             store_new(directory / "frozen_plan.json", {
                 "task": task, "proposal": plan, "decision": decision, "frozen_at": utc()})
         else:
-            diag = DiagnosisAgent(model).act(ctx, eid)
+            diag = (tree_diagnosis if tree_diagnosis is not None else
+                    DiagnosisAgent(model).act(ctx, eid))
             store_new(directory / "diagnosis.json", diag)
             designer = DesignerAgent(model)
             context = {"evidence": ctx, "diagnosis": diag,
                        "constraint": "single registered action; numeric forecast frozen before execution"}
-            plan = designer.propose(
-                context, eid, experiments.task_spec(task)["actions"],
-                experiments.task_metrics(task))
+            # Tree Designer has already frozen one distinct proposal. Running
+            # another Designer call here would silently replace the selected node.
+            plan = (tree_proposal if tree_proposal is not None else
+                    designer.propose(context, eid, experiments.task_spec(task)["actions"],
+                                     experiments.task_metrics(task)))
             if plan["action"] == "abstain":
                 store_new(directory / "frozen_plan.json", {
                     "task":task,"proposal":plan,
@@ -217,7 +225,8 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             review = CriticAgent(model).act(
                 {"evidence": ctx, "proposal": plan, "diagnosis": diag}, eid)
             revisions = []
-            if review_plan(task, plan, review) != "ACCEPTED_DESIGN_ONLY":
+            if (tree_proposal is None and
+                    review_plan(task, plan, review) != "ACCEPTED_DESIGN_ONLY"):
                 revisions.append({"plan": plan, "review": review})
                 plan = designer.propose(
                     {**context, "critic_feedback": review,
@@ -269,7 +278,7 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
         audit = experiments.independent_verdict(task, plan["action"], plan, result)
         audit.update(execution_kind=result.get("execution_kind", result.get("status")),
                      proposal_origin=selected_by,
-                     critic_disagreed=(selected_by != "qwen_accepted_design"),
+                     critic_disagreed=bool(selected_by.startswith("fixed_rule")),
                      experiment_seconds=round(perf_counter()-execute_start_time, 3),
                      episode_elapsed_seconds=round(perf_counter()-begin, 3),
                      experiment_model_calls=model.requests-execute_start_calls,
@@ -294,7 +303,7 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
         else:
             end_state = ("COMPLETED_INCONCLUSIVE" if audit["evidence_grade"] == "inconclusive"
                          else "COMPLETED_DEVELOPMENT")
-            if selected_by != "qwen_accepted_design":
+            if selected_by.startswith("fixed_rule"):
                 end_state = ("COMPLETED_RULE_INCONCLUSIVE" if end_state == "COMPLETED_INCONCLUSIVE"
                              else "COMPLETED_RULE_CONTROL")
         status.update(status=end_state, model_calls=model.requests-calls_before,
