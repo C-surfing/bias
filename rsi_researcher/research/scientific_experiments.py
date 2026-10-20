@@ -17,6 +17,7 @@ from rsi_researcher.datasets.author import author_data, author_profile
 from rsi_researcher.recommenders.agentcf import AgentCF
 from rsi_researcher.research.author_experiment import author_intervention
 from rsi_researcher.research import crossbias_discovery as reference
+from rsi_researcher.research import bias_registry
 from rsi_researcher.evaluation.author import score_author_ranking
 from rsi_researcher.runtime.client import atomic_json
 
@@ -131,6 +132,38 @@ def prepare_cohort(excluded_users, seed, count=6, events_per_user=2):
 
 def source_digest(path):
     return sha256(Path(path).read_bytes()).hexdigest()
+
+
+def structural_memory_support(cohort):
+    """Cheap PRE-TRAINING support bound: possible cross-user memory reads.
+
+    Positive training events and unlabeled candidate IDs only. No rankings,
+    inferred dislike, model output, validation labels, or seed selection.
+    Even positive support does NOT guarantee a changed learned Item Memory.
+    """
+    _,events,queries=cohort
+    writers={}
+    for e in events:
+        writers.setdefault(e["positive"],set()).add(e["user"])
+    ordered=sorted(queries,key=lambda q:q["query_id"])
+    halfway=len(ordered)//2
+    panels={"A":ordered[:halfway],"B":ordered[halfway:]}
+    links={}
+    readers={}
+    for name,qs in panels.items():
+        links[name]=sum(bool(writers.get(item,set())-{q["user"]})
+                        for q in qs for item in q["candidates"])
+        readers[name]=sum(any(writers.get(item,set())-{q["user"]}
+                              for item in q["candidates"]) for q in qs)
+    return {
+        "phase":"PRETRAINING_STRUCTURAL_SUPPORT",
+        "potential_cross_user_links_by_panel":links,
+        "potential_distinct_readers_by_panel":readers,
+        "passes":all(readers[name]>=1 for name in ("A","B")),
+        "used_validation_labels":False,
+        "meaning":"Potential writer-to-reader overlap only; learned memory "
+                  "changes and causal effect remain unidentified.",
+    }
 
 
 def preintervention_observations(cohort):
@@ -723,11 +756,86 @@ def panel_measurements(task, action, result):
     return per
 
 
+# The five BIAS targets are not equivalent to the four experiment families.
+# Only a demonstrated Debias intervention may feed an RSI Debias acceptance.
+EXPERIMENT_BIAS_TARGET = {
+    "coat_propensity": "selection",
+    "coat_utility": "selection",
+    "agentcf_popularity": "popularity",
+    "agentcf_memory": None,  # Mechanism-only, NOT a sixth bias category.
+}
+
+
+def classify_debias_evidence(audit):
+    """One owner for diagnostic vs proxy vs actual Debias-candidate semantics.
+
+    Called by the independent Python audit, never by Qwen/Director. A proxy
+    or observed rank change is not a qualified correction of a causal bias.
+    """
+    task, action = audit["task"], audit["action"]
+    bias = EXPERIMENT_BIAS_TARGET[task]
+    registered = audit.get("registered_action_falsifier_passes")
+    prediction = audit.get("mechanism_forecast_passes_both_panels") is True
+    quality = audit.get("known_target_quality_guard_passes_both_panels") is True
+    if audit.get("evidence_grade") == "previous_development_only":
+        stage = "ARCHIVED_DEVELOPMENT_REPLAY"
+    elif audit.get("mechanism_forecast_state") == "NOT_EXECUTED":
+        stage = "NO_EXECUTED_INTERVENTION"
+    elif bias is None:
+        stage = "AUXILIARY_MEMORY_MECHANISM_ONLY"
+    elif bias == "popularity":
+        stage = ("POPULARITY_EXPOSURE_PROXY_ONLY"
+                 if audit.get("debias_utility_state","").startswith("PROXY_GAIN")
+                 else "POPULARITY_MECHANISM_NOT_DEBIAS")
+    elif action in ("gamma_stress", "propensity_shuffle"):
+        stage = "SELECTION_FALSIFICATION_CONTROL_ONLY"
+    elif (task == "coat_utility" and action == "split_utility" and
+          audit.get("forecast_metric") == "brier_gain" and
+          audit.get("predeclared_direction") == "increase" and
+          prediction and quality and registered is True):
+        stage = "SELECTION_DEVELOPMENT_DEBIAS_CANDIDATE"
+    else:
+        stage = "SELECTION_DEBIAS_NOT_ESTABLISHED"
+    eligible = stage == "SELECTION_DEVELOPMENT_DEBIAS_CANDIDATE"
+    return {
+        "bias_task_id": bias,
+        "debias_evidence_stage": stage,
+        "debias_candidate_eligible": eligible,
+        "registered_falsifier_status": (
+            "PASSED_DEVELOPMENT" if registered is True else
+            "FAILED_DEVELOPMENT" if registered is False else
+            "NOT_IDENTIFIED"),
+        "scientific_claim": (
+            "DEVELOPMENT_ONLY_PENDING_INDEPENDENT_CONFIRMATION" if eligible
+            else "NOT_A_VALIDATED_DEBIAS_RESULT"),
+        "independently_confirmed_discoveries": 0,
+    }
+
+
+def five_bias_coverage():
+    """Read the existing frozen five-type registry; no parallel task registry."""
+    implementations = {t.id:[] for t in bias_registry.TASKS}
+    for experiment, bias in EXPERIMENT_BIAS_TARGET.items():
+        if bias is not None:
+            implementations[bias].append(experiment)
+    return [{
+        "bias_id":t.id,
+        "definition":t.definition,
+        "dataset":t.primary_dataset,
+        "planned_methods":list(t.allowable_interventions),
+        "existing_experimental_tasks":implementations[t.id],
+        "maturity":t.current_status,
+        "method_compared_on_real_development_data":t.id=="selection",
+        "independently_validated_debias":False,
+        "explicit_limitation":t.caveat,
+    } for t in bias_registry.TASKS]
+
+
 def independent_verdict(task, action, plan, result):
     if action != plan["action"] or plan["metric"] not in action_metrics(task, action):
         raise ValueError("frozen plan and actual result disagree")
     if result.get("status","").startswith("ABSTAIN_"):
-        return {"task":task, "action":action, "forecast_metric":plan["metric"],
+        audit = {"task":task, "action":action, "forecast_metric":plan["metric"],
                 "panel_measurements":[], "forecast_passes_both_panels":False,
                 "mechanism_forecast_passes_both_panels":False,
                 "mechanism_forecast_state":"NOT_EXECUTED",
@@ -736,6 +844,8 @@ def independent_verdict(task, action, plan, result):
                 "falsification_state":"NOT_EXECUTED",
                 "mechanism_development_check":None, "evidence_grade":"inconclusive",
                 "independently_confirmed_discoveries":0, "reason":result["reason"]}
+        audit.update(classify_debias_evidence(audit))
+        return audit
     panels = panel_measurements(task, action, result)
     metric, direction = plan["metric"], plan["direction"]
     threshold = max(plan["minimum_abs_effect"], DEVELOPMENT_EFFECT_FLOOR[metric])
@@ -784,11 +894,12 @@ def independent_verdict(task, action, plan, result):
                      if isinstance(mechanism,dict) else None)
     falsification_state=(
         "REGISTERED_ACTION_FALSIFIER_FAILED" if registered_pass is False else
+        "ACTION_FALSIFIER_NOT_IDENTIFIED" if registered_pass is None else
         "DEVELOPMENT_PATTERN_ONLY_ALTERNATIVE_NOT_EXCLUDED" if predicts else
         "COMPETING_EXPLANATION_UNRESOLVED")
     # Existing reference.assess understands Coat; fresh AgentCF evidence
     # has the same panel schema but is not upgraded to a confirmed finding.
-    return {"task": task, "action": action, "forecast_metric": metric,
+    audit = {"task": task, "action": action, "forecast_metric": metric,
             "predeclared_direction": direction,
             "model_predicted_minimum_effect": plan["minimum_abs_effect"],
             "evaluation_minimum_effect": threshold,
@@ -807,3 +918,5 @@ def independent_verdict(task, action, plan, result):
                               else "new_unconfirmed_development",
             "independently_confirmed_discoveries": 0,
             "reason": "no untouched independent confirmation panel in this episode"}
+    audit.update(classify_debias_evidence(audit))
+    return audit

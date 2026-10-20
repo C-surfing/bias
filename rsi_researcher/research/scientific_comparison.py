@@ -71,8 +71,21 @@ def compare_tree_linear(output, task, config, *, seed=20261017,
     result={"status":"RUNNING","policies":{},"independent_discoveries":0}
     atomic_json(output/"comparison.json",result)
     try:
+        structural=None
+        if task=="agentcf_memory":
+            structural=experiments.structural_memory_support(
+                experiments.prepare_cohort(set(),seed,cohort_size))
+            result["structural_identifiability_gate"]=structural
+        # Avoid the 88+ Qwen calls of AgentCF training when the initial
+        # event/candidate structure makes cross-user memory impossible.
+        structurally_blocked=(structural is not None
+                              and not structural["passes"])
         if task.startswith("agentcf_"):
-            if prepared_state is not None:
+            if structurally_blocked and prepared_state is None:
+                state=None
+                common_cost={"requests":0,"usage_measured":True,
+                             "skipped_pretraining_for_identifiability":True}
+            elif prepared_state is not None:
                 state=Path(prepared_state).resolve()
                 cohort=experiments.prepare_cohort(set(),seed,cohort_size)
                 experiments.load_prepared_agentcf(state,cohort)
@@ -141,7 +154,10 @@ def compare_tree_linear(output, task, config, *, seed=20261017,
             atomic_json(output/"comparison.json",result)
         same_state=bool(task.startswith("agentcf_") and
                         all(fingerprints) and len(set(fingerprints))==1)
-        if task.startswith("agentcf_") and not same_state:
+        if task.startswith("agentcf_") and not same_state and not (
+                structurally_blocked and state is None and
+                all(record["executed_development_nodes"]==0
+                    for record in result["policies"].values())):
             raise ValueError("arms did not share the same frozen state")
         result.update(status="COMPLETED_DEVELOPMENT_COMPARISON",
                       matched_trained_state=same_state,

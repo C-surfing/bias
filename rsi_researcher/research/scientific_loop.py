@@ -57,7 +57,8 @@ def verified_experience(run_dir, prior_campaign=None):
     # Node-index text and Reflection prose are NOT evidence; only completed
     # independent Python audit artifacts may be included.
     for sub in (ep for root in sources for ep in sorted(
-            [*root.glob("episode-*"),*root.glob("nodes/N[0-9]*")])):
+            [*root.glob("episode-*"),*root.glob("nodes/N[0-9]*"),
+             *root.glob("cycles/cycle-*/nodes/N[0-9]*")])):
         path = sub / "audit.json"
         if not path.is_file():
             continue

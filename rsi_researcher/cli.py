@@ -71,6 +71,9 @@ def main(argv=None):
     if requested and requested[0]=="science-tree":
         from rsi_researcher.research.scientific_tree import main as run_scientific_tree
         return run_scientific_tree(requested[1:])
+    if requested and requested[0]=="science-cycle":
+        from rsi_researcher.research.scientific_director import main as run_director
+        return run_director(requested[1:])
     if requested and requested[0]=="science-search-compare":
         from rsi_researcher.research.scientific_comparison import tree_main
         return tree_main(requested[1:])

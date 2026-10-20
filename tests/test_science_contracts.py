@@ -71,6 +71,52 @@ class ScientificContractTests(unittest.TestCase):
         self.assertEqual(observed["forecast_metric"],"gamma_reference_margin")
         self.assertIn("mechanism_development_check",observed)
 
+    def test_five_bias_coverage_is_not_four_scientific_experiment_names(self):
+        rows=experiments.five_bias_coverage()
+        self.assertEqual({r["bias_id"] for r in rows},{
+            "popularity","exposure","selection","filter_bubble","fairness"})
+        self.assertEqual(len(rows),5)
+        self.assertEqual(next(r for r in rows if r["bias_id"]=="selection")
+                         ["existing_experimental_tasks"],
+                         ["coat_propensity","coat_utility"])
+        self.assertEqual(experiments.EXPERIMENT_BIAS_TARGET["agentcf_memory"],None)
+        self.assertEqual([r["existing_experimental_tasks"] for r in rows
+                          if r["bias_id"] in ("fairness","exposure","filter_bubble")],
+                         [[],[],[]])
+
+    def test_causally_unidentified_popularity_proxy_cannot_trigger_debias_acceptance(self):
+        proxy={"task":"agentcf_popularity","action":"popularity_prompt",
+               "forecast_metric":"head_excess_delta",
+               "mechanism_forecast_passes_both_panels":True,
+               "known_target_quality_guard_passes_both_panels":True,
+               "registered_action_falsifier_passes":None,
+               "debias_utility_state":"PROXY_GAIN_WITH_QUALITY_GUARD_DEVELOPMENT_ONLY",
+               "evidence_grade":"new_unconfirmed_development"}
+        marked=experiments.classify_debias_evidence(proxy)
+        self.assertEqual(marked["bias_task_id"],"popularity")
+        self.assertFalse(marked["debias_candidate_eligible"])
+        self.assertEqual(marked["registered_falsifier_status"],"NOT_IDENTIFIED")
+        self.assertEqual(marked["debias_evidence_stage"],
+                         "POPULARITY_EXPOSURE_PROXY_ONLY")
+
+    def test_coat_falsifier_control_not_debias_and_only_real_method_can_qualify(self):
+        good={"task":"coat_utility","action":"split_utility",
+              "forecast_metric":"brier_gain",
+              "predeclared_direction":"increase",
+              "mechanism_forecast_passes_both_panels":True,
+              "known_target_quality_guard_passes_both_panels":True,
+              "registered_action_falsifier_passes":True,
+              "evidence_grade":"new_unconfirmed_development"}
+        self.assertTrue(experiments.classify_debias_evidence(good)
+                        ["debias_candidate_eligible"])
+        for change in ({"action":"gamma_stress"},
+                       {"predeclared_direction":"decrease"},
+                       {"registered_action_falsifier_passes":False},
+                       {"known_target_quality_guard_passes_both_panels":False},
+                       {"evidence_grade":"previous_development_only"}):
+            self.assertFalse(experiments.classify_debias_evidence(
+                {**good,**change})["debias_candidate_eligible"])
+
     def test_only_registered_task_action_metrics_pass(self):
         with self.assertRaises(ValueError):
             experiments.action_metrics("agentcf_memory","propensity_shuffle")

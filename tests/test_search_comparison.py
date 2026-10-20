@@ -39,13 +39,13 @@ class MatchedSearchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             prior=compare_tree_linear(
-                root/"first","agentcf_memory",CFG,
+                root/"first","agentcf_popularity",CFG,
                 seed=20270001,cohort_size=8,max_nodes=1,max_requests=90,
                 models={"shared_training":FakeModel(),
                         "linear":FakeModel(),"tree":FakeModel()})
             state=prior["frozen_state_ref"]
             second=compare_tree_linear(
-                root/"second","agentcf_popularity",CFG,
+                root/"second","agentcf_memory",CFG,
                 seed=20270001,cohort_size=8,max_nodes=1,max_requests=60,
                 prepared_state=state,
                 models={"linear":FakeModel(),"tree":FakeModel()})

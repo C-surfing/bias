@@ -97,16 +97,23 @@ def search(output, task, *, model=None, config=None, mode="fresh",
 
     prepared_path = None
     prepared = None
+    structural = None
     if task.startswith("agentcf_") and mode=="fresh":
         cohort = experiments.prepare_cohort(set(), seed, cohort_size)
-        if prepared_state is None:
-            shared = output/"shared_states"/"state-001"
-            shared.mkdir(parents=True)
-            prepared = experiments.train_and_observe_agentcf(cohort, model, shared)
-            prepared_path = shared/"prepared_agentcf.json"
-        else:
-            prepared_path = Path(prepared_state).resolve()
-            prepared = experiments.load_prepared_agentcf(prepared_path, cohort)
+        if task == "agentcf_memory":
+            structural = experiments.structural_memory_support(cohort)
+            atomic_json(output/"structural_support.json", structural)
+        if structural is None or structural["passes"] or prepared_state is not None:
+            # Previously trained data must still be provenance-checked even
+            # if the memory task itself has no structural support.
+            if prepared_state is None:
+                shared = output/"shared_states"/"state-001"
+                shared.mkdir(parents=True)
+                prepared = experiments.train_and_observe_agentcf(cohort, model, shared)
+                prepared_path = shared/"prepared_agentcf.json"
+            else:
+                prepared_path = Path(prepared_state).resolve()
+                prepared = experiments.load_prepared_agentcf(prepared_path, cohort)
 
     context = public_evidence(task, experience, arm)
     context["tree_search_scope"] = (
@@ -221,6 +228,49 @@ def search(output, task, *, model=None, config=None, mode="fresh",
         return (0 if uncertain else 1, n["depth"],
                 int(node_id[1:]))
 
+    # Preregister identifiability before any research-agent proposal.
+    # Under-supported memory mechanisms must NOT spend Critic/Designer/ranking
+    # calls on an experiment that is incapable of replicating in both panels.
+    if task == "agentcf_memory" and mode == "fresh":
+        trained = prepared is not None
+        support = (prepared["training"]["cross_user_candidate_links_by_panel"]
+                   if trained else structural["potential_cross_user_links_by_panel"])
+        passing = all(v >= 1 for v in support.values())
+        gate = {
+            "task": task,
+            "phase":("POSTTRAINING_CHANGED_MEMORY_SUPPORT" if trained
+                     else "PRETRAINING_STRUCTURAL_SUPPORT"),
+            "observed_before_design": True,
+            "minimum_links_per_panel": 1,
+            "cross_user_candidate_links_by_panel": support,
+            "passes": passing,
+            "observes_validation_labels": False,
+            "decision": ("ELIGIBLE_FOR_DEVELOPMENT" if passing else
+                         "ABSTAIN_UNIDENTIFIABLE_CROSS_USER_MEMORY"),
+            "reason": ("Both predefined panels need actual changed Item Memory "
+                       "written by other users" if trained else
+                       "One panel has no possible other-user writer-to-reader "
+                       "candidate link before training. Skip all Qwen training."),
+        }
+        atomic_json(output/"identifiability_gate.json", gate)
+        tree["identifiability_gate"] = gate["decision"]
+        if not gate["passes"]:
+            tree.update(status="ABSTAIN_PREDECISION_MECHANISM_SUPPORT",
+                        termination_reason="failed_identifiability_gate",
+                        attempted_nodes=0,executed_development_nodes=0,
+                        archived_replay_nodes=0,total_model_requests=model.requests,
+                        unselected_frontier_nodes=[],
+                        independently_confirmed_discoveries=0,
+                        search_is_not_confirmatory_evaluation=True,
+                        model_usage=(usage_summary(output)
+                            if (output/"calls.jsonl").is_file() else
+                            {"requests":model.requests,"usage_measured":False}))
+            save()
+            atomic_json(output/"campaign.json",{
+                "status":tree["status"],"executed_episodes":0,
+                "independently_confirmed_discoveries":0,
+                "no_claim_of_rsi_self_improvement":True})
+            return tree
     try:
         expand("ROOT",1,None,width if search_policy=="tree" else 1)
         attempted=0
