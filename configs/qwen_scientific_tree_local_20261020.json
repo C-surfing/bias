@@ -1,0 +1,20 @@
+{
+  "max_episodes": 4,
+  "budget": {
+    "max_requests": 160,
+    "max_tokens": 1200000,
+    "max_seconds": 2400
+  },
+  "llm": {
+    "provider": "vllm",
+    "base_url": "http://127.0.0.1:18419/v1",
+    "model": "qwen3-8b",
+    "enable_thinking": false,
+    "temperature": 0,
+    "top_p": 1,
+    "top_k": -1,
+    "max_tokens": 1000,
+    "seed": 42,
+    "timeout_seconds": 180
+  }
+}

@@ -71,6 +71,9 @@ def main(argv=None):
     if requested and requested[0]=="science-tree":
         from rsi_researcher.research.scientific_tree import main as run_scientific_tree
         return run_scientific_tree(requested[1:])
+    if requested and requested[0]=="science-search-compare":
+        from rsi_researcher.research.scientific_comparison import tree_main
+        return tree_main(requested[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("science", help="Qwen multi-agent bias research with independent development audit")

@@ -53,7 +53,11 @@ def verified_experience(run_dir, prior_campaign=None):
             raise ValueError("prior campaign protocol digest changed")
         sources.append(prior)
     sources.append(Path(run_dir))
-    for sub in (ep for root in sources for ep in sorted(root.glob("episode-*"))):
+    # One source of numeric research memory across linear and tree searches.
+    # Node-index text and Reflection prose are NOT evidence; only completed
+    # independent Python audit artifacts may be included.
+    for sub in (ep for root in sources for ep in sorted(
+            [*root.glob("episode-*"),*root.glob("nodes/N[0-9]*")])):
         path = sub / "audit.json"
         if not path.is_file():
             continue

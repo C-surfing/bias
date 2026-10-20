@@ -25,7 +25,8 @@ from rsi_researcher.runtime.models import create_model, model_description
 def search(output, task, *, model=None, config=None, mode="fresh",
            arm="qwen_no_history", cohort_size=12, seed=20261017,
            width=2, max_depth=2, max_nodes=4, max_proposals=6,
-           max_requests=180, prior_campaign=None):
+           max_requests=180, prior_campaign=None, prepared_state=None,
+           search_policy="tree"):
     """Build competing branches, execute selected nodes, and backtrack.
 
     Parentage records hypothesis refinement, NEVER a mutable model-state
@@ -33,7 +34,8 @@ def search(output, task, *, model=None, config=None, mode="fresh",
     max_nodes caps attempted node executions; runtime limits cap real LLM usage.
     """
     output = Path(output).resolve()
-    if (output.exists() or mode not in ("fresh", "archive") or
+    if (output.exists() or search_policy not in ("tree", "linear") or
+        mode not in ("fresh", "archive") or
         arm not in ("qwen_no_history", "qwen_audited_history",
                     "qwen_shuffled_history") or
         not 1 <= width <= 3 or not 1 <= max_depth <= 3 or
@@ -49,6 +51,9 @@ def search(output, task, *, model=None, config=None, mode="fresh",
         allowed = list(spec["actions"])
     if not allowed:
         raise ValueError("no executable experimental action")
+    if prepared_state is not None and (mode!="fresh" or
+                                       not task.startswith("agentcf_")):
+        raise ValueError("shared state is supported only for fresh AgentCF")
     if model is None and (config is None or
                           config.get("llm", {}).get("provider") != "vllm"):
         raise ValueError("explicit authorized Qwen vLLM configuration required")
@@ -58,16 +63,22 @@ def search(output, task, *, model=None, config=None, mode="fresh",
     output.mkdir(parents=True)
     (output / "nodes").mkdir()
     (output / "plans").mkdir()
+    effective_budget = ({**config["budget"],
+                         "max_requests":min(max_requests,
+                                            config["budget"]["max_requests"])}
+                        if config else None)
     if model is None:
-        limits = RunLimits(output, **config["budget"])
+        limits = RunLimits(output, **effective_budget)
         model = create_model(output, limits.max_requests, limits, config)
 
     protocol = {
-        "version": "bounded-scientific-tree-development-v1",
+        "version": "bounded-scientific-tree-development-v2",
+        "search_policy":search_policy,
+        "effective_hard_model_budget":effective_budget,
         "task":task, "mode":mode, "arm":arm, "width":width,
         "max_depth":max_depth, "max_executed_nodes":max_nodes,
         "max_generated_proposals":max_proposals,
-        "max_model_requests_advisory":max_requests,
+        "max_model_requests":max_requests,
         "cohort_size":cohort_size, "seed":seed,
         "independent_confirmation_used":False,
         "parent_id_is_hypothesis_lineage_not_mutable_state":True,
@@ -87,11 +98,15 @@ def search(output, task, *, model=None, config=None, mode="fresh",
     prepared_path = None
     prepared = None
     if task.startswith("agentcf_") and mode=="fresh":
-        shared = output/"shared_states"/"state-001"
-        shared.mkdir(parents=True)
         cohort = experiments.prepare_cohort(set(), seed, cohort_size)
-        prepared = experiments.train_and_observe_agentcf(cohort, model, shared)
-        prepared_path = shared/"prepared_agentcf.json"
+        if prepared_state is None:
+            shared = output/"shared_states"/"state-001"
+            shared.mkdir(parents=True)
+            prepared = experiments.train_and_observe_agentcf(cohort, model, shared)
+            prepared_path = shared/"prepared_agentcf.json"
+        else:
+            prepared_path = Path(prepared_state).resolve()
+            prepared = experiments.load_prepared_agentcf(prepared_path, cohort)
 
     context = public_evidence(task, experience, arm)
     context["tree_search_scope"] = (
@@ -105,8 +120,7 @@ def search(output, task, *, model=None, config=None, mode="fresh",
         context["shared_preparation_cost_accounted_separately"] = True
 
     tree = {"status":"RUNNING","root":"ROOT","task":task,
-            "state_ref":(str(prepared_path.relative_to(output))
-                         if prepared_path else None),
+            "state_ref":(str(prepared_path) if prepared_path else None),
             "training_sha256":(prepared["training"]["trained_state_sha256"]
                                if prepared else None),
             "nodes":{}, "frontier":[], "selection_history":[],
@@ -208,7 +222,7 @@ def search(output, task, *, model=None, config=None, mode="fresh",
                 int(node_id[1:]))
 
     try:
-        expand("ROOT",1,None,width)
+        expand("ROOT",1,None,width if search_policy=="tree" else 1)
         attempted=0
         last_selected=None
         while tree["frontier"] and attempted < max_nodes and model.requests < max_requests:
@@ -324,6 +338,7 @@ def main(argv=None):
     parser.add_argument("--max-proposals",type=int,default=6)
     parser.add_argument("--max-requests",type=int,default=180)
     parser.add_argument("--prior-campaign")
+    parser.add_argument("--policy",choices=["tree","linear"],default="tree")
     args=parser.parse_args(argv)
     config=json.loads(Path(args.config).read_text(encoding="utf8"))
     if config.get("llm",{}).get("provider")!="vllm":
@@ -335,7 +350,8 @@ def main(argv=None):
                   cohort_size=args.cohort_size,seed=args.seed,width=args.width,
                   max_depth=args.max_depth,max_nodes=args.max_nodes,
                   max_proposals=args.max_proposals,max_requests=args.max_requests,
-                  prior_campaign=args.prior_campaign)
+                  prior_campaign=args.prior_campaign,
+                  search_policy=args.policy)
     print(json.dumps({"status":result["status"],
                       "attempted_nodes":result["attempted_nodes"],
                       "independent_discoveries":0},ensure_ascii=False))

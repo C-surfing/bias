@@ -777,6 +777,15 @@ def independent_verdict(task, action, plan, result):
     mechanism = (reference.assess(task, action, result)
                  if task.startswith("coat_") and result.get("status") == "EXECUTED_DEVELOPMENT"
                  else None)
+    # A directional forecast is NOT a passed action-specific falsifier.
+    # Coat's frozen assessor may reject gamma stability even if both scalar
+    # margins exceed the prospective magnitude threshold.
+    registered_pass=(mechanism.get("replicated_development_signal")
+                     if isinstance(mechanism,dict) else None)
+    falsification_state=(
+        "REGISTERED_ACTION_FALSIFIER_FAILED" if registered_pass is False else
+        "DEVELOPMENT_PATTERN_ONLY_ALTERNATIVE_NOT_EXCLUDED" if predicts else
+        "COMPETING_EXPLANATION_UNRESOLVED")
     # Existing reference.assess understands Coat; fresh AgentCF evidence
     # has the same panel schema but is not upgraded to a confirmed finding.
     return {"task": task, "action": action, "forecast_metric": metric,
@@ -784,14 +793,15 @@ def independent_verdict(task, action, plan, result):
             "model_predicted_minimum_effect": plan["minimum_abs_effect"],
             "evaluation_minimum_effect": threshold,
             "panel_measurements": panels,
-            "forecast_passes_both_panels": bool(predicts and quality),
+            "forecast_passes_both_panels": bool(
+                predicts and quality and registered_pass is not False),
+            "registered_action_falsifier_passes": registered_pass,
             "mechanism_forecast_passes_both_panels": bool(predicts),
             "mechanism_forecast_state": forecast_state,
             "panel_forecast_matches": predictions,
             "known_target_quality_guard_passes_both_panels": quality,
             "debias_utility_state": debias_state,
-            "falsification_state": ("DEVELOPMENT_PATTERN_ONLY_ALTERNATIVE_NOT_EXCLUDED"
-                                   if predicts else "COMPETING_EXPLANATION_UNRESOLVED"),
+            "falsification_state": falsification_state,
             "mechanism_development_check": mechanism,
             "evidence_grade": "previous_development_only" if result.get("execution_kind") == "ARCHIVED_DEVELOPMENT_REPLAY"
                               else "new_unconfirmed_development",

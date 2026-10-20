@@ -21,6 +21,145 @@ DEFAULT_ARMS=("strong_rule","qwen_no_history",
               "qwen_audited_history","qwen_shuffled_history")
 
 
+def compare_tree_linear(output, task, config, *, seed=20261017,
+                        cohort_size=12, max_nodes=2, max_requests=180,
+                        prior_campaign=None, policies=("linear","tree"),
+                        models=None, prepared_state=None):
+    """Predeclared matched search policies; no scientific success shortcut.
+
+    Shares ONE prepared author state, matching task, model settings, hard
+    limits, node ceilings, evaluation operator and input cohort. The policies
+    differ in branching/frontier behavior; per-arm actual inference costs
+    are separately reported. Development panels NEVER become confirmatory.
+    """
+    from rsi_researcher.research.scientific_tree import search
+    from rsi_researcher.research.scientific_loop import verified_experience
+    output=Path(output).resolve()
+    if output.exists() or task not in source.CATEGORIES:
+        raise ValueError("new directory and registered task required")
+    permitted=("linear","tree","tree_audited_history","tree_shuffled_history")
+    if not policies or len(policies)!=len(set(policies)) or any(
+            p not in permitted for p in policies):
+        raise ValueError("unsupported or duplicated research policies")
+    if max_requests<1 or not 1<=max_nodes<=8 or not 4<=cohort_size<=12 or cohort_size%2:
+        raise ValueError("unbounded or invalid comparison")
+    if config.get("llm",{}).get("provider")!="vllm":
+        raise ValueError("local Qwen/vLLM configuration required")
+    if prepared_state is not None and not task.startswith("agentcf_"):
+        raise ValueError("Coat tasks cannot use prepared AgentCF states")
+    if any(p.endswith("history") for p in policies) and prior_campaign is None:
+        raise ValueError("history comparison requires a distinct prior audited run")
+    if prior_campaign is not None:
+        verified_experience(output, prior_campaign)
+    output.mkdir(parents=True)
+    protocol={
+        "version":"matched-search-development-v1",
+        "task":task,"seed":seed,"cohort_size":cohort_size,
+        "policies":list(policies),"nodes_ceiling_each_arm":max_nodes,
+        "hard_model_requests_ceiling_each_arm":min(
+            max_requests,config["budget"]["max_requests"]),
+        "model":model_description(config),
+        "same_frozen_recommendation_state":task.startswith("agentcf_"),
+        "reused_prepared_development_state":str(prepared_state) if prepared_state else None,
+        "same_budget_ceiling_not_necessarily_equal_actual_cost":True,
+        "independent_confirmation":False,
+        "source_sha256":digest(Path(__file__).with_name("scientific_tree.py")),
+        "prior_campaign":str(prior_campaign) if prior_campaign else None,
+    }
+    atomic_json(output/"protocol.json",protocol)
+    atomic_json(output/"protocol.sha256.json",{"sha256":digest(output/"protocol.json")})
+    result={"status":"RUNNING","policies":{},"independent_discoveries":0}
+    atomic_json(output/"comparison.json",result)
+    try:
+        if task.startswith("agentcf_"):
+            if prepared_state is not None:
+                state=Path(prepared_state).resolve()
+                cohort=experiments.prepare_cohort(set(),seed,cohort_size)
+                experiments.load_prepared_agentcf(state,cohort)
+                common_cost={"requests":0,"usage_measured":True,
+                             "previous_development_state_reused":True}
+                origin=state.parents[2]/"comparison.json"
+                if origin.is_file():
+                    previous=json.loads(origin.read_text(encoding="utf8"))
+                    result["previous_shared_training_usage"]=(
+                        previous.get("shared_training_model_usage"))
+            elif models is None:
+                shared, common_cost=prepare_shared_states(
+                    output,[task],config,seed,cohort_size)
+                state=shared[task]
+            else:
+                # For deterministic software comparison, the caller supplies
+                # the shared training model explicitly, not a new Qwen bill.
+                folder=output/"shared_training"
+                folder.mkdir()
+                sub=folder/f"task-001-{task}"
+                sub.mkdir()
+                initial=experiments.prepare_cohort(set(),seed,cohort_size)
+                model=models["shared_training"]
+                experiments.train_and_observe_agentcf(initial,model,sub)
+                state=sub/"prepared_agentcf.json"
+                common_cost={"requests":model.requests,
+                             "usage_measured":False,"test_double":True}
+        else:
+            state=None
+            common_cost={"requests":0,"usage_measured":True}
+        result["shared_training_model_usage"]=common_cost
+        result["frozen_state_ref"]=str(state) if state else None
+        atomic_json(output/"comparison.json",result)
+        fingerprints=[]
+        for policy in policies:
+            arm=("qwen_audited_history" if policy=="tree_audited_history" else
+                 "qwen_shuffled_history" if policy=="tree_shuffled_history" else
+                 "qwen_no_history")
+            tree=search(output/policy,task,
+                        model=models[policy] if models else None,
+                        config=config,mode="fresh",arm=arm,
+                        cohort_size=cohort_size,seed=seed,
+                        width=2,max_depth=2,max_nodes=max_nodes,
+                        max_proposals=max(4,max_nodes*2),
+                        max_requests=max_requests,prepared_state=state,
+                        search_policy="linear" if policy=="linear" else "tree",
+                        prior_campaign=prior_campaign)
+            fingerprints.append(tree["training_sha256"])
+            result["policies"][policy]={
+                "status":tree["status"],
+                "attempted_nodes":tree["attempted_nodes"],
+                "executed_development_nodes":tree["executed_development_nodes"],
+                "unique_actions":len({n["action"] for n in tree["nodes"].values()
+                                      if n.get("audit_ref")}),
+                "development_forecast_passes":sum(
+                    1 for n in tree["nodes"].values() if n.get("audit_ref")
+                    and json.loads((output/policy/n["audit_ref"]).read_text())
+                       .get("forecast_passes_both_panels")),
+                "actual_model_requests":tree["total_model_requests"],
+                "actual_model_usage":tree["model_usage"],
+                "frozen_training_sha256":tree["training_sha256"],
+                "selected_node_sequence":[x["node_id"] for x in
+                                          tree["selection_history"]],
+                "independently_confirmed_discoveries":0,
+            }
+            atomic_json(output/"comparison.json",result)
+        same_state=bool(task.startswith("agentcf_") and
+                        all(fingerprints) and len(set(fingerprints))==1)
+        if task.startswith("agentcf_") and not same_state:
+            raise ValueError("arms did not share the same frozen state")
+        result.update(status="COMPLETED_DEVELOPMENT_COMPARISON",
+                      matched_trained_state=same_state,
+                      matched_limits=True,
+                      no_independent_confirmation=True,
+                      independently_confirmed_discoveries=0,
+                      conclusion="development diagnostics only; no efficacy claim")
+    except Exception:
+        result["status"]="FAILED_CLOSED"
+        atomic_json(output/"comparison.json",result)
+        raise
+    atomic_json(output/"comparison.json",result)
+    return result
+
+
+
+
+
 
 def prepare_shared_states(output, tasks, config, seed, cohort_size):
     """Train/probe once per new AgentCF task, then use the same state for all arms."""
@@ -233,3 +372,32 @@ def main(argv=None):
 
 if __name__=="__main__":
     main()
+
+
+def tree_main(argv=None):
+    parser=argparse.ArgumentParser(description="Matched tree/linear development search")
+    parser.add_argument("--output",required=True)
+    parser.add_argument("--config",required=True)
+    parser.add_argument("--task",required=True,choices=sorted(source.CATEGORIES))
+    parser.add_argument("--cohort-size",type=int,default=12)
+    parser.add_argument("--seed",type=int,default=20261017)
+    parser.add_argument("--max-nodes",type=int,default=2)
+    parser.add_argument("--max-requests",type=int,default=180)
+    parser.add_argument("--policies",nargs="+",default=["linear","tree"],
+                        choices=["linear","tree","tree_audited_history","tree_shuffled_history"])
+    parser.add_argument("--prior-campaign")
+    parser.add_argument("--prepared-state",
+                        help="reuse a fingerprint-verified earlier development AgentCF state")
+    args=parser.parse_args(argv)
+    config=json.loads(Path(args.config).read_text(encoding="utf8"))
+    # Fail before creating a run if the independent Qwen service is absent.
+    create_model(args.output,config["budget"]["max_requests"],None,config).health()
+    report=compare_tree_linear(
+        args.output,args.task,config,seed=args.seed,
+        cohort_size=args.cohort_size,max_nodes=args.max_nodes,
+        max_requests=args.max_requests,prior_campaign=args.prior_campaign,
+        policies=tuple(args.policies),prepared_state=args.prepared_state)
+    print(json.dumps({"status":report["status"],
+                      "matched_state":report["matched_trained_state"],
+                      "policies":list(report["policies"]),
+                      "confirmed_discoveries":0},ensure_ascii=False))

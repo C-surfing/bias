@@ -225,6 +225,18 @@ class MultiAgentTests(unittest.TestCase):
         self.assertEqual(audit["debias_utility_state"],"PROXY_GAIN_WITH_UTILITY_COST")
         self.assertEqual(audit["independently_confirmed_discoveries"],0)
 
+    def test_registered_coat_falsifier_overrules_scalar_forecast(self):
+        result=ex.reference.coat_observation("gamma_stress")
+        plan={"action":"gamma_stress","metric":"gamma_reference_margin",
+              "direction":"decrease","minimum_abs_effect":.0001}
+        audit=ex.independent_verdict("coat_utility","gamma_stress",plan,result)
+        self.assertTrue(audit["mechanism_forecast_passes_both_panels"])
+        self.assertFalse(audit["registered_action_falsifier_passes"])
+        self.assertFalse(audit["forecast_passes_both_panels"])
+        self.assertEqual(audit["falsification_state"],
+                         "REGISTERED_ACTION_FALSIFIER_FAILED")
+        self.assertEqual(audit["independently_confirmed_discoveries"],0)
+
     def test_missing_memory_support_is_inconclusive_not_discovery(self):
         plan = {"action":"item_memory_ablation", "metric":"rank_change_excess",
                 "direction":"increase", "minimum_abs_effect":0.1}
