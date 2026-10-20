@@ -424,6 +424,144 @@ def run(output):
     return result
 
 
+# Scientific Director chooses actions; this module alone owns outcome
+# interpretation. All numeric outcomes below are from frozen REAL development
+# data or a predeclared non-identifiable abstention. Never inspect holdouts.
+DEBIAS_ACTIONS = {
+    "selection": ("estimated_propensity_clip_5",
+                  "estimated_propensity_clip_20",
+                  "estimated_propensity_clip_100"),
+    "exposure": ("random_equal_budget", "random_reference"),
+    "popularity": ("penalty_0.05","penalty_0.1","penalty_0.2"),
+    "fairness": ("group_calibrated",),
+    "filter_bubble": (),
+}
+DEBIAS_METRICS = {
+    "selection": ("brier_gain", .002),
+    "exposure": ("random_reference_common_brier_gain", .01),
+    "popularity": ("head_top20_share_reduction", .003),
+    "fairness": ("group_brier_gap_reduction", .0005),
+    "filter_bubble": ("unsupported_trajectory", 1.),
+}
+
+
+def evaluate_debias_action(frozen, bias, action):
+    """Independently compute action validity/utility on frozen development data.
+
+    No LLM output enters numerical measurements; unsupported causal claims
+    remain explicitly unidentifiable even after a successful proxy outcome.
+    """
+    if bias not in DEBIAS_ACTIONS or action not in DEBIAS_ACTIONS[bias]:
+        raise ValueError("unregistered Debias task or method")
+    entry=frozen["data"][bias]
+    metric,floor=DEBIAS_METRICS[bias]
+    confidence="DEVELOPMENT_ONLY_NO_INDEPENDENT_CONFIRMATION"
+    if bias=="selection":
+        base=entry["policies"]["unweighted"]
+        proposed=entry["policies"][action]
+        value=base["brier"]-proposed["brier"]
+        quality=(proposed["ndcg_at_5"]>=.99*base["ndcg_at_5"]
+                 and proposed["hit_at_5"]>=base["hit_at_5"]-.02)
+        identifiable=True
+        label="SELECTION_RANDOM_REFERENCE_DEBIAS_CANDIDATE"
+        constraints={"ndcg_at_least_99pct_baseline":quality,
+                     "hit_at_5_loss_at_most_two_percentage_points":quality,
+                     "author_propensity_is_estimated_not_known":True}
+    elif bias=="exposure":
+        base=entry["policies"]["standard_only"]
+        proposed=entry["policies"][action]
+        value=base["common_support_brier"]-proposed["common_support_brier"]
+        quality=(proposed["common_support_development_impressions"] ==
+                 base["common_support_development_impressions"]
+                 and proposed["common_support_development_impressions"]>0)
+        identifiable=(entry["true_full_logging_propensities_known"] is True
+                      and entry["causal_OPE_identified"] is True)
+        label="RANDOM_EXPOSURE_PREDICTION_PROXY_ONLY"
+        constraints={"same_random_eval_support":quality,
+                     "equal_training_record_count": (
+                       proposed["training_impressions"]==
+                       base["training_impressions"]),
+                     "causal_logging_propensities_known":False}
+    elif bias=="popularity":
+        base=entry["policies"]["0.0"]
+        proposed=entry["policies"][action.removeprefix("penalty_")]
+        value=(base["head_top_20pct_exposure_share"]-
+               proposed["head_top_20pct_exposure_share"])
+        quality=(proposed["ndcg_at_5"]>=.99*base["ndcg_at_5"]
+                 and proposed["tail_relevant_recall"]>=.99*base["tail_relevant_recall"])
+        identifiable=entry["identifies_unjustified_popularity_causally"] is True
+        label="POPULARITY_EXPOSURE_PROXY_ONLY"
+        constraints={"ndcg_at_least_99pct_baseline":(
+                       proposed["ndcg_at_5"]>=.99*base["ndcg_at_5"]),
+                     "tail_recall_at_least_99pct_baseline":(
+                       proposed["tail_relevant_recall"]>=.99*base["tail_relevant_recall"]),
+                     "causal_popularity_effect_identified":identifiable}
+    elif bias=="fairness":
+        value=(entry["absolute_brier_gap_before"]-
+               entry["absolute_brier_gap_after"])
+        before=entry["unadjusted"]; after=entry["group_calibrated"]
+        quality=all(after[g]["brier"]<=before[g]["brier"]+.001
+                    for g in ("men","women"))
+        identifiable=entry["status"]=="GROUP_PREDICTION_CALIBRATION_DEVELOPMENT"
+        label="FAIRNESS_ERROR_PARITY_METHOD_TEST"
+        constraints={"no_group_brier_loss_over_0_001":quality,
+                     "predeclared_group":"Coat dataset men/women only"}
+    effect=value>=floor
+    return {
+        "bias_id":bias, "registered_method":action, "metric":metric,
+        "measured_improvement":value, "predeclared_minimum":floor,
+        "effect_direction_passes":effect,
+        "quality_guard_passes":quality,
+        "mechanism_identification_sufficient":identifiable,
+        "development_effect_passes":bool(effect and quality),
+        "development_debias_candidate":bool(effect and quality and identifiable
+                                            and bias=="selection"),
+        "evidence_class":label,
+        "constraints":constraints,
+        "scientific_scope":confidence,
+        "independent_confirmation":False,
+        "independently_confirmed_discoveries":0,
+    }
+
+
+def public_debias_context(frozen, bias, previous):
+    """Private numeric action outcomes never appear in the agent's prompt."""
+    task=next(t for t in bias_registry.TASKS if t.id==bias)
+    base=frozen["data"][bias]
+    if bias=="selection":
+        controls={"baseline_brier":base["policies"]["unweighted"]["brier"],
+                  "baseline_ndcg":base["policies"]["unweighted"]["ndcg_at_5"]}
+    elif bias=="exposure":
+        controls={"baseline_common_support_brier":base["policies"]["standard_only"]
+                  ["common_support_brier"],"propensity_unidentified":True}
+    elif bias=="popularity":
+        controls={"baseline_head_share":base["policies"]["0.0"]
+                  ["head_top_20pct_exposure_share"],
+                  "baseline_ndcg":base["policies"]["0.0"]["ndcg_at_5"]}
+    elif bias=="fairness":
+        controls={"baseline_group_gap":base["absolute_brier_gap_before"]}
+    else:
+        controls={"matched_longitudinal_experiment_exists":False}
+    return {"five_bias_target":bias,
+            "bias_definition":task.definition,
+            "allowable_interventions":list(task.allowable_interventions),
+            "required_evidence":list(task.required_evidence),
+            "not_identified_if":list(task.not_identified_if),
+            "baseline_only":controls,
+            "previously_executed_development_audits":previous[-6:],
+            "frozen_task_action_metric":DEBIAS_METRICS[bias],
+            "metric_direction_semantics":(
+                "All registered metrics are IMPROVEMENTS, defined as "
+                "BEFORE minus AFTER for errors, exposure share and group gap. "
+                "A positive intervention success therefore requires forecast "
+                "direction INCREASE, even though the raw harmful quantity "
+                "must DECREASE. Predict a failed or harmful method by "
+                "abstaining or predicting a negative effect; do not silently "
+                "reverse the metric definition."),
+            "no_hidden_candidate_effects_in_prompt":True,
+            "development_only":True}
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output",required=True)

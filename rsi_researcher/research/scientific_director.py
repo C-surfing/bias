@@ -335,3 +335,273 @@ def main(argv=None):
 
 if __name__=="__main__":
     main()
+
+
+"""A bounded *Debias* search on the five registered tasks, within the Director.
+
+Four EXISTING research roles, original Bias Registry and frozen real-data
+numeric actions are reused. No new research agents, evaluators or holdout use.
+This is a development-stage strategy test, not independent discovery.
+"""
+from pathlib import Path
+import json
+from rsi_researcher.research.five_bias_development import (
+    DEBIAS_ACTIONS, DEBIAS_METRICS, evaluate_debias_action,
+    public_debias_context,
+)
+from rsi_researcher.research.scientific_agents import (
+    DiagnosisAgent, DesignerAgent, CriticAgent, ReflectionAgent,
+)
+from rsi_researcher.research.scientific_loop import utc, digest
+from rsi_researcher.runtime.client import atomic_json, usage_summary
+from rsi_researcher.runtime.limits import RunLimits
+from rsi_researcher.runtime.models import create_model, model_description
+
+
+def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
+                            policy="qwen", max_rounds=14, max_requests=90,
+                            min_development_debias_tasks=1):
+    """Continue until real development Debias goal or honest bounded exhaustion.
+
+    Method candidates, effect floors, evaluation data, and stop criteria are
+    frozen BEFORE proposals. Evaluated numeric outcomes stay hidden from the
+    model until that method has been chosen and audited. A rejection triggers
+    another legal method on the next cycle; no lucky-seed reruns.
+    """
+    output=Path(output).resolve()
+    evidence=Path(evidence).resolve()
+    if (output.exists() or policy not in ("qwen","strong_rule") or
+        not 5<=max_rounds<=50 or not 1<=max_requests<=500 or
+        not 1<=min_development_debias_tasks<=5):
+        raise ValueError("invalid five-bias Debias scientific campaign")
+    if model is None and (config is None or
+                          config.get("llm",{}).get("provider")!="vllm"):
+        raise ValueError("local vLLM Qwen configuration required")
+    if config is not None and max_requests>config["budget"]["max_requests"]:
+        raise ValueError("model requests exceed configured budget")
+    frozen=json.loads(evidence.read_text(encoding="utf8"))
+    if (frozen.get("mode")!="fixed_development_protocol_never_confirmation"
+        or frozen.get("confirmed_debias_findings")!=0 or
+        set(frozen.get("data",{}))!=set(DEBIAS_ACTIONS)):
+        raise ValueError("unsupported or altered five-bias evidence contract")
+    # Lock every candidate's original measured outcome to this input digest.
+    protocol={
+        "version":"five-bias-constrained-scientific-debias-v1",
+        "policy":policy,"max_rounds":max_rounds,
+        "hard_max_requests":max_requests,
+        "min_development_debias_tasks":min_development_debias_tasks,
+        "five_bias_tasks":list(DEBIAS_ACTIONS),
+        "predeclared_actions":{k:list(v) for k,v in DEBIAS_ACTIONS.items()},
+        "predeclared_metrics":DEBIAS_METRICS,
+        "frozen_real_development_evidence":str(evidence),
+        "evidence_sha256":digest(evidence),
+        "no_holdout_use":True,
+        "no_evaluation_parameter_learning_from_agent":True,
+        "no_independent_scientific_confirmation":True,
+        "model":model_description(config) if config else {"kind":"offline-test-double"},
+    }
+    output.mkdir(parents=True)
+    atomic_json(output/"protocol.json",protocol)
+    atomic_json(output/"protocol.sha256.json",{"sha256":digest(output/"protocol.json")})
+    if model is None:
+        limits=RunLimits(output,**{**config["budget"],
+                                    "max_requests":max_requests})
+        model=create_model(output,max_requests,limits,config)
+    actions_left={k:list(v) for k,v in DEBIAS_ACTIONS.items()}
+    attempted={k:0 for k in DEBIAS_ACTIONS}
+    completed=set()
+    pending=list(DEBIAS_ACTIONS)
+    sequence=[]
+    state={
+        "status":"RUNNING","started_at":utc(),"rounds":sequence,
+        "task_status":{},"policy":policy,"actual_model_requests":0,
+        "development_debias_candidates":[],
+        "observed_proxy_effects":[],
+        "independently_confirmed_debias":0,
+        "science_goal_met":False,
+        "development_goal_met":False,
+    }
+    def save():
+        state["actual_model_requests"]=model.requests
+        atomic_json(output/"director_state.json",state)
+    save()
+    try:
+        # One-pass explicit abstention, no fake action for unidentifiable bubble.
+        for task in pending:
+            if not actions_left[task]:
+                state["task_status"][task]="ABSTAIN_UNIDENTIFIABLE_FILTER_BUBBLE"
+                completed.add(task)
+        pending=[t for t in pending if t not in completed]
+        save()
+
+        while pending and len(sequence)<max_rounds:
+            # One scientific episode needs diagnosis + design + review +
+            # reflection. Do not start an episode without its call budget.
+            if model.requests >= max_requests or (
+                    policy=="qwen" and model.requests+4>max_requests):
+                state["status"]="STOP_MODEL_REQUEST_BUDGET"
+                break
+            bias=pending.pop(0)
+            if not actions_left[bias]:
+                completed.add(bias)
+                state["task_status"].setdefault(bias,"EXHAUSTED_METHODS_NO_DEBIAS")
+                continue
+            previous=[{"action":r["action"],"audit":r.get("numeric_audit"),
+                       "decision":r["status"]} for r in sequence
+                      if r["bias_id"]==bias and r.get("numeric_audit")]
+            context=public_debias_context(frozen,bias,previous)
+            metric,threshold=DEBIAS_METRICS[bias]
+            round_id=f"round-{len(sequence)+1:03d}-{bias}"
+            choice={"round_id":round_id,"bias_id":bias,
+                    "available_actions":list(actions_left[bias]),
+                    "metric":metric,"numeric_threshold":threshold,
+                    "prior_audit_count":len(previous)}
+            if policy=="strong_rule":
+                choice["action"]=actions_left[bias][0]
+                choice["status"]="FIXED_RULE_PREDECLARED"
+            else:
+                diag=DiagnosisAgent(model).act(context,round_id)
+                design=DesignerAgent(model).propose(
+                    {"evidence":context,"diagnosis":diag,
+                     "metric_definition":metric,
+                     "minimum_effect":threshold,
+                     "do_not_infer_unseen_method_outcomes":True},
+                    round_id,actions_left[bias],[metric])
+                choice.update({"diagnosis":diag,"frozen_proposal":design})
+                proposed=design["action"]
+                if proposed=="abstain":
+                    choice["status"]="AGENT_ABSTAIN_NO_ACTION"
+                    actions_left[bias].clear()
+                    completed.add(bias)
+                    state["task_status"][bias]="ABSTAIN_BY_DESIGNER"
+                    sequence.append(choice)
+                    save()
+                    continue
+                if proposed not in actions_left[bias]:
+                    raise ValueError("Qwen proposed unregistered method")
+                choice["action"]=proposed
+                critique=CriticAgent(model).act({
+                    "five_bias_task":context,
+                    "frozen_design":design,
+                    "real_numeric_results_hidden":True,
+                    "registered_evaluation_guards":{
+                        "metric":metric,"minimum_effect":threshold,
+                        "never_claim_causal_confirmation":True,
+                        "development_assessment_only":True}},round_id)
+                choice["critic_review"]=critique
+                if design["metric"]!=metric or design["direction"]!="increase" or (
+                   design["minimum_abs_effect"]<threshold):
+                    choice["status"]="REJECTED_PREDECLARED_CONTRACT"
+                elif critique["decision"]!="approve":
+                    choice["status"]="REJECTED_BY_CRITIC"
+                else:
+                    choice["status"]="CRITIC_APPROVED_DEVELOPMENT_TEST"
+            actions_left[bias].remove(choice["action"])
+            if choice["status"] not in ("REJECTED_PREDECLARED_CONTRACT",
+                                       "REJECTED_BY_CRITIC"):
+                if digest(evidence)!=protocol["evidence_sha256"]:
+                    raise ValueError("frozen numeric action source changed during research")
+                measurement=evaluate_debias_action(frozen,bias,choice["action"])
+                choice["numeric_audit"]=measurement
+                choice["numeric_audit_source_sha256"]=digest(evidence)
+                choice["status"]=("DEVELOPMENT_EFFECT_WITH_QUALITY_GUARD"
+                                   if measurement["development_effect_passes"]
+                                   else "DEVELOPMENT_FALSIFIER_OR_UTILITY_FAILED")
+                if measurement["development_effect_passes"]:
+                    state["observed_proxy_effects"].append({
+                        "bias_id":bias,"method":choice["action"],
+                        "evidence_class":measurement["evidence_class"]})
+                if measurement["development_debias_candidate"]:
+                    state["development_debias_candidates"].append({
+                        "bias_id":bias,"method":choice["action"],
+                        "audit_round":round_id})
+            if policy=="qwen":
+                reflection=ReflectionAgent(model).reflect({
+                    "bias_id":bias,"decision":choice["status"],
+                    "measured_numeric_audit":choice.get("numeric_audit"),
+                    "critic_reason":choice.get("critic_review",{}).get("reason"),
+                    "never_promote_proxy_or_dev_as_scientific_confirmation":True},
+                    round_id,[])
+                choice["reflection"]=reflection
+            attempted[bias]+=1
+            sequence.append(choice)
+            state["task_status"][bias]=choice["status"]
+            if (choice.get("numeric_audit",{}).get("development_effect_passes")):
+                completed.add(bias)
+            elif actions_left[bias]:
+                pending.append(bias)
+            else:
+                completed.add(bias)
+                state["task_status"][bias]="EXHAUSTED_METHODS_NO_DEBIAS"
+            save()
+            # This is a DEVELOPMENT goal, not scientific success. Every frozen
+            # bias must be inspected/abstained before accepting a five-bias run.
+            covered=all(attempted[t] or t in completed for t in DEBIAS_ACTIONS)
+            qualified={x["bias_id"] for x in state["development_debias_candidates"]}
+            if covered and len(qualified)>=min_development_debias_tasks:
+                state["status"]="STOP_DEVELOPMENT_DEBIAS_CANDIDATE_PENDING_CONFIRMATION"
+                state["development_goal_met"]=True
+                break
+        if state["status"]=="RUNNING":
+            state["status"]=("STOP_ROUND_CEILING" if pending else
+                             "STOP_NO_FURTHER_REGISTERED_METHODS")
+    except Exception as e:
+        state["status"]="FAILED_CLOSED"
+        state["error_type"]=type(e).__name__
+        save()
+        raise
+    state["finished_at"]=utc()
+    state["remaining_actions"]={k:v for k,v in actions_left.items() if v}
+    state["evaluated_biases"]=sorted(set(DEBIAS_ACTIONS)-set(pending))
+    state["development_debias_targets_reached"]=len({
+        c["bias_id"] for c in state["development_debias_candidates"]})
+    state["science_goal_met"]=False
+    state["independently_confirmed_debias"]=0
+    state["actual_model_usage"]=(
+        usage_summary(output) if (output/"calls.jsonl").is_file() else
+        {"requests":model.requests,"usage_measured":False})
+    save()
+    return state
+
+
+def debias_main(argv=None):
+    import argparse
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output",required=True)
+    parser.add_argument("--evidence",required=True)
+    parser.add_argument("--policy",choices=("qwen","strong_rule"),default="qwen")
+    parser.add_argument("--config")
+    parser.add_argument("--max-rounds",type=int,default=14)
+    parser.add_argument("--max-requests",type=int,default=90)
+    parser.add_argument("--min-development-debias-tasks",type=int,default=1)
+    args=parser.parse_args(argv)
+    conf=json.loads(Path(args.config).read_text()) if args.config else None
+    if args.policy=="qwen":
+        if conf is None:
+            parser.error("Qwen requires --config")
+        create_model(args.output,args.max_requests,None,conf).health()
+    elif conf is None:
+        # A fixed-rule run needs no model service or credentials; pass an
+        # explicit zero-call scorer using the same numerical executor.
+        class ZeroModel:
+            requests=0
+        return _print_debias(conduct_five_bias_debias(
+            args.output,evidence=args.evidence,model=ZeroModel(),
+            policy="strong_rule",max_rounds=args.max_rounds,
+            max_requests=args.max_requests,
+            min_development_debias_tasks=args.min_development_debias_tasks))
+    return _print_debias(conduct_five_bias_debias(
+        args.output,evidence=args.evidence,config=conf,
+        policy=args.policy,max_rounds=args.max_rounds,
+        max_requests=args.max_requests,
+        min_development_debias_tasks=args.min_development_debias_tasks))
+
+
+def _print_debias(result):
+    print(json.dumps({"status":result["status"],
+                      "attempted_rounds":len(result["rounds"]),
+                      "development_debias_targets_reached":
+                        result["development_debias_targets_reached"],
+                      "independently_confirmed_debias":0,
+                      "actual_model_requests":result["actual_model_requests"]},
+                     ensure_ascii=False))
