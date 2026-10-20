@@ -25,6 +25,15 @@ CRITIQUE = strict({
     "reason": TEXT, "confounding_risk": TEXT,
     "better_discriminating_test": TEXT,
 })
+DEBIAS_CRITIQUE = strict({
+    **CRITIQUE["properties"],
+    "counterexample_if_null_true": TEXT,
+    "unexcluded_competing_mechanism": TEXT,
+    "registered_falsifier_measurable": {"type":"boolean"},
+    "relevance_to_frozen_null": {"type":"string","enum":[
+        "logically_discriminating","relevant_but_not_identifying",
+        "not_relevant"]},
+})
 REFLECTION = strict({
     "evidence_state": {"type": "string", "enum": ["supported", "weakened", "inconclusive"]},
     "numeric_interpretation": TEXT, "remaining_alternative": TEXT,
@@ -32,6 +41,35 @@ REFLECTION = strict({
     "suggested_next_task": {"type": "string", "enum": ["stop"]},
     "next_task_reason": TEXT,
 })
+
+
+def authoritative_evidence(audit=None):
+    """Only the Python numerical audit, never the LLM, grants evidence levels.
+
+    Both historic science/tree episodes and five-bias Debias Director share
+    this single, intentionally small, evidence authority boundary.
+    """
+    audit = audit or {}
+    confirmation = audit.get("independent_confirmation") is True
+    # Older experimental protocols always record zero confirmed findings;
+    # a fresh confirmation needs a separately frozen evaluator.
+    development = bool(
+        audit.get("development_effect_passes")
+        or audit.get("debias_candidate_eligible")
+        or audit.get("forecast_passes_both_panels"))
+    return {
+        "authority": "python_numeric_audit_only",
+        "statistical_significance": "NOT_ESTABLISHED_BY_THIS_WORKFLOW",
+        "sequential_error_control": "NOT_AVAILABLE",
+        "independent_confirmation": confirmation,
+        "development_check_passed": development,
+        "causal_identification": (
+            "SUPPORTED_WITHIN_REGISTERED_SIMULATOR_ONLY"
+            if audit.get("evidence_class","").startswith("SYNTHETIC_")
+            else "NOT_ESTABLISHED_BY_THIS_WORKFLOW"),
+        "model_reflection_is_hypothesis_not_evidence": True,
+        "confirmed_scientific_discoveries": 0,
+    }
 
 
 def design_schema(actions, metrics):
@@ -118,9 +156,19 @@ class CriticAgent(ResearchAgent):
         "the named competing mechanism, is unpaired, or claims unsupported "
         "causal effects; cite the relevant protocol failure precisely. "
         "Development admissibility never implies independent confirmation. "
+        "For each experiment, attempt a CONCRETE counterexample: can the "
+        "primary null be true while the proposed measurable falsifier passes? "
+        "Inspect the task-specific data requirements and support before "
+        "asking for propensity, placebo, or Gamma controls from another bias. "
+        "Never treat randomized reference prediction as identified policy OPE. "
         "Your approval NEVER grants execution permission."
     )
     schema = CRITIQUE
+
+    def review_debias(self, observation, episode_id):
+        # Same Critic Agent with a stronger task-specific POPPER-style
+        # logical link contract; not an added role or a new LLM service.
+        return self.act(observation, episode_id, schema=DEBIAS_CRITIQUE)
 
 
 class ReflectionAgent(ResearchAgent):
@@ -129,7 +177,11 @@ class ReflectionAgent(ResearchAgent):
         "You are the research reflection scientist. Interpret the independent "
         "measured evidence, the frozen forecast verdict and the experiment cost. "
         "Propose the next discriminating scientific question and ONE TENTATIVE "
-        "research skill. Do not mark a skill verified or reverse a failed gate."
+        "research skill. The Python numerical audit is the ONLY evidence "
+        "authority. No significance test or independent confirmation was "
+        "performed here: never call an improvement statistically significant, "
+        "causally confirmed, or say further confirmation is unnecessary. "
+        "Do not mark a skill verified or reverse a failed gate."
     )
     schema = REFLECTION
 

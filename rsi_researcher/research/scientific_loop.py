@@ -17,6 +17,7 @@ from rsi_researcher.paths import ROOT
 from rsi_researcher.research import crossbias_discovery as source
 from rsi_researcher.research.scientific_agents import (
     DiagnosisAgent, DesignerAgent, CriticAgent, ReflectionAgent,
+    authoritative_evidence,
 )
 from rsi_researcher.research import scientific_experiments as experiments
 from rsi_researcher.research import scientific_skills as skills
@@ -294,6 +295,7 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
                      episode_elapsed_seconds=round(perf_counter()-begin, 3),
                      experiment_model_calls=model.requests-execute_start_calls,
                      total_model_calls_to_audit=model.requests-calls_before)
+        audit["authoritative_evidence"]=authoritative_evidence(audit)
         store_new(directory / "audit.json", audit)
 
         if arm == "strong_rule":
@@ -303,7 +305,11 @@ def episode(directory, task, model, mode, excluded_users, seed, cohort_size,
             reflection = ReflectionAgent(model).reflect(
                 {"frozen_plan": plan, "independent_numeric_verdict": audit,
                  "no_independent_confirmation": True}, eid, list(allowed_next_tasks))
-            store_new(directory / "reflection.json", reflection)
+            store_new(directory / "reflection.json", {
+                **reflection,
+                "model_text_can_only_suggest_hypotheses": True,
+                "authoritative_evidence": audit["authoritative_evidence"],
+                "do_not_cite_model_numeric_interpretation_as_scientific_result":True})
             # Skill is NOT a model-generated fact. Link to verified numeric source
             # and freeze as a candidate that cannot promote itself.
             skills.proposal(directory, task, reflection["candidate_research_skill"],

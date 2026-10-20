@@ -652,6 +652,58 @@ def evaluate_debias_action(frozen, bias, action, *, parameters=None):
     }
 
 
+def falsification_protocol(frozen, bias):
+    """Registered POPPER-style claim/test relation, not an LLM verdict.
+
+    The null is specific to the observed development experiment; absent data
+    prevents upgrading a proxy into a real-world causal claim. Unlike generic
+    Critic rhetoric, the Python auditor owns the empirical pass/fail check.
+    """
+    task=next(t for t in bias_registry.TASKS if t.id==bias)
+    spec={
+        "selection":(
+            "Propensity-weighted selection has no Brier gain >= 0.002 "
+            "with acceptable paired ranking utility over unweighted.",
+            "Randomly rated known-user development Brier and paired ranking guards",
+            "Same-population development method advantage only"),
+        "exposure":(
+            "Random-reference-trained item/tab CTR does not improve "
+            "common-support random-feedback prediction by >= 0.01.",
+            "Held-out randomized-feedback item/tab Brier on matched support",
+            "Prediction shift, NOT alternative-policy causal value"),
+        "popularity":(
+            "Penalty does not lower training-popular top-k share by >= 0.003 "
+            "while retaining ranking relevance.",
+            "Same randomized-rated candidate panel relevance and top-k",
+            "Popularity exposure change only; unjustified bias not identified"),
+        "fairness":(
+            "Candidate does not reduce men's/women's Brier disparity by "
+            ">= 0.0005 while preventing either group's loss > 0.001.",
+            "Coat gender groups; groupwise Brier and same random-rated pairs",
+            "Predictive error parity in Coat; NOT social opportunity fairness"),
+        "filter_bubble":(
+            "Exploration does not increase simulated longitudinal topic "
+            "entropy by >= 0.08 with matched dynamics and utility guard.",
+            "Matched initial states, common noise, no-feedback placebo, "
+            "new simulation seeds",
+            "Conditional simulated feedback-loop effect, NOT real KuaiRand")
+    }
+    null,test,scope=spec[bias]
+    return {
+        "primary_null_hypothesis":null,
+        "registered_falsifier":test,
+        "admissible_conclusion":scope,
+        "required_observations":list(task.required_evidence),
+        "missing_or_nonidentified_if":list(task.not_identified_if),
+        "counterexample_challenge":(
+            "Name a concrete world in which the null mechanism remains true "
+            "but this registered observable can improve due to support, "
+            "candidate relevance, group composition, or stochastic feedback."),
+        "optional_stopping_significance_control":"NOT_AVAILABLE",
+        "claim_test_relation_is_registration_not_a_statistical_proof":True,
+    }
+
+
 def public_debias_context(frozen, bias, previous):
     """Private numeric action outcomes never appear in the agent's prompt."""
     task=next(t for t in bias_registry.TASKS if t.id==bias)
@@ -679,6 +731,7 @@ def public_debias_context(frozen, bias, previous):
             "baseline_only":controls,
             "previously_executed_development_audits":previous[-6:],
             "frozen_task_action_metric":DEBIAS_METRICS[bias],
+            "falsification_protocol":falsification_protocol(frozen,bias),
             "metric_direction_semantics":(
                 "All registered metrics are IMPROVEMENTS, defined as "
                 "BEFORE minus AFTER for errors, exposure share and group gap. "

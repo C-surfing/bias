@@ -43,7 +43,13 @@ class ScientificFake:
             return {"decision":"approve",
                     "reason":"Accept one registered development experiment, not confirmation.",
                     "confounding_risk":"Observational logs may violate causal identification.",
-                    "better_discriminating_test":"Confirm using a new source or independent cohort."}
+                    "better_discriminating_test":"Confirm using a new source or independent cohort.",
+                    **({
+                        "counterexample_if_null_true":"Observational item coverage may alter predictions even with no identified debias mechanism.",
+                        "unexcluded_competing_mechanism":"Catalog support and user selection effects are not eliminated.",
+                        "registered_falsifier_measurable":True,
+                        "relevance_to_frozen_null":"relevant_but_not_identifying",
+                    } if "relevance_to_frozen_null" in schema["properties"] else {})}
         if stage=="reflection":
             return {"evidence_state":"inconclusive",
                     "numeric_interpretation":"This development result is not an independent discovery.",

@@ -345,12 +345,14 @@ This is a development-stage strategy test, not independent discovery.
 """
 from pathlib import Path
 import json
+from time import perf_counter
 from rsi_researcher.research.five_bias_development import (
     DEBIAS_ACTIONS, DEBIAS_METRICS, evaluate_debias_action,
     public_debias_context,
 )
 from rsi_researcher.research.scientific_agents import (
     DiagnosisAgent, DesignerAgent, CriticAgent, ReflectionAgent, strict, TEXT,
+    authoritative_evidence,
 )
 from rsi_researcher.research.scientific_loop import utc, digest
 from rsi_researcher.runtime.client import atomic_json, usage_summary
@@ -361,7 +363,8 @@ from rsi_researcher.runtime.models import create_model, model_description
 def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                             policy="qwen", max_rounds=14, max_requests=90,
                             min_development_debias_tasks=1,
-                            joint_design_only=False):
+                            joint_design_only=False,
+                            max_joint_proposals=1):
     """Continue until real development Debias goal or honest bounded exhaustion.
 
     Method candidates, effect floors, evaluation data, and stop criteria are
@@ -369,11 +372,13 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
     model until that method has been chosen and audited. A rejection triggers
     another legal method on the next cycle; no lucky-seed reruns.
     """
+    begin_wall=perf_counter()
     output=Path(output).resolve()
     evidence=Path(evidence).resolve()
     if (output.exists() or policy not in ("qwen","strong_rule") or
         not 5<=max_rounds<=50 or not 1<=max_requests<=500 or
-        not 1<=min_development_debias_tasks<=5):
+        not 1<=min_development_debias_tasks<=5 or
+        not 1<=max_joint_proposals<=5):
         raise ValueError("invalid five-bias Debias scientific campaign")
     if model is None and (config is None or
                           config.get("llm",{}).get("provider")!="vllm"):
@@ -390,6 +395,7 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
         "version":"five-bias-constrained-scientific-debias-v1",
         "policy":policy,"max_rounds":max_rounds,
         "joint_design_only":joint_design_only,
+        "maximum_frozen_joint_proposals":max_joint_proposals,
         "hard_max_requests":max_requests,
         "min_development_debias_tasks":min_development_debias_tasks,
         "five_bias_tasks":list(DEBIAS_ACTIONS),
@@ -398,7 +404,8 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
         "frozen_real_development_evidence":str(evidence),
         "evidence_sha256":digest(evidence),
         "no_holdout_use":True,
-        "no_evaluation_parameter_learning_from_agent":True,
+        "evaluator_and_acceptance_rules_never_modified_by_agent":True,
+        "agent_can_propose_training_policy_parameters":True,
         "no_independent_scientific_confirmation":True,
         "model":model_description(config) if config else {"kind":"offline-test-double"},
     }
@@ -414,6 +421,7 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
         ) if joint_design_only else list(v)
         for k,v in DEBIAS_ACTIONS.items()}
     attempted={k:0 for k in DEBIAS_ACTIONS}
+    joint_proposed=[]
     completed=set()
     pending=list(DEBIAS_ACTIONS)
     sequence=[]
@@ -434,7 +442,10 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
         # One-pass explicit abstention, no fake action for unidentifiable bubble.
         for task in pending:
             if not actions_left[task]:
-                state["task_status"][task]="ABSTAIN_UNIDENTIFIABLE_FILTER_BUBBLE"
+                state["task_status"][task]=(
+                    "ABSTAIN_UNIDENTIFIABLE_FILTER_BUBBLE" if
+                    task=="filter_bubble" and not joint_design_only
+                    else "NOT_IN_REGISTERED_SEARCH_MODE")
                 completed.add(task)
         pending=[t for t in pending if t not in completed]
         save()
@@ -456,6 +467,7 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                       if r["bias_id"]==bias and r.get("numeric_audit")]
             context=public_debias_context(frozen,bias,previous)
             metric,threshold=DEBIAS_METRICS[bias]
+            claim_contract=context["falsification_protocol"]
             round_id=f"round-{len(sequence)+1:03d}-{bias}"
             choice={"round_id":round_id,"bias_id":bias,
                     "available_actions":list(actions_left[bias]),
@@ -465,7 +477,9 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                 choice["action"]=actions_left[bias][0]
                 choice["status"]="FIXED_RULE_PREDECLARED"
                 if choice["action"]=="joint_propensity_popularity_design":
-                    choice["joint_parameters"]={"alpha":.75,"beta":.05}
+                    candidates=((.75,.05),(.9,0.),(.5,.02),(.65,.01),(.3,0.))
+                    alpha,beta=candidates[min(len(joint_proposed),len(candidates)-1)]
+                    choice["joint_parameters"]={"alpha":alpha,"beta":beta}
             else:
                 diag=DiagnosisAgent(model).act(context,round_id)
                 design=DesignerAgent(model).propose(
@@ -493,6 +507,10 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                         "unknown_development_outcome":True,
                         "predeclared_goal":"Brier improvement >=0.002, NDCG >=99% of baseline, Hit loss <=0.02",
                         "alpha_range":[0,1],"beta_range":[0,.15],
+                        "previous_joint_development_trials": [
+                            {"parameters":x["parameters"],
+                             "outcome":x["result"]} for x in joint_proposed],
+                        "must_avoid_duplicate_parameters":True,
                         "no_holdout_labels_visible":True
                     },round_id,schema=strict({
                         "alpha":{"type":"number","minimum":0,"maximum":1},
@@ -501,36 +519,78 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                     choice["joint_parameters"]={"alpha":values["alpha"],
                                                 "beta":values["beta"]}
                     choice["joint_hypothesis"]=values
-                critique=CriticAgent(model).act({
-                    "five_bias_task":context,
-                    "frozen_design":design,
-                    "joint_parameters":choice.get("joint_parameters"),
-                    "real_numeric_results_hidden":True,
-                    "registered_evaluation_guards":{
-                        "metric":metric,"minimum_effect":threshold,
-                        "never_claim_causal_confirmation":True,
-                        "development_assessment_only":True}},round_id)
-                choice["critic_review"]=critique
-                if design["metric"]!=metric or design["direction"]!="increase" or (
-                   design["minimum_abs_effect"]<threshold):
-                    choice["status"]="REJECTED_PREDECLARED_CONTRACT"
-                elif critique["decision"]!="approve":
-                    choice["status"]="REJECTED_BY_CRITIC"
+                duplicate_proposal = (
+                    proposed=="joint_propensity_popularity_design" and
+                    any(x["parameters"]==choice.get("joint_parameters")
+                        for x in joint_proposed))
+                if duplicate_proposal:
+                    # An invalid repeat cannot gain new evidence. Save the
+                    # Critic request: numeric evaluation would also be skipped.
+                    choice["status"]="REJECTED_DUPLICATE_DEVELOPMENT_PROPOSAL"
+                    choice["critic_review"]={
+                        "decision":"not_called","reason":"duplicate frozen parameters",
+                        "numeric_claim_authority":"none"}
                 else:
-                    choice["status"]="CRITIC_APPROVED_DEVELOPMENT_TEST"
+                    critique=CriticAgent(model).review_debias({
+                        "five_bias_task":context,
+                        "frozen_design":design,
+                        "joint_parameters":choice.get("joint_parameters"),
+                        "real_numeric_results_hidden":True,
+                        "registered_evaluation_guards":{
+                            "metric":metric,"minimum_effect":threshold,
+                            "never_claim_causal_confirmation":True,
+                            "development_assessment_only":True},
+                        "relevance_challenge":{
+                            "primary_null":claim_contract["primary_null_hypothesis"],
+                            "observable_falsifier":claim_contract["registered_falsifier"],
+                            "allowed_conclusion":claim_contract["admissible_conclusion"],
+                            "potential_counterexample":claim_contract["counterexample_challenge"],
+                            "forbidden_inferences":claim_contract["missing_or_nonidentified_if"],
+                            "no_sequential_significance_test":True}},round_id)
+                    choice["critic_review"]=critique
+                    if design["metric"]!=metric or design["direction"]!="increase" or (
+                       design["minimum_abs_effect"]<threshold):
+                        choice["status"]="REJECTED_PREDECLARED_CONTRACT"
+                    elif (critique["decision"]!="approve" or not
+                          critique["registered_falsifier_measurable"] or
+                          critique["relevance_to_frozen_null"]=="not_relevant"):
+                        choice["status"]="REJECTED_BY_CRITIC"
+                    else:
+                        choice["status"]="CRITIC_APPROVED_DEVELOPMENT_TEST"
             actions_left[bias].remove(choice["action"])
+            # Sequential proposals must be distinct; repeated lookups at the
+            # same development metrics provide no additional scientific data.
+            if choice["action"]=="joint_propensity_popularity_design":
+                params=choice.get("joint_parameters")
+                if params is None:
+                    raise ValueError("joint action missing parameters")
+                if any(old["parameters"]==params for old in joint_proposed):
+                    choice["status"]="REJECTED_DUPLICATE_DEVELOPMENT_PROPOSAL"
+                joint_proposed.append({"parameters":params,
+                                        "result":"not_evaluated_yet"})
             if choice["status"] not in ("REJECTED_PREDECLARED_CONTRACT",
+                                       "REJECTED_DUPLICATE_DEVELOPMENT_PROPOSAL",
                                        "REJECTED_BY_CRITIC"):
                 if digest(evidence)!=protocol["evidence_sha256"]:
                     raise ValueError("frozen numeric action source changed during research")
+                numeric_start=perf_counter()
                 measurement=evaluate_debias_action(
                     frozen,bias,choice["action"],
                     parameters=choice.get("joint_parameters"))
+                choice["numeric_evaluation_wall_seconds"]=round(
+                    perf_counter()-numeric_start,4)
                 choice["numeric_audit"]=measurement
+                choice["authoritative_evidence"]=authoritative_evidence(measurement)
+                choice["registered_falsifier"]=claim_contract
                 choice["numeric_audit_source_sha256"]=digest(evidence)
                 choice["status"]=("DEVELOPMENT_EFFECT_WITH_QUALITY_GUARD"
                                    if measurement["development_effect_passes"]
                                    else "DEVELOPMENT_FALSIFIER_OR_UTILITY_FAILED")
+                if choice["action"]=="joint_propensity_popularity_design":
+                    joint_proposed[-1]["result"]={
+                        "measured_improvement":measurement["measured_improvement"],
+                        "quality_guard_passes":measurement["quality_guard_passes"],
+                        "passed":measurement["development_effect_passes"]}
                 if measurement["development_effect_passes"]:
                     state["observed_proxy_effects"].append({
                         "bias_id":bias,"method":choice["action"],
@@ -546,8 +606,16 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
                     "critic_reason":choice.get("critic_review",{}).get("reason"),
                     "never_promote_proxy_or_dev_as_scientific_confirmation":True},
                     round_id,[])
-                choice["reflection"]=reflection
+                choice["reflection_hypotheses_only"]=reflection
+                choice["reflection_evidence_authority"]=authoritative_evidence(
+                    choice.get("numeric_audit"))
+                choice["reflection_does_not_override_numerical_audit"]=True
             attempted[bias]+=1
+            if (choice.get("action")=="joint_propensity_popularity_design"
+                    and attempted[bias]<max_joint_proposals and
+                    not choice.get("numeric_audit",{}).get(
+                        "development_effect_passes")):
+                actions_left[bias].append("joint_propensity_popularity_design")
             sequence.append(choice)
             state["task_status"][bias]=choice["status"]
             if (choice.get("numeric_audit",{}).get("development_effect_passes")):
@@ -581,6 +649,21 @@ def conduct_five_bias_debias(output, *, evidence, model=None, config=None,
         c["bias_id"] for c in state["development_debias_candidates"]})
     state["science_goal_met"]=False
     state["independently_confirmed_debias"]=0
+    state["evidence_authority"]=authoritative_evidence()
+    state["real_confirmation_protocol"]=(
+        "Coat cap100 previously failed its one-shot holdout ranking guard; "
+        "the old holdout must not be reused for new proposals. "
+        "Development success is not independent confirmation.")
+    state["frozen_action_tests"]={k:v for k,v in DEBIAS_METRICS.items()}
+    state["campaign_wall_seconds"]=round(perf_counter()-begin_wall,3)
+    state["total_numeric_execution_wall_seconds"]=round(sum(
+        x.get("numeric_evaluation_wall_seconds",0) for x in sequence),3)
+    state["executed_development_experiments"]=sum(
+        "numeric_audit" in x for x in sequence)
+    state["falsified_or_rejected_rounds"]=sum(x["status"] in (
+        "REJECTED_BY_CRITIC","REJECTED_PREDECLARED_CONTRACT",
+        "REJECTED_DUPLICATE_DEVELOPMENT_PROPOSAL",
+        "DEVELOPMENT_FALSIFIER_OR_UTILITY_FAILED") for x in sequence)
     state["actual_model_usage"]=(
         usage_summary(output) if (output/"calls.jsonl").is_file() else
         {"requests":model.requests,"usage_measured":False})
@@ -599,6 +682,7 @@ def debias_main(argv=None):
     parser.add_argument("--max-requests",type=int,default=90)
     parser.add_argument("--min-development-debias-tasks",type=int,default=1)
     parser.add_argument("--joint-design-only",action="store_true")
+    parser.add_argument("--max-joint-proposals",type=int,default=1)
     args=parser.parse_args(argv)
     conf=json.loads(Path(args.config).read_text()) if args.config else None
     if args.policy=="qwen":
@@ -615,13 +699,15 @@ def debias_main(argv=None):
             policy="strong_rule",max_rounds=args.max_rounds,
             max_requests=args.max_requests,
             min_development_debias_tasks=args.min_development_debias_tasks,
-            joint_design_only=args.joint_design_only))
+            joint_design_only=args.joint_design_only,
+            max_joint_proposals=args.max_joint_proposals))
     return _print_debias(conduct_five_bias_debias(
         args.output,evidence=args.evidence,config=conf,
         policy=args.policy,max_rounds=args.max_rounds,
         max_requests=args.max_requests,
         min_development_debias_tasks=args.min_development_debias_tasks,
-        joint_design_only=args.joint_design_only))
+        joint_design_only=args.joint_design_only,
+        max_joint_proposals=args.max_joint_proposals))
 
 
 def _print_debias(result):
