@@ -191,7 +191,7 @@ def main(argv=None):
     p.add_argument("--data",required=True)
     p.add_argument("--dataset",choices=["ml-1m","Games","Beauty","Sports","CDs"],
                    default="ml-1m")
-    p.add_argument("--retrieval",choices=["random","sasrec"],default="random")
+    p.add_argument("--retrieval",choices=["random","sasrec","bm25"],default="random")
     p.add_argument("--users",type=int,default=12)
     p.add_argument("--seeds",default="20261021")
     p.add_argument("--max-rounds",type=int,default=3)

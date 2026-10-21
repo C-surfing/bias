@@ -55,8 +55,8 @@ def select_case_panels(dataset, data, retrieval, n, seed, fraction=0.6):
         test,skip_test=cases_from_source(dataset,"test",requested[split:],
               train,positive,titles,source,seed+1,20,50)
     else:
-        dev=cases_for("validation",requested[:split],train,positive,known,titles,seed,20)
-        test=cases_for("test",requested[split:],train,positive,known,titles,seed+1,20)
+        dev=cases_for("validation",requested[:split],train,positive,known,titles,seed,20,retrieval)
+        test=cases_for("test",requested[split:],train,positive,known,titles,seed+1,20,retrieval)
         skip_dev=skip_test={}
     if len(dev)<2 or len(test)<2:
         raise ValueError("insufficient nonempty development and test users")
@@ -66,8 +66,12 @@ def select_case_panels(dataset, data, retrieval, n, seed, fraction=0.6):
           "dev_users":[c["user"] for c in dev],
           "holdout_users":[c["user"] for c in test],"dev_count":len(dev),
           "holdout_count":len(test),"candidate_source":source.name if source else "frozen_random",
-          "retrieval":retrieval if source else None,"budget_candidates":20,
+          "retrieval":retrieval,
+          "candidate_generation":("author_precomputed_"+retrieval if source
+                 else "train_title_bm25" if retrieval=="bm25" else "frozen_random"),
+          "budget_candidates":20,
           "official_LLMRank_full_reproduction":False,
+          "candidate_position_protocol":"target-appended, frozen shuffled candidates, paired gt-first presentation diagnosis",
           "history_len":50,
           "skipped":{"dev":skip_dev,"test":skip_test},
           "data_archive_sha256":data_sha256}
@@ -129,6 +133,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
     data=Path(data).resolve()
     prior_development=[]
     inherited_by_seed={}
+    prior_rank_cache_paths=[]
     visited=set()
     prior_path=Path(prior_campaign).resolve() if prior_campaign else None
     while prior_path:
@@ -136,6 +141,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
             raise ValueError("invalid or cyclic prior campaign lineage")
         visited.add(prior_path)
         manifest=prior_path/"program.json"
+        prior_rank_cache_paths.append(prior_path/"rank_cache.jsonl")
         if not manifest.is_file():
             raise ValueError("missing original run program manifest")
         program=json.loads(manifest.read_text(encoding="utf-8"))
@@ -162,7 +168,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
     limits=RunLimits(output,**run_budget)
     model=create_model(output,limits.max_requests,limits,config)
     model.health()
-    gateway=RankGateway(model,output/"rank_cache.jsonl")
+    gateway=RankGateway(model,output/"rank_cache.jsonl",
+                       preload_paths=reversed(prior_rank_cache_paths))
     atomic_json(output/"program.json",{
        "goal":"Maximize independently measured debias quality with controlled utility loss",
        "editable":"strategy instruction, history framing, candidate presentation, votes, rerank formula",
@@ -174,6 +181,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
        "node_limit":max_nodes,"budget":run_budget,"arm":arm,
        "no_test_labels_in_agent_context":True,
        "prior_development_records":len(prior_development),
+       "prior_frozen_rank_cache_files":[str(x) for x in prior_rank_cache_paths],
        "prior_campaign":str(Path(prior_campaign).resolve()) if prior_campaign else None,
        "development_only":development_only})
     summaries=[]
@@ -211,6 +219,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                  "requests":gateway.calls-start})
             return result,gateway.calls-start
         baseline,cost_base=run_exp("plain",BASELINE,dev,"dev")
+        fixed_start=gateway.calls
         fixed=[]
         for name,strategy in list(FIXED.items())[:max_nodes]:
             measured,used=run_exp(name,canonical(strategy),dev,"dev")
@@ -218,6 +227,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
             fixed.append({"name":name,"strategy":canonical(strategy),
                          "audit":outcome,"metrics":measured["metrics"],
                          "requests":used})
+        fixed_end=gateway.calls
         best_fixed=max([{"name":"plain","strategy":BASELINE,
                          "audit":{"eligible_development_only":False,"merit":0},
                          "metrics":baseline["metrics"],"requests":0},*fixed],
@@ -250,6 +260,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                 if assessment["eligible_development_only"] and assessment["merit"]>0:
                     best=inherited_node
         history=[]
+        tree_start=gateway.calls
         for turn in range(1,max_nodes+1):
             parent=max((n for n in nodes if n.get("status") in ("BASELINE","MEASURED")
                         and n["depth"]<max_nodes),
@@ -358,6 +369,14 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                     "next_question":h["reflection"].get("next_question")}
                     for h in history[-3:]],
                 "confirmation":"unseen holdout has not yet been opened"})
+        tree_end=gateway.calls
+        experiment_cost={
+            "baseline_dev_requests":cost_base,
+            "fixed_search_requests":fixed_end-fixed_start,
+            "agent_tree_total_requests":tree_end-tree_start,
+            "matched_node_slots":max_nodes,
+            "strict_equal_compute":False,
+        }
         # Only the FINAL independent confirmation run may open hidden test
         # labels. Intermediary RSI rounds end with development-only evidence.
         if development_only:
@@ -372,7 +391,9 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                         n.get("audit",{}).get("eligible_development_only",False)
                         for n in nodes[1:])},
                 "usage":{"cumulative_model_calls":gateway.calls,
+                          **experiment_cost,
                           "ranking_cache_hits":gateway.cache_hits,
+                          "preloaded_prior_rankings":gateway.preloaded_rankings,
                           "equal_realized_compute_not_guaranteed":True}
             }
             atomic_json(rd/"result.json",result)
@@ -407,6 +428,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                 "authoritative_evidence":authoritative_evidence({}),
                 "statement":"Only preselected development candidates assessed on untouched holdout"},
             "usage":{"cumulative_model_calls":gateway.calls,
+                     **experiment_cost,
                      "model_details":model_description(config),
                      "matched_candidate_slots":max_nodes,
                      "equal_realized_compute_not_guaranteed":True,

@@ -10,7 +10,7 @@ from rsi_researcher.llmrank.formula import validate,score
 from rsi_researcher.llmrank.agents import PROPOSAL, STRATEGY, RankGateway
 from jsonschema import Draft202012Validator
 
-SOURCE=Path("/data/cjh/rsi/llmrank-rsi-20261021/external")
+SOURCE=Path(__file__).resolve().parent.parent / "datasets" / "llmrank"
 
 class LLMRankMainlineTests(unittest.TestCase):
     def test_pareto_candidate_can_be_expanded_without_being_accepted(self):

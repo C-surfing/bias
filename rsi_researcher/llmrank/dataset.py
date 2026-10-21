@@ -62,20 +62,32 @@ def load_dataset(directory, dataset):
     return train, positives, known, titles, popularity
 
 
-def cases_for(split, users, train, positives, known, titles, seed, n_candidates=20):
+def cases_for(split, users, train, positives, known, titles, seed, n_candidates=20, retrieval="random"):
     rng = random.Random(seed)
     catalog = sorted(titles)
+    if retrieval not in ("random","bm25"):
+        raise ValueError("Amazon retrieval supports random or bm25 only")
+    from .retrieval import TitleBM25
+    retriever=TitleBM25(titles) if retrieval=="bm25" else None
     cases = []
     for user in users:
         gt = positives[user][split]
         if gt not in titles:
             continue
-        pool = [i for i in catalog if i not in known[user]]
-        if len(pool) < n_candidates-1:
-            continue
-        cand = rng.sample(pool, n_candidates-1) + [gt]
+        if retriever:
+            import hashlib
+            user_seed=int.from_bytes(hashlib.sha256(
+                f"{seed}:{user}:{split}".encode()).digest()[:8],"big")
+            negatives=retriever.select(train[user],known[user],titles,user_seed,
+                                        n_candidates-1)
+        else:
+            pool = [i for i in catalog if i not in known[user]]
+            if len(pool) < n_candidates-1:
+                continue
+            negatives=rng.sample(pool,n_candidates-1)
+        cand = negatives + [gt]
         rng.shuffle(cand)
-        cases.append({"user":user, "history":train[user][-20:], "target":gt, "candidates":cand})
+        cases.append({"user":user, "history":train[user][-50:], "target":gt, "candidates":cand})
     return cases
 
 

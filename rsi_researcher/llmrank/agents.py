@@ -64,11 +64,32 @@ class LLMRankCriticAgent(CriticAgent):
 
 class RankGateway:
     """Adapter from the new dataset runner into existing quota/schema vLLM model."""
-    def __init__(self,scientific_model,cache_path=None):
+    def __init__(self,scientific_model,cache_path=None,preload_paths=()):
         self.model=scientific_model
         self.cache={}
         self.cache_hits=0
         self.cache_path=cache_path
+        self.preloaded_rankings=0
+        # Immutable ranking evidence is carried across development rounds.
+        # The key includes exact model metadata, prompt, schema and system
+        # instruction; changed strategies still issue genuine Qwen requests.
+        # Holdout responses are NEVER imported into this development cache.
+        for source in preload_paths:
+            from pathlib import Path
+            path=Path(source)
+            if not path.is_file():
+                raise FileNotFoundError(f"missing prior rank cache: {path}")
+            with path.open(encoding="utf-8") as stream:
+                for line in stream:
+                    row=__import__("json").loads(line)
+                    key=row["prompt_sha256"]
+                    answer=row["ranking"]
+                    if not isinstance(answer,dict) or not isinstance(answer.get("ranking"),list):
+                        raise ValueError("corrupted previous model ranking")
+                    if key in self.cache and self.cache[key]!=answer:
+                        raise ValueError("conflicting frozen rank cache for the same request")
+                    self.cache[key]=answer
+                    self.preloaded_rankings+=1
     @property
     def calls(self):
         return self.model.requests

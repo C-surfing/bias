@@ -169,38 +169,64 @@ def evaluate_strategy(model,cases,titles,popularity,strategy,seed,label,max_requ
                          "ranking":prediction})
     metrics={}
     for k in (5,10):
-        x=summarize(random_rows,popularity,titles.keys(),k)
-        y=summarize(first_rows,popularity,titles.keys(),k)
+        x=summarize(random_rows,popularity,titles,k)
+        y=summarize(first_rows,popularity,titles,k)
         x[f"CandidatePositionBias_HR@{k}"]=cpb(y[f"HR@{k}"],x[f"HR@{k}"])
         x[f"CandidatePositionBias_NDCG@{k}"]=cpb(y[f"NDCG@{k}"],x[f"NDCG@{k}"])
         metrics[str(k)]=x
     return {"metrics":metrics,"random":random_rows,"first":first_rows}
 
 def bootstrap_paired(before,after,popularity,catalog,k=5,seed=20261021,draws=2000):
-    """Cluster bootstrap: same users, same indices for both algorithms."""
-    from .dataset import summarize
-    a=before["random"]
-    b=after["random"]
-    if len(a)!=len(b) or not a or any(x["user"]!=y["user"] for x,y in zip(a,b)):
-        raise ValueError("paired bootstrap requires the same frozen user sample and order")
-    keys=(f"HR@{k}",f"NDCG@{k}",f"ARP@{k}",f"APLT@{k}")
-    baseline=summarize(a,popularity,catalog,k)
-    candidate=summarize(b,popularity,catalog,k)
+    """Paired user-resample CIs for utility, popularity and position proxies.
+
+    The same user indices are sampled in baseline and intervention; position
+    probes use each user's frozen random and target-first presentation arms.
+    Undefined small-sample saturated CPB values stay unsupported.
+    """
+    from .dataset import summarize,cpb
+    a,b=before["random"],after["random"]
+    af,bf=before["first"],after["first"]
+    n=len(a)
+    if (n==0 or n!=len(b) or n!=len(af) or n!=len(bf) or
+        any(x["user"]!=y["user"] for x,y in zip(a,b)) or
+        any(x["user"]!=y["user"] for x,y in zip(a,af)) or
+        any(x["user"]!=y["user"] for x,y in zip(a,bf))):
+        raise ValueError("paired bootstrap requires matching users and both position arms")
+    ordinary=(f"HR@{k}",f"NDCG@{k}",f"ARP@{k}",f"APLT@{k}")
+    position=(f"CandidatePositionBias_HR@{k}",f"CandidatePositionBias_NDCG@{k}")
+    keys=ordinary+position
     rng=random.Random(seed)
     samples={key:[] for key in keys}
-    n=len(a)
+
+    def observed(x,xf):
+        rank=summarize(x,popularity,catalog,k)
+        first=summarize(xf,popularity,catalog,k)
+        for suffix in ("HR","NDCG"):
+            name=f"{suffix}@{k}"
+            rank[f"CandidatePositionBias_{name}"]=cpb(first[name],rank[name])
+        return rank
+
+    baseline=observed(a,af)
+    changed=observed(b,bf)
     for _ in range(draws):
-        idx=[rng.randrange(n) for _ in range(n)]
-        ma=summarize([a[i] for i in idx],popularity,catalog,k)
-        mb=summarize([b[i] for i in idx],popularity,catalog,k)
+        index=[rng.randrange(n) for _ in range(n)]
+        left=observed([a[i] for i in index],[af[i] for i in index])
+        right=observed([b[i] for i in index],[bf[i] for i in index])
         for key in keys:
-            if ma[key] is not None and mb[key] is not None:
-                samples[key].append(mb[key]-ma[key])
-    result={}
+            if left.get(key) is not None and right.get(key) is not None:
+                samples[key].append(right[key]-left[key])
+    results={}
     for key in keys:
+        x,y=baseline.get(key),changed.get(key)
         values=sorted(samples[key])
-        point=(candidate[key]-baseline[key]) if baseline[key] is not None and candidate[key] is not None else None
-        result[key]={"delta":point,"ci95":([values[int(0.025*len(values))],
-                       values[min(len(values)-1,int(0.975*len(values)))]] if values else None),
-                     "paired_n":n}
-    return result
+        supported=len(values)>=int(draws*0.8)
+        results[key]={
+            "delta":(y-x if x is not None and y is not None else None),
+            "ci95":([values[int(.025*len(values))],
+                     values[min(len(values)-1,int(.975*len(values)))]]
+                    if supported and values else None),
+            "paired_n":n,
+            "valid_resamples":len(values),
+            "requested_resamples":draws,
+        }
+    return results

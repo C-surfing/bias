@@ -18,6 +18,7 @@
 | 自由公式 | `rsi_researcher/llmrank/formula.py` | 受限算术 DSL，不允许 arbitrary Python |
 | 数据划分及指标 | `rsi_researcher/llmrank/dataset.py` | Leave-two-out/官方 Games，HR/NDCG/ARP/APLT/PopREO |
 | 作者候选适配 | `rsi_researcher/llmrank/candidates.py` | ML-1M、Games Random/SASRec 预计算候选 |
+| Amazon hard negatives | `rsi_researcher/llmrank/retrieval.py` | 训练历史标题 BM25 冻结候选，绝非官方预计算候选 |
 | Amazon 数据 | `rsi_researcher/llmrank/amazon.py` | Beauty、Sports、CDs 2014 5-core 转换 |
 | Agent 只读证据工具 | `rsi_researcher/llmrank/tools.py` | 候选流行度、效用—偏差配对差异 |
 | 实验报告 | `rsi_researcher/llmrank/report.py` | 指标前后对比 |

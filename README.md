@@ -16,6 +16,7 @@ rsi_researcher/
 │   ├── formula.py            # 可验证的安全重排表达式
 │   ├── dataset.py            # 数据划分、HR/NDCG/ARP/APLT/PopREO
 │   ├── candidates.py         # LLMRank 官方 Random/SASRec 候选
+│   ├── retrieval.py          # Amazon 自建 Title-BM25 hard negatives
 │   ├── amazon.py             # Beauty/Sports/CDs 数据预处理
 │   ├── tools.py              # 只读诊断与配对指标证据
 │   └── report.py             # 输出实验对照
@@ -26,10 +27,23 @@ rsi_researcher/
 └── runtime/                  # vLLM、JSON Schema、硬预算与日志
 configs/llmrank_qwen.json     # 本地 Qwen3-8B
 datasets/llmrank/             # 处理好的 ML-1M/Games
-datasets/amazon/raw/          # 未完成校验的 Amazon 2014 下载缓存
+datasets/amazon/raw/          # Amazon 2014 原始压缩文件及续传缓存
+datasets/amazon/processed/    # 已校验/预处理的 Amazon 5-core 数据
 runs/                         # 真实模型实验和冻结科学证据
 tests/                        # 新旧科研协议的回归检查
 ```
+
+
+## 数据与实验实际进度
+
+完整、可核验的状态见 [docs/RESEARCH_STATUS.md](docs/RESEARCH_STATUS.md)。
+
+- **ML-1M、Games：** 官方处理数据及 Random/SASRec 候选已接入；Qwen 实验已执行。
+- **Amazon Beauty：** 2014 5-core 的评论/元数据均已校验，得到 22,334 用户、12,094 商品、198,255 次交互；已完成一组 24 用户、两轮 RSI、最终留出评价。
+- **Amazon Sports：** 原始两份 gzip 均已校验，得到 35,359 用户、18,267 商品、294,151 次交互；已完成24用户、两轮真实 Qwen 实验。
+- **Amazon CDs：** 原始评论压缩包仍在断点续传，不能作为已完成处理与评估的数据集。
+
+Amazon 的 `--retrieval random` 是冻结随机负例，`--retrieval bm25` 是新增的冻结标题检索 hard-negative 协议；二者都不是 LLMRank 官方提供的 Amazon 召回候选。**不能将不同候选协议的数据直接作为同一实验条件比较。**
 
 ## 如何运行
 
@@ -54,6 +68,19 @@ $PY -B -m rsi_researcher science-tree \
     --data datasets/llmrank --dataset Games \
     --cohort-size 30 --max-nodes 2 --max-requests 350 \
     --output runs/UNIQUE_PILOT_NAME
+
+
+# Beauty 的 Title-BM25 检索协议（更困难的候选池）
+$PY -B -m rsi_researcher llmrank-cycle \
+    --config configs/llmrank_qwen.json \
+    --data datasets/amazon/processed/Beauty --dataset Beauty \
+    --retrieval bm25 --users 24 --seeds 20261030 \
+    --max-rounds 2 --max-nodes 2 --patience 2 \
+    --requests-per-round 320 --max-total-requests 850 \
+    --output runs/UNIQUE_BEAUTY_BM25
+
+# 对 Sports/CDs 改成 --data datasets/amazon/processed/Sports 或 CDs，
+# 但先验证数据来源已经下载及预处理完成。
 
 # 测试
 $PY -B -m unittest tests.test_llmrank_mainline tests.test_llmrank_cycle -v

@@ -392,7 +392,7 @@ def main(argv=None):
     # Task data are adapters; shared CLI and scientist runtime remain unchanged.
     parser.add_argument("--dataset",choices=["ml-1m","Games","Beauty","Sports","CDs"],default="ml-1m")
     parser.add_argument("--data",default="/data/cjh/rsi/llmrank-rsi-20261021/external")
-    parser.add_argument("--retrieval",choices=["random","sasrec"],default="random")
+    parser.add_argument("--retrieval",choices=["random","sasrec","bm25"],default="random")
     parser.add_argument("--seeds",default=None)
     args=parser.parse_args(argv)
     config=json.loads(Path(args.config).read_text(encoding="utf8"))
