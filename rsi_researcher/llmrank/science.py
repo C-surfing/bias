@@ -117,7 +117,8 @@ def expansion_priority(baseline,current):
     return 0.4*pop_gain+0.5*tail_gain-0.6*quality_loss
 
 def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
-           max_requests=800,arm="qwen_audited_history",prior_campaign=None):
+           max_requests=800,arm="qwen_audited_history",prior_campaign=None,
+           development_only=False):
     output=Path(output).resolve()
     if output.exists():
         raise FileExistsError(output)
@@ -127,22 +128,35 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
         raise ValueError("invalid bounded protocol")
     data=Path(data).resolve()
     prior_development=[]
-    if prior_campaign:
-        prior=Path(prior_campaign).resolve()
-        if not prior.is_dir() or prior==output:
-            raise ValueError("prior campaign must be a distinct existing run")
-        manifest=prior/"program.json"
+    inherited_by_seed={}
+    visited=set()
+    prior_path=Path(prior_campaign).resolve() if prior_campaign else None
+    while prior_path:
+        if not prior_path.is_dir() or prior_path==output or prior_path in visited:
+            raise ValueError("invalid or cyclic prior campaign lineage")
+        visited.add(prior_path)
+        manifest=prior_path/"program.json"
         if not manifest.is_file():
             raise ValueError("missing original run program manifest")
-        for source in sorted(prior.glob("seed-*/result.json")):
+        program=json.loads(manifest.read_text(encoding="utf-8"))
+        if program.get("development_only") is not True:
+            raise ValueError("cannot reuse development evidence from a holdout-opened campaign")
+        for source in sorted(prior_path.glob("seed-*/result.json")):
             archive=json.loads(source.read_text(encoding="utf-8"))
-            if archive["cohort"]["dataset"]!=dataset:
-                raise ValueError("prior experiment dataset differs")
+            if archive["cohort"]["dataset"]!=dataset or archive["holdout"] is not None:
+                raise ValueError("prior campaign contains incompatible or holdout evidence")
+            if archive["cohort"]["seed"] not in inherited_by_seed:
+                inherited_by_seed[archive["cohort"]["seed"]]={
+                    "cohort":archive["cohort"],
+                    "selected":archive["development"]["selected_rsi"],
+                }
             for n in archive["development"]["tree"]:
                 if n.get("status")=="MEASURED":
                     prior_development.append({"strategy":n["strategy"],
                       "audit":n["audit"],"origin":str(source),
                       "grade":"development_only_not_independent"})
+        parent=program.get("prior_campaign")
+        prior_path=Path(parent).resolve() if parent else None
     output.mkdir(parents=True)
     run_budget={**config["budget"],"max_requests":min(config["budget"]["max_requests"],max_requests)}
     limits=RunLimits(output,**run_budget)
@@ -159,12 +173,20 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
        "model":model_description(config),"seeds":seeds,"users":users,
        "node_limit":max_nodes,"budget":run_budget,"arm":arm,
        "no_test_labels_in_agent_context":True,
-       "prior_development_records":len(prior_development)})
+       "prior_development_records":len(prior_development),
+       "prior_campaign":str(Path(prior_campaign).resolve()) if prior_campaign else None,
+       "development_only":development_only})
     summaries=[]
     for seed in seeds:
         rd=output/f"seed-{seed}"
         rd.mkdir()
         dev,test,titles,pop,protocol=select_case_panels(dataset,data,retrieval,users,seed)
+        if seed in inherited_by_seed:
+            prev=inherited_by_seed[seed]["cohort"]
+            for field in ("seed","dataset","dev_users","holdout_users",
+                          "data_archive_sha256","retrieval","candidate_source"):
+                if prev.get(field)!=protocol.get(field):
+                    raise ValueError("cross-round frozen cohort mismatch: "+field)
         atomic_json(rd/"cohort.json",protocol)
         # Stored ground-truth labels are evaluator-only; research agents receive
         # aggregate metrics and leakage-safe tool snapshots, NEVER this file.
@@ -205,6 +227,28 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                 "status":"BASELINE","merit":0,"search_priority":0.0,
                 "expansions":0,"metrics":baseline["metrics"]}]
         best=nodes[0]
+        seen={fingerprint(BASELINE)}
+        seen.update(fingerprint(row["strategy"]) for row in fixed)
+        seen.update(fingerprint(row["strategy"]) for row in prior_development)
+        inherited=inherited_by_seed.get(seed)
+        if inherited:
+            strategy=canonical(inherited["selected"]["strategy"])
+            if fingerprint(strategy)!=fingerprint(BASELINE):
+                measured,cost=run_exp("inherited",strategy,dev,"dev")
+                assessment=audit(baseline["metrics"],measured["metrics"])
+                inherited_node={
+                    "id":"INHERITED","parent":"ROOT","depth":1,
+                    "strategy":strategy,"status":"MEASURED",
+                    "merit":assessment["merit"],
+                    "search_priority":expansion_priority(baseline["metrics"],measured["metrics"]),
+                    "expansions":0,
+                    "metrics":measured["metrics"],"audit":assessment,
+                    "requests":cost,
+                    "parent_campaign":str(prior_campaign),
+                }
+                nodes.append(inherited_node)
+                if assessment["eligible_development_only"] and assessment["merit"]>0:
+                    best=inherited_node
         history=[]
         for turn in range(1,max_nodes+1):
             parent=max((n for n in nodes if n.get("status") in ("BASELINE","MEASURED")
@@ -223,6 +267,11 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                 "prior_verified_numeric_development_memory":prior_development[-4:],
                 "previous_measured_development_experiments":experience[-5:],
                 "recent_critic_and_reflection_feedback":history[-2:],
+                "previously_tested_strategy_fingerprints":sorted(seen),
+                "candidate_parent_strategy":parent["strategy"],
+                "search_guidance":"Avoid exact repeats. When a parent lowers ARP "
+                    "but damages NDCG, try reducing strength, mixing with base "
+                    "or changing fewer dimensions to preserve utility.",
                 "parent_id":parent["id"],
                 "scientific_question":"Find a testable LLM ranking intervention while preserving recommendation utility",
                 "utility_floor":"development NDCG no more than 5% relative loss; HR at most one sampled hit loss",
@@ -238,6 +287,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                     from rsi_researcher.llmrank.formula import validate as validate_formula
                     validate_formula(strategy["score_expression"])
                     structural_error=None
+                    if fingerprint(strategy) in seen:
+                        raise ValueError("duplicate previously evaluated strategy; prune exact repeat")
                 except (ValueError,TypeError,KeyError) as exc:
                     strategy=None
                     structural_error=str(exc)
@@ -265,6 +316,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                       "metrics":measured["metrics"],"audit":outcome,
                       "requests":usage}
                 nodes.append(node)
+                seen.add(fingerprint(strategy))
                 if best_id==node_id:
                     best=node
             else:
@@ -306,6 +358,32 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                     "next_question":h["reflection"].get("next_question")}
                     for h in history[-3:]],
                 "confirmation":"unseen holdout has not yet been opened"})
+        # Only the FINAL independent confirmation run may open hidden test
+        # labels. Intermediary RSI rounds end with development-only evidence.
+        if development_only:
+            result={
+                "cohort":protocol,
+                "development":{"baseline":baseline["metrics"],"fixed":fixed,
+                    "selected_fixed":best_fixed,"selected_rsi":best,"tree":nodes},
+                "holdout":None,"ci95":None,
+                "evidence":{"confirmed_discoveries":0,
+                    "phase":"development_only","no_holdout_opened":True,
+                    "development_candidate_success":sum(
+                        n.get("audit",{}).get("eligible_development_only",False)
+                        for n in nodes[1:])},
+                "usage":{"cumulative_model_calls":gateway.calls,
+                          "ranking_cache_hits":gateway.cache_hits,
+                          "equal_realized_compute_not_guaranteed":True}
+            }
+            atomic_json(rd/"result.json",result)
+            summaries.append({"seed":seed,"chosen_rsi":best["id"],
+                              "selected_merit":best["merit"],
+                              "development_candidates":result["evidence"]["development_candidate_success"]})
+            atomic_json(output/"summary.json",{"seeds_done":summaries,
+                        "remaining_seeds":seeds[len(summaries):],
+                        "requests":gateway.calls,"authoritative_research_discoveries":0,
+                        "holdout_opened":False})
+            continue
         # Keep/discard is frozen on development; only now open held-out test.
         base_test,_=run_exp("plain",BASELINE,test,"holdout")
         fixed_test,_=run_exp("fixed_selected",best_fixed["strategy"],test,"holdout")

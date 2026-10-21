@@ -18,13 +18,19 @@ SPEC = {
     "candidate_order": ("frozen","reversed","rotated"),
     "votes": (1,3),
     "popularity_lambda": (0,0.05,0.1,0.2,0.4),
+    "rerank_policy": ("global","personalized_gate","protect_top3"),
 }
 BASELINE = {
     "history_n":20,"history_order":"chronological","candidate_order":"frozen",
     "votes":1,"popularity_lambda":0,"instruction":"","score_expression":"base",
+    "rerank_policy":"global",
 }
 FIXED = {
     "fixed_popularity":{**BASELINE,"popularity_lambda":0.1},
+    "fixed_personalized":{**BASELINE,"popularity_lambda":0.2,
+                          "rerank_policy":"personalized_gate"},
+    "fixed_protected":{**BASELINE,"popularity_lambda":0.2,
+                        "rerank_policy":"protect_top3"},
     "fixed_recency":{**BASELINE,"history_n":5,"instruction":"Prioritize the most recent interactions."},
     "fixed_balance":{**BASELINE,"instruction":"Focus on personalized fit over global item popularity."},
     "fixed_bootstrap":{**BASELINE,"votes":3},
@@ -35,12 +41,12 @@ def canonical(input):
         raise ValueError("strategy must be a JSON object")
     # An omitted new formula field falls back to neutral LLM rank votes.
     # Older Qwen responses remain executable; never default other semantics.
-    mandatory=set(BASELINE)-{"score_expression"}
+    mandatory=set(BASELINE)-{"score_expression","rerank_policy"}
     if not mandatory <= set(input) or not set(input) <= set(BASELINE):
         raise ValueError(f"required strategy fields: {sorted(mandatory)}")
     result={}
     for key, allowed in SPEC.items():
-        v=input[key]
+        v=input.get(key,BASELINE[key])
         if isinstance(v,bool) or v not in allowed:
             raise ValueError(f"invalid {key}: {v}")
         result[key]=v
@@ -125,14 +131,28 @@ def rank(model,case,order,titles,strategy,popularity,seed,tag,max_requests=None)
     def words(text):
         return set(re.findall(r"[a-z0-9]{3,}",text.lower()))
     hist=set().union(*(words(titles[i]) for i in case["history"][-strategy["history_n"]:] if i in titles))
+    # Original ranking is the relevance anchor for bounded movement.
+    original=sorted(case["candidates"],key=lambda i:(-scores[i],i))
+    policy=strategy.get("rerank_policy","global")
+    history_pop=[popularity.get(i,0) for i in case["history"] if i in popularity]
+    hist_cutoff=sorted(history_pop)[len(history_pop)//2] if history_pop else 0
+    normalized_cutoff=math.log1p(hist_cutoff)/scale
     for item in case["candidates"]:
         normalized=math.log1p(popularity.get(item,0))/scale
         tokens=words(titles[item])
         overlap=len(tokens&hist)/(len(tokens) or 1)
         features={"base":scores[item]/(n*strategy["votes"]),
                   "pop":normalized,"match":overlap}
-        scores[item]=evaluate_formula(tree,features)-lam*normalized
-    return sorted(case["candidates"],key=lambda i:(-scores[i],i))
+        # Unlike global debias, conditional gating subtracts only the
+        # popularity EXCESS over this user's training-history baseline.
+        penalty=lam*(max(0,normalized-normalized_cutoff)
+                     if policy=="personalized_gate" else normalized)
+        scores[item]=evaluate_formula(tree,features)-penalty
+    proposed=sorted(case["candidates"],key=lambda i:(-scores[i],i))
+    if policy=="protect_top3":
+        keep=set(original[:3])
+        return original[:3]+[item for item in proposed if item not in keep]
+    return proposed
 
 def evaluate_strategy(model,cases,titles,popularity,strategy,seed,label,max_requests=None):
     from .dataset import summarize, cpb

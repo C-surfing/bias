@@ -9,7 +9,9 @@ STRATEGY = strict({
     "history_order":{"type":"string","enum":["chronological","reverse"]},
     "candidate_order":{"type":"string","enum":["frozen","reversed","rotated"]},
     "votes":{"type":"integer","enum":[1,3]},
-    "popularity_lambda":{"type":"number","enum":[0,0.05,0.1,0.2,0.4]},
+        "popularity_lambda":{"type":"number","enum":[0,0.05,0.1,0.2,0.4]},
+    "rerank_policy":{"type":"string","enum":[
+        "global","personalized_gate","protect_top3"]},
     "instruction":{"type":"string","maxLength":350},
     "score_expression":{"type":"string","minLength":1,"maxLength":160},
 })
@@ -29,6 +31,9 @@ class LLMRankDesignerAgent(ResearchAgent):
         "Propose one COMPOSABLE concrete intervention; not a label from a small menu. "
         "You can change history framing, candidate presentation, sampling, "
         "an original generalizable prompt instruction and a small safe score formula. "
+         "Use rerank_policy global for unconditional penalty, personalized_gate "
+        "to subtract only popularity exceeding the user's history median, "
+        "or protect_top3 to freeze the original first 3 predictions. "
         "score_expression uses ONLY numbers and base, pop, match; e.g. "
         "'base - 0.1 * pop + 0.1 * match'. Do not use code execution, labels, "
         "test answers, or change evaluation. Make the proposal genuinely distinct "
