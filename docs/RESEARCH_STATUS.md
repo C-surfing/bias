@@ -11,7 +11,7 @@
 | Games | LLMRank 官方预处理及 Random/SASRec 候选 | ✓ | ✓，小样本实验 | 无独立确认的有效 Debias |
 | Amazon Beauty | Amazon 2014 5-core review + metadata | ✓，源文件验证与 provenance | ✓，24用户、2轮真实 Qwen 实验 | 新策略未通过联合门槛 |
 | Amazon Sports | Amazon 2014 5-core review + metadata | ✓，源文件验证与 provenance | ✓，24用户、2轮真实 Qwen | 新策略未通过联合门槛 |
-| Amazon CDs | Amazon 2014 5-core review + metadata | **未完成**：评论源文件仍在续传 | **未运行** | 不可声明 |
+| Amazon CDs | Amazon 2014 5-core review + metadata | ✓，源文件校验与溯源 | ✓，24用户、两轮真实 Qwen | 没有独立确认的有效 Agent 去偏 |
 
 ### Amazon 准确规模
 
@@ -19,7 +19,7 @@
 | --- | ---: | ---: | ---: | ---: |
 | Beauty | 198,502 | 22,334 | 12,094 | 198,255 |
 | Sports | 296,337 | 35,359 | 18,267 | 294,151 |
-| CDs | 1,097,592（官方原始规模） | 待处理 | 待处理 | 待处理 |
+| CDs | 1,097,592 | 52,808 | 49,866 | 814,068 |
 
 Amazon Beauty / Sports 的数据以 `datasets/amazon/processed/{Beauty,Sports}/` 保存
 `*.inter.zip`、`*.item` 及 `provenance.json`（含 SHA256、标题缺失统计、筛选规则）。
@@ -82,9 +82,39 @@ HR@5=0.4000，NDCG@5=0.2931，ARP@5=29.8889，APLT@5=0.8444。
 上限很小。新增 Title-BM25 检索属于更难的候选对照环境；不可
 与 LLMRank 作者预先计算的 ML-1M/Games 候选协议混为一谈。
 
+## 已完成 Amazon CDs 真实 Qwen 小样本研究
+
+`runs/cds-qwen-real-two-round-20261101/` 记录 24 用户、
+两轮开发搜索与唯一一次留出确认。开发集 Baseline
+NDCG@5=0.28698、ARP@5=20.94；固定 Popularity 策略
+ARP@5=15.64 且 NDCG 不变，但留出没有延续。
+最终 RSI 选择原始策略，留出 HR@5=0.20、NDCG@5=0.13869、
+ARP@5=17.74、APLT@5=0.66。无可确认的自主去偏发现。
+
+## 开放策略程序（新增）
+
+开发集研究可以由 Qwen 自主编写 1..5 阶段的 `policy_program`，
+组合用户条件公式、MMR 多样性、rank 前缀保护、head 配额；
+包含连续参数、近期历史匹配、用户流行度画像和非线性表达式。
+代码在 `program.py`、`formula.py`、`strategy.py`。
+此方式尚不支持任意 Python 算法，详细边界见
+`docs/OPEN_POLICY_RESEARCH.md`。
+所有程序都由可信解释器运行，继续冻结召回、标签和指标。
+与旧 parser-v2 不混用实验结果，验证仍需多种子同成本对照。
+
+## Open-program v1 探索性实验
+
+`runs/beauty-open-policy-v1-normalized-20261103/`：Qwen 提出了由
+score、MMR、protect 和 head_budget 四阶段构成的程序。
+开发集 Baseline (NDCG@5,ARP@5)=(0.07270,24.27)，
+程序 (0.06153,14.84)。程序能真实改变排名、降低 ARP，但
+NDCG 相对损失超过 5%；被实验审计拒绝。
+模型配置温度 0 造成跨节点程序大量重复，下一批单独提高
+Designer 采样温度、固定 Ranker，结果待确认。
+
 ## 下一阶段按科学价值排序
 
-1. 等待 CDs 2014 源文件完整、复核 gzip/sha256 和转换；**未完成前禁止报告 CDs 结果**。
+1. 等待 CDs 2014 源文件完整、复核 gzip/sha256 和转换；已完成源文件与转换核验，但不得将单种子试验作为跨数据集确认。
 2. 对 Beauty / Sports 各自冻结同一召回协议，比较 Random 与 Title-BM25 在推荐
    质量、真实热门程度与去偏 Pareto 上的不同。此处比较的是环境变化，不要
    将 BM25 检索变好直接当作 Agent Debias 效果。

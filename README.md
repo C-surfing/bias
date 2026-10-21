@@ -3,6 +3,8 @@
 **打开这个目录即可看最新代码：`/data/cjh/rsi/project`。** 不用再从带日期的 Git 工作树或 `experiments/` 中寻找实现。
 **一张完整文件地图：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**；研究原则：[docs/LLMRANK_RESEARCH_PROGRAM.md](docs/LLMRANK_RESEARCH_PROGRAM.md)。
 
+**最新自主策略程序设计：[docs/OPEN_POLICY_RESEARCH.md](docs/OPEN_POLICY_RESEARCH.md)**。Agent 现在可以构造非线性用户条件与多阶段重排，而不是只枚举系数。
+
 ## 最新主线
 
 ```
@@ -13,7 +15,8 @@ rsi_researcher/
 │   ├── science.py            # 内循环：Agent → Critic → 执行 → 证据 → 树搜索
 │   ├── agents.py             # LLMRank 任务级 Agent 协议
 │   ├── strategy.py           # 可组合推荐/去偏实验机制
-│   ├── formula.py            # 可验证的安全重排表达式
+│   ├── formula.py            # 自主分段条件评分表达式
+│   ├── program.py            # Agent 生成可组合的排序策略程序
 │   ├── dataset.py            # 数据划分、HR/NDCG/ARP/APLT/PopREO
 │   ├── candidates.py         # LLMRank 官方 Random/SASRec 候选
 │   ├── retrieval.py          # Amazon 自建 Title-BM25 hard negatives
@@ -25,7 +28,8 @@ rsi_researcher/
 │   ├── scientific_skills.py  # 原 RSI 的技能证据生命周期
 │   └── scientific_tree.py    # 原科学树入口（兼容旧任务）
 └── runtime/                  # vLLM、JSON Schema、硬预算与日志
-configs/llmrank_qwen.json     # 本地 Qwen3-8B
+configs/llmrank_qwen.json     # 本地 Qwen3-8B 固定低温测量
+configs/llmrank_open_policy_qwen.json # Designer 探索采样与排序测量隔离
 datasets/llmrank/             # 处理好的 ML-1M/Games
 datasets/amazon/raw/          # Amazon 2014 原始压缩文件及续传缓存
 datasets/amazon/processed/    # 已校验/预处理的 Amazon 5-core 数据
@@ -41,7 +45,7 @@ tests/                        # 新旧科研协议的回归检查
 - **ML-1M、Games：** 官方处理数据及 Random/SASRec 候选已接入；Qwen 实验已执行。
 - **Amazon Beauty：** 2014 5-core 的评论/元数据均已校验，得到 22,334 用户、12,094 商品、198,255 次交互；已完成一组 24 用户、两轮 RSI、最终留出评价。
 - **Amazon Sports：** 原始两份 gzip 均已校验，得到 35,359 用户、18,267 商品、294,151 次交互；已完成24用户、两轮真实 Qwen 实验。
-- **Amazon CDs：** 原始评论压缩包仍在断点续传，不能作为已完成处理与评估的数据集。
+- **Amazon CDs：** 已完成源文件完整性校验、52,808 用户/49,866 商品/814,068 交互的转换，并有两轮真实 Qwen 实验。
 
 Amazon 的 `--retrieval random` 是冻结随机负例，`--retrieval bm25` 是新增的冻结标题检索 hard-negative 协议；二者都不是 LLMRank 官方提供的 Amazon 召回候选。**不能将不同候选协议的数据直接作为同一实验条件比较。**
 

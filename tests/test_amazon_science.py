@@ -13,6 +13,29 @@ class AmazonScienceTests(unittest.TestCase):
     def test_three_categories_are_registered(self):
         self.assertEqual(set(NAMES),{"Beauty","Sports","CDs"})
 
+    def test_all_three_prepared_datasets_and_frozen_protocol(self):
+        expected={
+            "Beauty":(22334,12094,198255),
+            "Sports":(35359,18267,294151),
+            "CDs":(52808,49866,814068),
+        }
+        for name,(users,items,events) in expected.items():
+            with self.subTest(dataset=name):
+                directory=ROOT/name
+                record=json.loads((directory/"provenance.json").read_text(encoding="utf-8"))
+                self.assertEqual((record["users_retained"],record["items_retained"],
+                                  record["interactions_retained"]),(users,items,events))
+                self.assertTrue(all(len(v)==64 for v in record["source_sha256"].values()))
+                dev,heldout,titles,pop,protocol=select_case_panels(
+                    name,directory,"random",24,20261028)
+                self.assertEqual(len(dev),14)
+                self.assertEqual(len(heldout),10)
+                self.assertEqual(len(set(protocol["dev_users"]) &
+                                     set(protocol["holdout_users"])),0)
+                self.assertEqual(len(titles),items)
+                self.assertTrue(all(len(set(case["candidates"]))==20 for case in dev+heldout))
+                self.assertEqual(protocol["candidate_generation"],"frozen_random")
+
     @unittest.skipUnless((ROOT/"Beauty"/"provenance.json").is_file(),
                          "Beauty has not yet been converted")
     def test_beauty_end_to_end_data_contract(self):

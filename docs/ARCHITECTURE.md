@@ -15,7 +15,8 @@
 | 原树搜索入口 | `rsi_researcher/research/scientific_tree.py` | 保留 CLI 分发及历史任务兼容 |
 | 持续记忆/技能 | `rsi_researcher/research/scientific_skills.py` | 审计来源、Candidate Skill 不可自我认证 |
 | 实际推荐及策略 | `rsi_researcher/llmrank/strategy.py` | LLM 排序 Prompt、Bootstrapping、后处理、完整排名校验 |
-| 自由公式 | `rsi_researcher/llmrank/formula.py` | 受限算术 DSL，不允许 arbitrary Python |
+| 自由公式 | `rsi_researcher/llmrank/formula.py` | 连续系数、分段条件与用户特征的安全表达式 |
+| 自主策略程序 | `rsi_researcher/llmrank/program.py` | Agent 生成、编译及执行多阶段去偏算法，冻结候选集合 |
 | 数据划分及指标 | `rsi_researcher/llmrank/dataset.py` | Leave-two-out/官方 Games，HR/NDCG/ARP/APLT/PopREO |
 | 作者候选适配 | `rsi_researcher/llmrank/candidates.py` | ML-1M、Games Random/SASRec 预计算候选 |
 | Amazon hard negatives | `rsi_researcher/llmrank/retrieval.py` | 训练历史标题 BM25 冻结候选，绝非官方预计算候选 |
@@ -24,6 +25,7 @@
 | 实验报告 | `rsi_researcher/llmrank/report.py` | 指标前后对比 |
 | 本地模型与资源 | `rsi_researcher/runtime/models.py`, `runtime/limits.py` | Qwen vLLM、JSON Schema、请求/Token/时间额度 |
 | 模型配置 | `configs/llmrank_qwen.json` | 显式端口与模型参数，需服务预先启动 |
+| 创造性采样 | `configs/llmrank_open_policy_qwen.json` | Designer 高探索采样，Ranker 仍固定低温与种子 |
 | 研究约束 | `docs/LLMRANK_RESEARCH_PROGRAM.md` | 冻结评价器、研究结论权威、Autoresearch 的可编辑表面 |
 | 回归测试 | `tests/test_llmrank_mainline.py`, `tests/test_llmrank_cycle.py` | 隔离测试集、合法策略、跨轮停止、同一候选协议 |
 | 数据目录 | `datasets/llmrank/`, `datasets/amazon/raw/` | 数据本体，不纳入 Git |

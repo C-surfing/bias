@@ -7,25 +7,28 @@ Only development metrics are visible to scientific agents.
 from __future__ import annotations
 from collections import Counter
 from .formula import validate as validate_formula, score as evaluate_formula
+from .program import compile_program, normalize_program, execute_program, PROGRAM_VERSION
 import hashlib
 import json
 import math
 import random
 
-PARSER_CONTRACT="rank_alias_first_occurrence_stable_fill_v2"
+PARSER_CONTRACT="rank_alias_v2_open_policy_program_v1_synonyms"
 
 SPEC = {
     "history_n": (3,5,10,20,50),
     "history_order": ("chronological","reverse"),
     "candidate_order": ("frozen","reversed","rotated"),
     "votes": (1,3),
-    "popularity_lambda": (0,0.05,0.1,0.2,0.4),
+    # This is no longer an enumerated choice: continuous strength [0,2].
+    "popularity_lambda": None,
     "rerank_policy": ("global","personalized_gate","protect_top3"),
 }
 BASELINE = {
     "history_n":20,"history_order":"chronological","candidate_order":"frozen",
     "votes":1,"popularity_lambda":0,"instruction":"","score_expression":"base",
     "rerank_policy":"global",
+    "policy_program":"",
 }
 FIXED = {
     "fixed_popularity":{**BASELINE,"popularity_lambda":0.1},
@@ -43,15 +46,20 @@ def canonical(input):
         raise ValueError("strategy must be a JSON object")
     # An omitted new formula field falls back to neutral LLM rank votes.
     # Older Qwen responses remain executable; never default other semantics.
-    mandatory=set(BASELINE)-{"score_expression","rerank_policy"}
+    mandatory=set(BASELINE)-{"score_expression","rerank_policy","policy_program"}
     if not mandatory <= set(input) or not set(input) <= set(BASELINE):
         raise ValueError(f"required strategy fields: {sorted(mandatory)}")
     result={}
     for key, allowed in SPEC.items():
         v=input.get(key,BASELINE[key])
-        if isinstance(v,bool) or v not in allowed:
-            raise ValueError(f"invalid {key}: {v}")
-        result[key]=v
+        if key=="popularity_lambda":
+            if type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=2:
+                raise ValueError("popularity_lambda must be finite continuous number 0..2")
+            result[key]=float(v)
+        else:
+            if isinstance(v,bool) or v not in allowed:
+                raise ValueError(f"invalid {key}: {v}")
+            result[key]=v
     instruction=input["instruction"]
     if not isinstance(instruction,str) or len(instruction)>350 or any(c in instruction for c in "\r\x00"):
         raise ValueError("instruction must be <=350 characters of plain text")
@@ -59,6 +67,10 @@ def canonical(input):
     expression=input.get("score_expression","base")
     validate_formula(expression)
     result["score_expression"]=expression
+    program=input.get("policy_program","")
+    compiled=compile_program(program)
+    result["policy_program"]=(json.dumps(normalize_program(program),
+                   sort_keys=True,separators=(",",":")) if compiled else "")
     return result
 
 def fingerprint(strategy):
@@ -152,8 +164,10 @@ def rank(model,case,order,titles,strategy,popularity,seed,tag,
     alias_expected={alias:item for item,alias in stable_aliases(case).items()}
     repaired_votes=0
     observed_votes=0
+    policy_failures=0
     def return_result(prediction):
-        meta={"repaired_votes":repaired_votes,"observed_votes":observed_votes}
+        meta={"repaired_votes":repaired_votes,"observed_votes":observed_votes,
+              "policy_execution_failures":policy_failures}
         return (prediction,meta) if return_details else prediction
     for repeat in range(strategy["votes"]):
         if max_requests is not None and model.calls>=max_requests:
@@ -177,31 +191,58 @@ def rank(model,case,order,titles,strategy,popularity,seed,tag,
     popmax=max((popularity.get(i,0) for i in case["candidates"]),default=0)
     scale=math.log1p(popmax) or 1.0
     tree=validate_formula(strategy["score_expression"])
+    compiled=compile_program(strategy.get("policy_program",""))
     import re
     def words(text):
         return set(re.findall(r"[a-z0-9]{3,}",text.lower()))
     hist=set().union(*(words(titles[i]) for i in case["history"][-strategy["history_n"]:] if i in titles))
-    # Original ranking is the relevance anchor for bounded movement.
+    # Original rank and user profile come strictly from training evidence.
     original=sorted(case["candidates"],key=lambda i:(-scores[i],i))
+    original_position={item:idx for idx,item in enumerate(original)}
+    pop_order=sorted(case["candidates"],key=lambda i:(popularity.get(i,0),i))
+    pop_quantile={item:idx/max(1,n-1) for idx,item in enumerate(pop_order)}
+    head_items=set(pop_order[max(0,n-math.ceil(.2*n)):])
+    recent_hist=set().union(*(words(titles[i]) for i in case["history"][-3:] if i in titles))
     policy=strategy.get("rerank_policy","global")
     history_pop=[popularity.get(i,0) for i in case["history"] if i in popularity]
     hist_cutoff=sorted(history_pop)[len(history_pop)//2] if history_pop else 0
-    normalized_cutoff=math.log1p(hist_cutoff)/scale
+    normalized_cutoff=min(1.,math.log1p(hist_cutoff)/scale)
+    features_by_item={}
     for item in case["candidates"]:
         normalized=math.log1p(popularity.get(item,0))/scale
         tokens=words(titles[item])
         overlap=len(tokens&hist)/(len(tokens) or 1)
-        features={"base":scores[item]/(n*strategy["votes"]),
-                  "pop":normalized,"match":overlap}
-        # Unlike global debias, conditional gating subtracts only the
-        # popularity EXCESS over this user's training-history baseline.
-        penalty=lam*(max(0,normalized-normalized_cutoff)
+        base=scores[item]/(n*strategy["votes"])
+        features={"base":base,"score":base,"pop":normalized,
+            "match":overlap,
+            "recent_match":len(tokens&recent_hist)/(len(tokens) or 1),
+            "user_pop":normalized_cutoff,
+            "pop_excess":max(0,normalized-normalized_cutoff),
+            "novelty":1.-normalized,
+            "head":float(item in head_items),
+            "rank_norm":1.-original_position[item]/max(1,n-1),
+            "history_len":min(1.,len(case["history"])/50.),
+            "pop_percentile":pop_quantile[item]}
+        penalty=lam*(features["pop_excess"]
                      if policy=="personalized_gate" else normalized)
-        scores[item]=evaluate_formula(tree,features)-penalty
+        try:
+            final_score=evaluate_formula(tree,features)-penalty
+        except (ValueError,ArithmeticError):
+            policy_failures+=1
+            return return_result(None)
+        scores[item]=final_score
+        features["score"]=final_score
+        features_by_item[item]=features
     proposed=sorted(case["candidates"],key=lambda i:(-scores[i],i))
     if policy=="protect_top3":
         keep=set(original[:3])
-        return return_result(original[:3]+[item for item in proposed if item not in keep])
+        proposed=original[:3]+[item for item in proposed if item not in keep]
+    if compiled:
+        try:
+            proposed=execute_program(compiled,proposed,features_by_item,titles)
+        except (ValueError,ArithmeticError):
+            policy_failures+=1
+            return return_result(None)
     return return_result(proposed)
 
 def evaluate_strategy(model,cases,titles,popularity,strategy,seed,label,max_requests=None):

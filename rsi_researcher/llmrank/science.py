@@ -104,9 +104,24 @@ def audit(baseline,candidate,*, relative_utility_tolerance=0.05):
        +(max(0,abs(pos_b)-abs(pos_c)) if pos_b is not None and pos_c is not None else 0)*0.15
        +changes["NDCG@5"]*0.2
     ) if eligible else -1
+    # Mechanism-level memory lets later rounds repair the right failure,
+    # instead of blindly increasing or decreasing the same bias penalty.
+    if c.get("policy_execution_failures",0):
+        failure_mode="invalid_generated_policy"
+    elif not validity:
+        failure_mode="ranking_format_or_inventory"
+    elif eligible:
+        failure_mode="development_candidate_only"
+    elif not utility and any(improvements.values()):
+        failure_mode="debias_quality_tradeoff"
+    elif utility and not any(improvements.values()):
+        failure_mode="no_measured_bias_gain"
+    else:
+        failure_mode="no_joint_improvement"
     return {"eligible_development_only":eligible,"utility_guard":utility,
             "validity_guard":validity,"metric_deltas":changes,
             "improvements":improvements,"merit":merit,
+            "failure_mode":failure_mode,
             "not_causal_or_confirmatory":True}
 
 def expansion_priority(baseline,current):
@@ -175,7 +190,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                        preload_paths=reversed(prior_rank_cache_paths))
     atomic_json(output/"program.json",{
        "goal":"Maximize independently measured debias quality with controlled utility loss",
-       "editable":"strategy instruction, history framing, candidate presentation, votes, rerank formula",
+       "editable":"Agent-generated conditional expression and typed multi-stage policy program, plus prompt/history/candidate presentation and voting",
+       "policy_language":"debias_policy_program_v1",
        "immutable":"evaluation, candidates, labels, split, metrics, model, time and request budget",
        "source_branch":"mainline RSI science-tree","author_harness_reused":True,
        "agent_roles":["DiagnosisAgent","LLMRankDesignerAgent",
@@ -284,9 +300,17 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                 "recent_critic_and_reflection_feedback":history[-2:],
                 "previously_tested_strategy_fingerprints":sorted(seen),
                 "candidate_parent_strategy":parent["strategy"],
-                "search_guidance":"Avoid exact repeats. When a parent lowers ARP "
-                    "but damages NDCG, try reducing strength, mixing with base "
-                    "or changing fewer dimensions to preserve utility.",
+                "search_guidance":"Invent an executable conditional or multi-stage policy_program "
+                    "rather than relabeling a popularity coefficient. Use numeric user-profile "
+                    "and recent-match evidence to preserve quality, and compare against the "
+                    "parent. If lowering ARP damages NDCG, reduce intervention where recent "
+                    "match is strong or preserve highly ranked relevant items.",
+                "available_policy_features":[
+                    "base","score","pop","match","recent_match","user_pop",
+                    "pop_excess","novelty","head","rank_norm","history_len",
+                    "pop_percentile"],
+                "policy_compilation":"conditional mathematical expressions plus at most 5 "
+                    "typed stage operators; immutable data and evaluator",
                 "parent_id":parent["id"],
                 "scientific_question":"Find a testable LLM ranking intervention while preserving recommendation utility",
                 "utility_floor":"development NDCG no more than 5% relative loss; HR at most one sampled hit loss",

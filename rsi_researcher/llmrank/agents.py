@@ -9,11 +9,12 @@ STRATEGY = strict({
     "history_order":{"type":"string","enum":["chronological","reverse"]},
     "candidate_order":{"type":"string","enum":["frozen","reversed","rotated"]},
     "votes":{"type":"integer","enum":[1,3]},
-        "popularity_lambda":{"type":"number","enum":[0,0.05,0.1,0.2,0.4]},
+    "popularity_lambda":{"type":"number","minimum":0,"maximum":2},
     "rerank_policy":{"type":"string","enum":[
         "global","personalized_gate","protect_top3"]},
     "instruction":{"type":"string","maxLength":350},
-    "score_expression":{"type":"string","minLength":1,"maxLength":160},
+    "score_expression":{"type":"string","minLength":1,"maxLength":320},
+    "policy_program":{"type":"string","maxLength":1600},
 })
 PROPOSAL=strict({
     "hypothesis":TEXT,
@@ -27,21 +28,42 @@ PROPOSAL=strict({
 class LLMRankDesignerAgent(ResearchAgent):
     role="design"
     instruction=(
-        "You are the RSI experimental designer for LLM zero-shot ranking. "
-        "Propose one COMPOSABLE concrete intervention; not a label from a small menu. "
-        "You can change history framing, candidate presentation, sampling, "
-        "an original generalizable prompt instruction and a small safe score formula. "
-         "Use rerank_policy global for unconditional penalty, personalized_gate "
-        "to subtract only popularity exceeding the user's history median, "
-        "or protect_top3 to freeze the original first 3 predictions. "
-        "score_expression uses ONLY numbers and base, pop, match; e.g. "
-        "'base - 0.1 * pop + 0.1 * match'. Do not use code execution, labels, "
-        "test answers, or change evaluation. Make the proposal genuinely distinct "
-        "from previous experiments. State a measurable DEVELOPMENT falsifier: "
-        "the intervention FAILS if bias does not improve or utility drops "
-        "beyond registered tolerance. A development experiment is exploratory; "
-        "it need not prove causal identification to be allowed. "
-        "Use exact strategy object fields and valid enum values."
+        "You are a scientific agent inventing new mechanisms for zero-shot "
+        "recommendation debiasing, NOT merely choosing from a menu. "
+        "Design a distinct, testable, label-blind intervention. "
+        "You control history framing, candidate presentation, any finite "
+        "continuous popularity_lambda from 0 to 2, a conditional scoring "
+        "expression, and optional multistage JSON policy_program. "
+        "The expression can use base (normalized Qwen rank), score (current "
+        "stage score), pop (train popularity), match (historical title overlap), "
+        "recent_match (last 3 items), user_pop (user historical median popularity), "
+        "pop_excess (pop above user profile), novelty, head (top 20 percent "
+        "of candidate popularity), rank_norm, history_len, pop_percentile. "
+        "Use +,-,*,/, min,max,abs,clamp,sqrt,log1p and Python-like ternary "
+        "expressions, e.g. 'base - (0.3*pop_excess if recent_match < 0.15 "
+        "else 0.05*pop)'. None may use target or test labels. "
+        "policy_program is a JSON ARRAY SERIALIZED AS A STRING, or empty string. "
+        "The program has 1..5 stages. Legal stage fields: "
+        "score has op and expr; mmr has op and relevance_weight (continuous 0..1); "
+        "protect has op and top (integer 0..5); head_budget has op, top and "
+        "max_head (integers <=10). Compose stages only if the scientific "
+        "mechanism demands them; do not include every stage reflexively. "
+        "Pick your OWN stage sequence, conditional features and real coefficients "
+        "rather than copying a canned formula. On each retry, contrast your "
+        "new mechanism with the EXACT prior strategy and explain what changed. "
+        "These stages combine a flexible score, candidate-level redundancy "
+        "correction, relevance prefix lock and contextual popularity budget. "
+        "Prefer a NONEMPTY policy_program with at least one reasoned stage "
+        "so that this experiment tests an actual new algorithm, not only a "
+        "cosmetic prompt edit. Leave it empty only if every stage would "
+        "contradict your explicit falsifiable hypothesis. "
+        "You MUST state competing explanation and a DEVELOPMENT falsifier. "
+        "Previous numeric failures should guide proposals: harsh popularity "
+        "penalties often reduce ARP by sacrificing NDCG, so consider adaptive "
+        "gating and keeping relevance. Admit small exploratory experiments "
+        "even if uncertain; only evaluator decides success. "
+        "Never change datasets, split, evaluator, user target, metric code, "
+        "or model weights. Return all schema fields."
     )
     schema=PROPOSAL
     def propose(self,observation,episode_id):

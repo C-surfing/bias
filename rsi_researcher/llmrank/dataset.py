@@ -121,6 +121,7 @@ def summarize(rows, popularity, catalog, k):
     valid = [r for r in rows if r["ranking"] is not None]
     repaired_votes=sum(r.get("repaired_votes",0) for r in rows)
     observed_votes=sum(r.get("observed_votes",0) for r in rows)
+    policy_failures=sum(r.get("policy_execution_failures",0) for r in rows)
     long_tail,groups,catalog_size=_catalog_groups(popularity,catalog)
     hit = ndcg = 0.0
     head = long = total = 0
@@ -154,6 +155,7 @@ def summarize(rows, popularity, catalog, k):
         "repaired_votes":repaired_votes,
         "observed_votes":observed_votes,
         "ranking_repair_rate":repaired_votes/observed_votes if observed_votes else None,
+        "policy_execution_failures":policy_failures,
         f"HR@{k}": hit/n, f"NDCG@{k}":ndcg/n,
         f"ARP@{k}": head/total if total else None,
         f"APLT@{k}":long/total if total else None,

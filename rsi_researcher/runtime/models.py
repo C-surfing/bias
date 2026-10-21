@@ -24,7 +24,16 @@ def model_description(config=None):
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("base_url must be an HTTP API base without credentials or query parameters")
     parameters = {key: options.get(key, value) for key, value in VLLM_PARAMETERS.items()}
+    sampler=({"designer_temperature":options["designer_temperature"],
+              "designer_top_p":options.get("designer_top_p",.95)}
+             if "designer_temperature" in options else None)
+    if sampler is not None and (
+            not isinstance(sampler["designer_temperature"],(float,int))
+            or not 0<=sampler["designer_temperature"]<=1.5
+            or not 0<sampler["designer_top_p"]<=1):
+        raise ValueError("invalid role-specific designer sampler")
     return {"provider": provider, "base_url": base_url, "model_parameters": parameters,
+            "designer_sampler":sampler,
             "enable_thinking": options.get("enable_thinking", False),
             "request_timeout": options.get("timeout_seconds", 180),
             "api_key_env": options.get("api_key_env"),
@@ -61,6 +70,17 @@ class VLLMModel(ModelTransport):
         payload["response_format"] = {"type": "json_schema", "json_schema": {
             "name": "research_result", "strict": True, "schema": schema}}
         payload["chat_template_kwargs"] = {"enable_thinking": self.metadata["enable_thinking"]}
+        # Keep Qwen ranking at fixed temperature / model seed for paired
+        # comparisons; only the scientific DESIGN role explores varied
+        # proposals. Stable episode-derived seeds make runs reproducible.
+        sampler=self.metadata.get("designer_sampler")
+        if sampler is not None and (self.scope or {}).get("scientific_role")=="design":
+            import hashlib
+            episode=(self.scope or {}).get("episode","")
+            episode_hash=int.from_bytes(hashlib.sha256(episode.encode()).digest()[:4],"big")
+            payload["temperature"]=sampler["designer_temperature"]
+            payload["top_p"]=sampler["designer_top_p"]
+            payload["seed"]=(self.model_parameters["seed"]+episode_hash)%2147483647
         return payload
 
     def response_content(self, choice):
