@@ -17,6 +17,10 @@ def candidate_snapshot(cases,train_popularity):
         "users":len(cases),
         "history_length":{"minimum":min(lens),"median":median(lens),
                           "maximum":max(lens)},
+        "history_window_effective_fraction":{
+            str(w):round(sum(length>w for length in lens)/len(lens),4)
+            for w in (3,5,10,20,50)
+        },
         "candidate_total":len(counts),
         "candidate_distinct":len(unique),
         "training_popularity":{"minimum":min(counts),"median":median(counts),

@@ -5,7 +5,7 @@ from rsi_researcher.research.scientific_agents import (
 from rsi_researcher.llmrank.strategy import BASELINE
 
 STRATEGY = strict({
-    "history_n":{"type":"integer","enum":[5,10,20,50]},
+    "history_n":{"type":"integer","enum":[3,5,10,20,50]},
     "history_order":{"type":"string","enum":["chronological","reverse"]},
     "candidate_order":{"type":"string","enum":["frozen","reversed","rotated"]},
     "votes":{"type":"integer","enum":[1,3]},

@@ -12,8 +12,10 @@ import json
 import math
 import random
 
+PARSER_CONTRACT="rank_alias_first_occurrence_stable_fill_v2"
+
 SPEC = {
-    "history_n": (5,10,20,50),
+    "history_n": (3,5,10,20,50),
     "history_order": ("chronological","reverse"),
     "candidate_order": ("frozen","reversed","rotated"),
     "votes": (1,3),
@@ -62,6 +64,23 @@ def canonical(input):
 def fingerprint(strategy):
     return hashlib.sha256(json.dumps(strategy,sort_keys=True).encode()).hexdigest()[:12]
 
+def functional_fingerprint(strategy,cases):
+    """Deduplicate parameter variants that cause identical cohort behavior.
+
+    For a cohort with max 19 available history items, a 20-item and a
+    50-item history window are equivalent. No-op popularity policies are
+    also collapsed when the score formula is neutral and penalty is zero.
+    This prunes provable equivalences, NOT entire unsuccessful bias families.
+    """
+    normalized=canonical(strategy)
+    max_h=max((len(case["history"]) for case in cases),default=0)
+    normalized["history_n"]=min(normalized["history_n"],max_h)
+    normalized["score_expression"]=" ".join(normalized["score_expression"].split())
+    if (normalized["popularity_lambda"]==0 and
+            normalized["score_expression"]=="base"):
+        normalized["rerank_policy"]="global"
+    return fingerprint(normalized)
+
 def stable_random(seed, *parts):
     digest=hashlib.sha256(("/".join(map(str,(seed,*parts)))).encode()).digest()
     return random.Random(int.from_bytes(digest[:8],"big"))
@@ -101,10 +120,41 @@ def make_prompt(case, order, titles, strategy):
             "Cxx aliases exactly once, ordered most to least relevant; "+
             "never output ordinal positions, titles or unseen identifiers."),aliases
 
-def rank(model,case,order,titles,strategy,popularity,seed,tag,max_requests=None):
+def repair_alias_permutation(raw,expected):
+    """Label-blind deterministic repair of a mostly complete LLM ranking.
+
+    Keep first occurrence of every valid alias; fill omissions using the
+    user's stable pseudo-random aliases, not display position or target label.
+    Require at least half the requested candidates to be recognizable.
+    The unmodified model response remains in the immutable Qwen call log.
+    """
+    if not isinstance(raw,list):
+        return None,False
+    size=len(expected)
+    unique=[]
+    seen=set()
+    for alias in raw:
+        if isinstance(alias,str) and alias in expected and alias not in seen:
+            seen.add(alias)
+            unique.append(alias)
+    if len(unique)<max(3,size//2):
+        return None,False
+    repaired=(len(unique)!=size or len(raw)!=size)
+    unique.extend(alias for alias in sorted(expected) if alias not in seen)
+    if len(unique)!=size or len(set(unique))!=size:
+        raise RuntimeError("internal permutation reconstruction contract violated")
+    return unique,repaired
+
+def rank(model,case,order,titles,strategy,popularity,seed,tag,
+         max_requests=None,return_details=False):
     scores=Counter()
     n=len(case["candidates"])
     alias_expected={alias:item for item,alias in stable_aliases(case).items()}
+    repaired_votes=0
+    observed_votes=0
+    def return_result(prediction):
+        meta={"repaired_votes":repaired_votes,"observed_votes":observed_votes}
+        return (prediction,meta) if return_details else prediction
     for repeat in range(strategy["votes"]):
         if max_requests is not None and model.calls>=max_requests:
             raise RuntimeError("total Qwen request budget exhausted")
@@ -113,15 +163,15 @@ def rank(model,case,order,titles,strategy,popularity,seed,tag,max_requests=None)
         try:
             result=model.ask("You are a zero-shot LLMRank-style personalized ranking system. Return JSON only.",
                              prompt,f"{tag}.{repeat}")
-            out=result["ranking"]
-            if (not isinstance(out,list) or len(out)!=n
-                    or any(not isinstance(x,str) or x not in alias_expected for x in out)
-                    or len(set(out))!=n):
-                return None
+            observed_votes+=1
+            out,was_repaired=repair_alias_permutation(result["ranking"],alias_expected)
+            if out is None:
+                return return_result(None)
+            repaired_votes+=int(was_repaired)
             for position,alias in enumerate(out):
                 scores[alias_expected[alias]]+=n-position
         except (ValueError,KeyError,TypeError):
-            return None
+            return return_result(None)
     # A deterministic, independent post-ranking correction. Does NOT see gt.
     lam=strategy["popularity_lambda"]
     popmax=max((popularity.get(i,0) for i in case["candidates"]),default=0)
@@ -151,8 +201,8 @@ def rank(model,case,order,titles,strategy,popularity,seed,tag,max_requests=None)
     proposed=sorted(case["candidates"],key=lambda i:(-scores[i],i))
     if policy=="protect_top3":
         keep=set(original[:3])
-        return original[:3]+[item for item in proposed if item not in keep]
-    return proposed
+        return return_result(original[:3]+[item for item in proposed if item not in keep])
+    return return_result(proposed)
 
 def evaluate_strategy(model,cases,titles,popularity,strategy,seed,label,max_requests=None):
     from .dataset import summarize, cpb
@@ -163,10 +213,11 @@ def evaluate_strategy(model,cases,titles,popularity,strategy,seed,label,max_requ
         shuffled=case["candidates"].copy()
         first=[case["target"]]+[i for i in shuffled if i!=case["target"]]
         for name,order,rows in (("random",shuffled,random_rows),("first",first,first_rows)):
-            prediction=rank(model,case,order,titles,strategy,popularity,
-                            seed+index*101,f"{label}.{index}.{name}",max_requests)
+            prediction,quality=rank(model,case,order,titles,strategy,popularity,
+                            seed+index*101,f"{label}.{index}.{name}",max_requests,
+                            return_details=True)
             rows.append({"user":case["user"],"target":case["target"],
-                         "ranking":prediction})
+                         "ranking":prediction,**quality})
     metrics={}
     for k in (5,10):
         x=summarize(random_rows,popularity,titles,k)

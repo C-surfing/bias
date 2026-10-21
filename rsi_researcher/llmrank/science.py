@@ -23,7 +23,8 @@ from rsi_researcher.llmrank.candidates import (
     cases_from_source, source_candidates
 )
 from rsi_researcher.llmrank.strategy import (
-    BASELINE, FIXED, canonical, fingerprint, evaluate_strategy, bootstrap_paired
+    BASELINE, FIXED, canonical, fingerprint, functional_fingerprint,
+    evaluate_strategy, bootstrap_paired, PARSER_CONTRACT
 )
 from rsi_researcher.research.scientific_agents import authoritative_evidence
 from rsi_researcher.runtime.client import atomic_json, usage_summary
@@ -147,6 +148,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
         program=json.loads(manifest.read_text(encoding="utf-8"))
         if program.get("development_only") is not True:
             raise ValueError("cannot reuse development evidence from a holdout-opened campaign")
+        if program.get("ranking_parser_contract")!=PARSER_CONTRACT:
+            raise ValueError("cannot reuse cross-round evidence from another ranking parser protocol")
         for source in sorted(prior_path.glob("seed-*/result.json")):
             archive=json.loads(source.read_text(encoding="utf-8"))
             if archive["cohort"]["dataset"]!=dataset or archive["holdout"] is not None:
@@ -180,6 +183,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
        "model":model_description(config),"seeds":seeds,"users":users,
        "node_limit":max_nodes,"budget":run_budget,"arm":arm,
        "no_test_labels_in_agent_context":True,
+       "ranking_parser_contract":PARSER_CONTRACT,
        "prior_development_records":len(prior_development),
        "prior_frozen_rank_cache_files":[str(x) for x in prior_rank_cache_paths],
        "prior_campaign":str(Path(prior_campaign).resolve()) if prior_campaign else None,
@@ -237,9 +241,9 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                 "status":"BASELINE","merit":0,"search_priority":0.0,
                 "expansions":0,"metrics":baseline["metrics"]}]
         best=nodes[0]
-        seen={fingerprint(BASELINE)}
-        seen.update(fingerprint(row["strategy"]) for row in fixed)
-        seen.update(fingerprint(row["strategy"]) for row in prior_development)
+        seen={functional_fingerprint(BASELINE,dev)}
+        seen.update(functional_fingerprint(row["strategy"],dev) for row in fixed)
+        seen.update(functional_fingerprint(row["strategy"],dev) for row in prior_development)
         inherited=inherited_by_seed.get(seed)
         if inherited:
             strategy=canonical(inherited["selected"]["strategy"])
@@ -298,8 +302,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                     from rsi_researcher.llmrank.formula import validate as validate_formula
                     validate_formula(strategy["score_expression"])
                     structural_error=None
-                    if fingerprint(strategy) in seen:
-                        raise ValueError("duplicate previously evaluated strategy; prune exact repeat")
+                    if functional_fingerprint(strategy,dev) in seen:
+                        raise ValueError("previously evaluated or provably equivalent cohort strategy")
                 except (ValueError,TypeError,KeyError) as exc:
                     strategy=None
                     structural_error=str(exc)
@@ -327,7 +331,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                       "metrics":measured["metrics"],"audit":outcome,
                       "requests":usage}
                 nodes.append(node)
-                seen.add(fingerprint(strategy))
+                seen.add(functional_fingerprint(strategy,dev))
                 if best_id==node_id:
                     best=node
             else:

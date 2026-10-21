@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 from rsi_researcher.llmrank.science import search, select_case_panels
 from rsi_researcher.llmrank.strategy import (
-    BASELINE, fingerprint, evaluate_strategy, bootstrap_paired
+    BASELINE, fingerprint, evaluate_strategy, bootstrap_paired,
+    PARSER_CONTRACT
 )
 from rsi_researcher.llmrank.agents import RankGateway
 from rsi_researcher.runtime.client import atomic_json, usage_summary
@@ -101,6 +102,7 @@ def conduct(directory, *,config,data,dataset,retrieval,users,seeds,
         "max_rounds":max_rounds,"max_nodes_per_round":max_nodes,
         "requests_per_round":requests_per_round,
         "max_total_model_requests":max_total_requests,
+        "ranking_parser_contract":PARSER_CONTRACT,
         "patience":patience,"holdout_access":"AFTER stopping only",
         "stopping":"budget OR early scientific candidate OR patience OR maximum rounds",
         "not_until_success_by_repeated_test_peeking":True})

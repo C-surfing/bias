@@ -119,6 +119,8 @@ def summarize(rows, popularity, catalog, k):
     if not n:
         raise ValueError("empty sample")
     valid = [r for r in rows if r["ranking"] is not None]
+    repaired_votes=sum(r.get("repaired_votes",0) for r in rows)
+    observed_votes=sum(r.get("observed_votes",0) for r in rows)
     long_tail,groups,catalog_size=_catalog_groups(popularity,catalog)
     hit = ndcg = 0.0
     head = long = total = 0
@@ -149,6 +151,9 @@ def summarize(rows, popularity, catalog, k):
         reo = math.sqrt(sum((v-mean)**2 for v in good)/len(good)) / mean
     return {
         "users": n, "valid_rankings": len(valid), "invalid_rankings": n-len(valid),
+        "repaired_votes":repaired_votes,
+        "observed_votes":observed_votes,
+        "ranking_repair_rate":repaired_votes/observed_votes if observed_votes else None,
         f"HR@{k}": hit/n, f"NDCG@{k}":ndcg/n,
         f"ARP@{k}": head/total if total else None,
         f"APLT@{k}":long/total if total else None,
