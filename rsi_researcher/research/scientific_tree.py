@@ -376,7 +376,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output",required=True)
     parser.add_argument("--config",required=True)
-    parser.add_argument("--task",required=True,choices=sorted(source.CATEGORIES))
+    parser.add_argument("--task",required=True,choices=sorted([*source.CATEGORIES,"llmrank_bias"]))
     parser.add_argument("--mode",choices=["fresh","archive"],default="fresh")
     parser.add_argument("--arm",choices=["qwen_no_history","qwen_audited_history",
                                         "qwen_shuffled_history"],default="qwen_no_history")
@@ -389,10 +389,27 @@ def main(argv=None):
     parser.add_argument("--max-requests",type=int,default=180)
     parser.add_argument("--prior-campaign")
     parser.add_argument("--policy",choices=["tree","linear"],default="tree")
+    # Task data are adapters; shared CLI and scientist runtime remain unchanged.
+    parser.add_argument("--dataset",choices=["ml-1m","Games","Beauty","Sports","CDs"],default="ml-1m")
+    parser.add_argument("--data",default="/data/cjh/rsi/llmrank-rsi-20261021/external")
+    parser.add_argument("--retrieval",choices=["random","sasrec"],default="random")
+    parser.add_argument("--seeds",default=None)
     args=parser.parse_args(argv)
     config=json.loads(Path(args.config).read_text(encoding="utf8"))
     if config.get("llm",{}).get("provider")!="vllm":
         parser.error("Qwen vLLM required, never fall back to an external API")
+    if args.task == "llmrank_bias":
+        from rsi_researcher.llmrank.science import search as search_llmrank
+        if args.mode != "fresh":
+            parser.error("LLMRank runs need an actual frozen fresh evaluation")
+        seeds=[int(v) for v in args.seeds.split(",")] if args.seeds else [args.seed]
+        result=search_llmrank(
+            args.output,config=config,data=args.data,dataset=args.dataset,
+            retrieval=args.retrieval,users=args.cohort_size,seeds=seeds,
+            max_nodes=args.max_nodes,max_requests=args.max_requests,arm=args.arm,
+            prior_campaign=args.prior_campaign)
+        print(json.dumps(result,ensure_ascii=False))
+        return
     # No launching or modifying an existing shared GPU service.
     health=create_model(args.output,config["budget"]["max_requests"],None,config)
     health.health()

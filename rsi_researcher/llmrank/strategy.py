@@ -1,0 +1,186 @@
+"""Executable, compositional (not enumerated-action) LLMRank debias strategy DSL.
+
+Agents may invent evidence-based *instructions* and combine independently
+implemented mechanisms. Python validates, compiles, runs and measures them.
+Only development metrics are visible to scientific agents.
+"""
+from __future__ import annotations
+from collections import Counter
+from .formula import validate as validate_formula, score as evaluate_formula
+import hashlib
+import json
+import math
+import random
+
+SPEC = {
+    "history_n": (5,10,20,50),
+    "history_order": ("chronological","reverse"),
+    "candidate_order": ("frozen","reversed","rotated"),
+    "votes": (1,3),
+    "popularity_lambda": (0,0.05,0.1,0.2,0.4),
+}
+BASELINE = {
+    "history_n":20,"history_order":"chronological","candidate_order":"frozen",
+    "votes":1,"popularity_lambda":0,"instruction":"","score_expression":"base",
+}
+FIXED = {
+    "fixed_popularity":{**BASELINE,"popularity_lambda":0.1},
+    "fixed_recency":{**BASELINE,"history_n":5,"instruction":"Prioritize the most recent interactions."},
+    "fixed_balance":{**BASELINE,"instruction":"Focus on personalized fit over global item popularity."},
+    "fixed_bootstrap":{**BASELINE,"votes":3},
+}
+
+def canonical(input):
+    if not isinstance(input,dict):
+        raise ValueError("strategy must be a JSON object")
+    # An omitted new formula field falls back to neutral LLM rank votes.
+    # Older Qwen responses remain executable; never default other semantics.
+    mandatory=set(BASELINE)-{"score_expression"}
+    if not mandatory <= set(input) or not set(input) <= set(BASELINE):
+        raise ValueError(f"required strategy fields: {sorted(mandatory)}")
+    result={}
+    for key, allowed in SPEC.items():
+        v=input[key]
+        if isinstance(v,bool) or v not in allowed:
+            raise ValueError(f"invalid {key}: {v}")
+        result[key]=v
+    instruction=input["instruction"]
+    if not isinstance(instruction,str) or len(instruction)>350 or any(c in instruction for c in "\r\x00"):
+        raise ValueError("instruction must be <=350 characters of plain text")
+    result["instruction"]=instruction.strip()
+    expression=input.get("score_expression","base")
+    validate_formula(expression)
+    result["score_expression"]=expression
+    return result
+
+def fingerprint(strategy):
+    return hashlib.sha256(json.dumps(strategy,sort_keys=True).encode()).hexdigest()[:12]
+
+def stable_random(seed, *parts):
+    digest=hashlib.sha256(("/".join(map(str,(seed,*parts)))).encode()).digest()
+    return random.Random(int.from_bytes(digest[:8],"big"))
+
+def reorder(candidates, strategy, seed, user, replicate):
+    result=candidates.copy()
+    method=strategy["candidate_order"]
+    if method=="reversed":
+        result.reverse()
+    elif method=="rotated":
+        start=(seed+replicate) % len(result)
+        result=result[start:]+result[:start]
+    if replicate:
+        stable_random(seed,user,replicate).shuffle(result)
+    return result
+
+def stable_aliases(case):
+    """Per-user deterministic random aliases, unchanged by position arm."""
+    items=sorted(case["candidates"])
+    stable_random(0,case["user"],*items).shuffle(items)
+    return {item:f"C{idx+1:02d}" for idx,item in enumerate(items)}
+
+def make_prompt(case, order, titles, strategy):
+    history=case["history"][-strategy["history_n"]:]
+    if strategy["history_order"]=="reverse":
+        history=history[::-1]
+        heading="User interactions (most recent first):"
+    else:
+        heading="User interactions (oldest to newest):"
+    hist="\n".join(f"- {titles[i]}" for i in history if i in titles)
+    aliases=stable_aliases(case)
+    opts="\n".join(f"- {aliases[item]}: {titles[item]}" for item in order)
+    guidance=strategy["instruction"] or "Rank the candidates by user-specific relevance."
+    return (heading+"\n"+hist+"\nCandidates:\n"+opts+
+            "\n"+guidance+
+            "\nReturn only one JSON object with key ranking containing ALL candidate "+
+            "Cxx aliases exactly once, ordered most to least relevant; "+
+            "never output ordinal positions, titles or unseen identifiers."),aliases
+
+def rank(model,case,order,titles,strategy,popularity,seed,tag,max_requests=None):
+    scores=Counter()
+    n=len(case["candidates"])
+    alias_expected={alias:item for item,alias in stable_aliases(case).items()}
+    for repeat in range(strategy["votes"]):
+        if max_requests is not None and model.calls>=max_requests:
+            raise RuntimeError("total Qwen request budget exhausted")
+        ordered=reorder(order,strategy,seed,case["user"],repeat)
+        prompt, aliases=make_prompt(case,ordered,titles,strategy)
+        try:
+            result=model.ask("You are a zero-shot LLMRank-style personalized ranking system. Return JSON only.",
+                             prompt,f"{tag}.{repeat}")
+            out=result["ranking"]
+            if (not isinstance(out,list) or len(out)!=n
+                    or any(not isinstance(x,str) or x not in alias_expected for x in out)
+                    or len(set(out))!=n):
+                return None
+            for position,alias in enumerate(out):
+                scores[alias_expected[alias]]+=n-position
+        except (ValueError,KeyError,TypeError):
+            return None
+    # A deterministic, independent post-ranking correction. Does NOT see gt.
+    lam=strategy["popularity_lambda"]
+    popmax=max((popularity.get(i,0) for i in case["candidates"]),default=0)
+    scale=math.log1p(popmax) or 1.0
+    tree=validate_formula(strategy["score_expression"])
+    import re
+    def words(text):
+        return set(re.findall(r"[a-z0-9]{3,}",text.lower()))
+    hist=set().union(*(words(titles[i]) for i in case["history"][-strategy["history_n"]:] if i in titles))
+    for item in case["candidates"]:
+        normalized=math.log1p(popularity.get(item,0))/scale
+        tokens=words(titles[item])
+        overlap=len(tokens&hist)/(len(tokens) or 1)
+        features={"base":scores[item]/(n*strategy["votes"]),
+                  "pop":normalized,"match":overlap}
+        scores[item]=evaluate_formula(tree,features)-lam*normalized
+    return sorted(case["candidates"],key=lambda i:(-scores[i],i))
+
+def evaluate_strategy(model,cases,titles,popularity,strategy,seed,label,max_requests=None):
+    from .dataset import summarize, cpb
+    cases=tuple(cases)
+    random_rows=[]
+    first_rows=[]
+    for index,case in enumerate(cases):
+        shuffled=case["candidates"].copy()
+        first=[case["target"]]+[i for i in shuffled if i!=case["target"]]
+        for name,order,rows in (("random",shuffled,random_rows),("first",first,first_rows)):
+            prediction=rank(model,case,order,titles,strategy,popularity,
+                            seed+index*101,f"{label}.{index}.{name}",max_requests)
+            rows.append({"user":case["user"],"target":case["target"],
+                         "ranking":prediction})
+    metrics={}
+    for k in (5,10):
+        x=summarize(random_rows,popularity,titles.keys(),k)
+        y=summarize(first_rows,popularity,titles.keys(),k)
+        x[f"CandidatePositionBias_HR@{k}"]=cpb(y[f"HR@{k}"],x[f"HR@{k}"])
+        x[f"CandidatePositionBias_NDCG@{k}"]=cpb(y[f"NDCG@{k}"],x[f"NDCG@{k}"])
+        metrics[str(k)]=x
+    return {"metrics":metrics,"random":random_rows,"first":first_rows}
+
+def bootstrap_paired(before,after,popularity,catalog,k=5,seed=20261021,draws=2000):
+    """Cluster bootstrap: same users, same indices for both algorithms."""
+    from .dataset import summarize
+    a=before["random"]
+    b=after["random"]
+    if len(a)!=len(b) or not a or any(x["user"]!=y["user"] for x,y in zip(a,b)):
+        raise ValueError("paired bootstrap requires the same frozen user sample and order")
+    keys=(f"HR@{k}",f"NDCG@{k}",f"ARP@{k}",f"APLT@{k}")
+    baseline=summarize(a,popularity,catalog,k)
+    candidate=summarize(b,popularity,catalog,k)
+    rng=random.Random(seed)
+    samples={key:[] for key in keys}
+    n=len(a)
+    for _ in range(draws):
+        idx=[rng.randrange(n) for _ in range(n)]
+        ma=summarize([a[i] for i in idx],popularity,catalog,k)
+        mb=summarize([b[i] for i in idx],popularity,catalog,k)
+        for key in keys:
+            if ma[key] is not None and mb[key] is not None:
+                samples[key].append(mb[key]-ma[key])
+    result={}
+    for key in keys:
+        values=sorted(samples[key])
+        point=(candidate[key]-baseline[key]) if baseline[key] is not None and candidate[key] is not None else None
+        result[key]={"delta":point,"ci95":([values[int(0.025*len(values))],
+                       values[min(len(values)-1,int(0.975*len(values)))]] if values else None),
+                     "paired_n":n}
+    return result

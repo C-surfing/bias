@@ -1,3 +1,64 @@
+# RSI: LLMRank + autonomous debias, 2026-10-21 mainline migration
+
+**Active research branch**: feat/rsi-integrated-llmrank-20261021
+**Development checkout**: /data/cjh/rsi/integrated-llmrank-20261021
+
+The active recommendation-debias task is **llmrank_bias**. The old
+AgentCF/Coat/KuaiRand evidence and code below are preserved for
+history and regression; they are NOT the subject or dataset of
+the new experiments. Main was not modified.
+
+The original CLI, vLLM runtime with independent budgets, schema-governed
+Diagnosis/Designer/Critic/Reflection, scientific skill provenance and
+independent numeric evidence authority are retained. The LLMRank
+dataset/candidate/reranking/scientific task adapters live in
+rsi_researcher/llmrank. These are not a second top-level RSI app.
+
+Run from this checkout with an *already running, separately authorized*
+Qwen service:
+
+    /data/cjh/rsi/envs/research/bin/python -B -m rsi_researcher science-tree --task llmrank_bias --config configs/llmrank_qwen.json --data /data/cjh/rsi/llmrank-rsi-20261021/external --dataset ml-1m --retrieval random --cohort-size 24 --seeds 20261021,20261022,20261023 --max-nodes 2 --max-requests 600 --output runs/UNIQUE_NAME
+
+To run Games change --dataset Games. The Amazon Beauty, Sports, CDs
+converter is in rsi_researcher/llmrank/amazon.py, but original Amazon
+2014 5-core sources were not yet fully downloaded/verified, so no
+valid result on those three categories is claimed.
+
+The experiment contract, editable-vs-immutable boundaries and literature
+inspiration are in docs/LLMRANK_RESEARCH_PROGRAM.md. Observe numeric
+results with python -m rsi_researcher.llmrank.report runs/.../seed-...
+Check independent result.json, frozen_evaluator_only.json,
+model calls.jsonl, per-user rank traces, tree_index.json,
+candidate_skill.json, and the scientific_memory.json.
+
+## Measured early evidence (real Qwen, not a confirmed discovery)
+
+ML-1M, 12 users (7 development, 5 holdout):
+- Development baseline NDCG@5 0.27835, ARP@5 491.09, APLT@5 0.65714.
+- Agent N001 NDCG@5 0.21429, ARP@5 354.67, APLT@5 0.83333.
+- Bias proxy improves but relevance degrades, so N001 is not deployed.
+
+ML-1M, 24 users (14 development, 10 holdout):
+- Development baseline NDCG@5 0.12090, ARP@5 420.17, APLT@5 0.64286.
+- Fixed recency NDCG@5 0.20933, ARP@5 372.71, APLT@5 0.68571, passes development.
+- Agent N001: (NDCG@5 0.03076, ARP@5 342.09, APLT@5 0.74286).
+- Agent N002: (NDCG@5 0.07583, ARP@5 257.30, APLT@5 0.78000).
+- On the heldout group, baseline NDCG@5 0.21309, ARP@5 525.58;
+  fixed recency NDCG@5 0.06309, ARP@5 404.18.
+- Both Agent branches are rejected on development utility guard.
+  Development success of a fixed rule did NOT generalize to holdout.
+
+The current search combines seven strategy dimensions, including
+a user-generated safe score expression. No arbitrary Python code or
+edits to the evaluator/test set are allowed. A critic approves **protocol
+admissibility**, never self-certifies debias effectiveness.
+Small samples are exploratory. Real compute costs differ between fixed
+and agent arms and must not be called strict equal-budget comparison.
+
+---
+
+# Prior RSI scientific architecture (historical research track)
+
 # RSI Researcher：推荐系统偏差的可证伪多智能体科研系统
 
 > 当前主线：`/data/cjh/rsi/project` · 分支 `main`。2026-10-20 已将 `feat/rsi-multiagent-20261017` 快进整合至主线。
