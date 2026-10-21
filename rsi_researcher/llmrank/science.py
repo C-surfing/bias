@@ -17,6 +17,7 @@ from rsi_researcher.llmrank.agents import (
     DiagnosisAgent, ReflectionAgent
 )
 from rsi_researcher.llmrank.dataset import load_dataset, cases_for
+from rsi_researcher.llmrank.evidence import paired_clean_evidence
 from rsi_researcher.llmrank.tools import candidate_snapshot,metric_tradeoff
 from rsi_researcher.research.scientific_skills import proposal as record_skill
 from rsi_researcher.llmrank.candidates import (
@@ -78,8 +79,15 @@ def select_case_panels(dataset, data, retrieval, n, seed, fraction=0.6):
           "data_archive_sha256":data_sha256}
     return dev,test,titles,pop,protocol
 
-def audit(baseline,candidate,*, relative_utility_tolerance=0.05):
+def audit(baseline,candidate,*, relative_utility_tolerance=0.05,clean_evidence=None):
     b=baseline["5"];c=candidate["5"]
+    # Full-panel metrics are always descriptive, including parser repair.
+    # Format-clean evidence is a matched-user sensitivity analysis, not a
+    # replacement cohort chosen by test-label performance.
+    if clean_evidence and clean_evidence["baseline"] is not None:
+        clean_base,clean_cand=clean_evidence["baseline"],clean_evidence["candidate"]
+    else:
+        clean_base=clean_cand=None
     utility=(c["NDCG@5"] >= (1-relative_utility_tolerance)*b["NDCG@5"]
          and c["HR@5"] >= b["HR@5"]-max(0.03,1/max(1,b["users"])))
     validity=(c["invalid_rankings"]<=b["invalid_rankings"] and c["valid_rankings"]>0)
@@ -96,7 +104,25 @@ def audit(baseline,candidate,*, relative_utility_tolerance=0.05):
       "higher_aplt":changes["APLT@5"] is not None and changes["APLT@5"]>0.02,
       "less_candidate_position_bias": pos_b is not None and pos_c is not None and abs(pos_c)<abs(pos_b)-0.02,
     }
-    eligible=utility and validity and any(improvements.values())
+    descriptive_eligible=utility and validity and any(improvements.values())
+    if clean_evidence is None:
+        eligible=descriptive_eligible  # aggregate-only backward-compatible unit contract
+        format_status="legacy_aggregate_only"
+        clean_audit=None
+    elif not clean_evidence["sufficient_support"] or clean_base is None:
+        eligible=False
+        format_status="insufficient_clean_paired_support"
+        clean_audit=None
+    else:
+        # Numeric-only recursive call applies the exact same old scientific
+        # thresholds to an identically sized, unrepaired cohort in both arms.
+        clean_audit=audit(clean_base,clean_cand,
+                          relative_utility_tolerance=relative_utility_tolerance)
+        eligible=descriptive_eligible and clean_audit["eligible_development_only"]
+        format_status=("fails_full_panel" if not descriptive_eligible else
+                       "robust_full_and_clean" if clean_audit["eligible_development_only"]
+                       else "not_robust_to_format_exclusion")
+
     # Development-only merit: a better trade-off without collapsing utility.
     merit=(
        0.25*(max(0,-changes["ARP@5"])/max(1,b["ARP@5"]) if changes["ARP@5"] is not None else 0)
@@ -106,7 +132,11 @@ def audit(baseline,candidate,*, relative_utility_tolerance=0.05):
     ) if eligible else -1
     # Mechanism-level memory lets later rounds repair the right failure,
     # instead of blindly increasing or decreasing the same bias penalty.
-    if c.get("policy_execution_failures",0):
+    if format_status=="insufficient_clean_paired_support":
+        failure_mode="inconclusive_due_to_ranking_format"
+    elif format_status=="not_robust_to_format_exclusion":
+        failure_mode="format_sensitive_candidate"
+    elif c.get("policy_execution_failures",0):
         failure_mode="invalid_generated_policy"
     elif not validity:
         failure_mode="ranking_format_or_inventory"
@@ -122,6 +152,14 @@ def audit(baseline,candidate,*, relative_utility_tolerance=0.05):
             "validity_guard":validity,"metric_deltas":changes,
             "improvements":improvements,"merit":merit,
             "failure_mode":failure_mode,
+            "format_assessment":format_status,
+            "clean_paired_evidence":clean_evidence,
+            "clean_paired_assessment":({
+                "utility_guard":clean_audit["utility_guard"],
+                "validity_guard":clean_audit["validity_guard"],
+                "improvements":clean_audit["improvements"],
+                "metric_deltas":clean_audit["metric_deltas"]
+            } if clean_audit is not None else None),
             "not_causal_or_confirmatory":True}
 
 def expansion_priority(baseline,current):
@@ -135,6 +173,17 @@ def expansion_priority(baseline,current):
     tail_gain=c["APLT@5"]-b["APLT@5"]
     quality_loss=max(0,b["NDCG@5"]-c["NDCG@5"])/max(b["NDCG@5"],0.1)
     return 0.4*pop_gain+0.5*tail_gain-0.6*quality_loss
+
+FORMAT_AUDIT_CONTRACT="paired_unrepaired_dev_sensitivity_v1"
+
+def evidence_priority(baseline,candidate,assessment):
+    """Never use repaired-only bias gains to prioritize descendants."""
+    evidence=assessment.get("clean_paired_evidence")
+    if evidence is not None:
+        if not evidence["sufficient_support"] or evidence["baseline"] is None:
+            return -1.
+        return expansion_priority(evidence["baseline"],evidence["candidate"])
+    return expansion_priority(baseline,candidate)
 
 def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
            max_requests=800,arm="qwen_audited_history",prior_campaign=None,
@@ -165,6 +214,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
             raise ValueError("cannot reuse development evidence from a holdout-opened campaign")
         if program.get("ranking_parser_contract")!=PARSER_CONTRACT:
             raise ValueError("cannot reuse cross-round evidence from another ranking parser protocol")
+        if program.get("format_audit_contract")!=FORMAT_AUDIT_CONTRACT:
+            raise ValueError("cannot reuse cross-round evidence from an incompatible format audit")
         for source in sorted(prior_path.glob("seed-*/result.json")):
             archive=json.loads(source.read_text(encoding="utf-8"))
             if archive["cohort"]["dataset"]!=dataset or archive["holdout"] is not None:
@@ -200,6 +251,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
        "node_limit":max_nodes,"budget":run_budget,"arm":arm,
        "no_test_labels_in_agent_context":True,
        "ranking_parser_contract":PARSER_CONTRACT,
+       "format_audit_contract":FORMAT_AUDIT_CONTRACT,
        "prior_development_records":len(prior_development),
        "prior_frozen_rank_cache_files":[str(x) for x in prior_rank_cache_paths],
        "prior_campaign":str(Path(prior_campaign).resolve()) if prior_campaign else None,
@@ -239,11 +291,15 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                  "requests":gateway.calls-start})
             return result,gateway.calls-start
         baseline,cost_base=run_exp("plain",BASELINE,dev,"dev")
+        def development_audit(measured):
+            clean=paired_clean_evidence(baseline,measured,pop,titles)
+            return audit(baseline["metrics"],measured["metrics"],
+                         clean_evidence=clean)
         fixed_start=gateway.calls
         fixed=[]
         for name,strategy in list(FIXED.items())[:max_nodes]:
             measured,used=run_exp(name,canonical(strategy),dev,"dev")
-            outcome=audit(baseline["metrics"],measured["metrics"])
+            outcome=development_audit(measured)
             fixed.append({"name":name,"strategy":canonical(strategy),
                          "audit":outcome,"metrics":measured["metrics"],
                          "requests":used})
@@ -265,12 +321,12 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
             strategy=canonical(inherited["selected"]["strategy"])
             if fingerprint(strategy)!=fingerprint(BASELINE):
                 measured,cost=run_exp("inherited",strategy,dev,"dev")
-                assessment=audit(baseline["metrics"],measured["metrics"])
+                assessment=development_audit(measured)
                 inherited_node={
                     "id":"INHERITED","parent":"ROOT","depth":1,
                     "strategy":strategy,"status":"MEASURED",
                     "merit":assessment["merit"],
-                    "search_priority":expansion_priority(baseline["metrics"],measured["metrics"]),
+                    "search_priority":evidence_priority(baseline["metrics"],measured["metrics"],assessment),
                     "expansions":0,
                     "metrics":measured["metrics"],"audit":assessment,
                     "requests":cost,
@@ -340,7 +396,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
             node_id=f"N{turn:03d}"
             if strategy is not None and review["decision"]=="approve":
                 measured,usage=run_exp(node_id,strategy,dev,"dev")
-                outcome=audit(baseline["metrics"],measured["metrics"])
+                outcome=development_audit(measured)
                 score=outcome["merit"]
                 status="MEASURED"
                 if score>best["merit"] and outcome["eligible_development_only"]:
@@ -349,7 +405,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                     best_id=best["id"]
                 node={"id":node_id,"parent":parent["id"],"depth":parent["depth"]+1,
                       "strategy":strategy,"status":status,"merit":score,
-                      "search_priority":expansion_priority(baseline["metrics"],measured["metrics"]),
+                      "search_priority":evidence_priority(baseline["metrics"],measured["metrics"],outcome),
                       "expansions":0,
                       "tradeoff_tool_result":metric_tradeoff(baseline["metrics"],measured["metrics"]),
                       "metrics":measured["metrics"],"audit":outcome,
@@ -440,12 +496,17 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
         pair_fixed=bootstrap_paired(base_test,fixed_test,pop,titles,seed=seed)
         pair_rsi=bootstrap_paired(base_test,rsi_test,pop,titles,seed=seed+1)
         pair_rsi_fixed=bootstrap_paired(fixed_test,rsi_test,pop,titles,seed=seed+2)
+        format_heldout={
+            "fixed_vs_baseline":paired_clean_evidence(base_test,fixed_test,pop,titles),
+            "rsi_vs_baseline":paired_clean_evidence(base_test,rsi_test,pop,titles)
+        }
         result={
             "cohort":protocol,
             "development":{"baseline":baseline["metrics"],"fixed":fixed,
                 "selected_fixed":best_fixed,"selected_rsi":best,"tree":nodes},
             "holdout":{"baseline":base_test["metrics"],"fixed":fixed_test["metrics"],
-                       "rsi":rsi_test["metrics"]},
+                       "rsi":rsi_test["metrics"],
+                       "format_sensitivity":format_heldout},
             "ci95":{"fixed_minus_baseline":pair_fixed,
                     "rsi_minus_baseline":pair_rsi,
                     "rsi_minus_fixed":pair_rsi_fixed},

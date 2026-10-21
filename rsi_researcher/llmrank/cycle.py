@@ -9,7 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from rsi_researcher.llmrank.science import search, select_case_panels
+from rsi_researcher.llmrank.science import search, select_case_panels, FORMAT_AUDIT_CONTRACT
+from rsi_researcher.llmrank.evidence import paired_clean_evidence
 from rsi_researcher.llmrank.strategy import (
     BASELINE, fingerprint, evaluate_strategy, bootstrap_paired,
     PARSER_CONTRACT
@@ -71,6 +72,10 @@ def independent_confirmation(directory, *, config, data, dataset, retrieval,
             "frozen_rsi":rsi,"frozen_fixed":fixed,
             "baseline":baseline["metrics"],"rsi":rsi_arm["metrics"],
             "fixed":fixed_arm["metrics"],"paired_rsi":paired,
+            "format_sensitivity":{
+                "rsi_vs_baseline":paired_clean_evidence(baseline,rsi_arm,pop,titles),
+                "fixed_vs_baseline":paired_clean_evidence(baseline,fixed_arm,pop,titles)
+            },
             "paired_fixed":fixed_paired,"paired_rsi_minus_fixed":against_fixed,
             "source_selection":str(frozen_campaign),
             "independent_causal_discoveries":0,
@@ -103,6 +108,7 @@ def conduct(directory, *,config,data,dataset,retrieval,users,seeds,
         "requests_per_round":requests_per_round,
         "max_total_model_requests":max_total_requests,
         "ranking_parser_contract":PARSER_CONTRACT,
+        "format_audit_contract":FORMAT_AUDIT_CONTRACT,
         "patience":patience,"holdout_access":"AFTER stopping only",
         "stopping":"budget OR early scientific candidate OR patience OR maximum rounds",
         "not_until_success_by_repeated_test_peeking":True})
