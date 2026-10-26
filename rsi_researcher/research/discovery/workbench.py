@@ -87,7 +87,9 @@ def _summary(rows: list[dict], spec: dict, *, seed: int) -> dict:
         totals[group][0] += count
         totals[group][1] += value
     if any(totals[g][0] < 5 for g in totals):
-        raise ValueError("Both comparison groups need at least five observed outcomes")
+        support = ", ".join(f"{key}: {values[0]} events" for key, values in totals.items())
+        raise ValueError("Insufficient observed support for comparison: " + support +
+                         ". Inspect the actual group distribution and use supported values.")
     paired = {
         unit: values for unit, values in user_data.items()
         if all(values[group][0] > 0 for group in (control, treatment))
@@ -154,6 +156,50 @@ class ExperimentalWorkbench:
     def __init__(self, development_tools):
         self.tools = development_tools
 
+    def supported_population_filters(self, spec: dict) -> list[dict]:
+        """Observe support, not outcomes, for alternative experiment cohorts."""
+        if spec["source_query"].strip():
+            return []
+        names = [item["column"] for item in self.tools.schema()[spec["source_table"]]]
+        excluded = {"uid", "vid", "click", "hate", "long_view", "next_click",
+                    "moment_ms", "timestamp", "previous_moment"}
+        source = self.tools.active_table(spec["source_table"])
+        condition = re.sub(r"^WHERE\s+", "", spec["population_filter"].strip(), flags=re.I)
+        where = _expr(condition) if condition else "TRUE"
+        group = _expr(spec["group_expression"])
+        result = []
+        for col in names:
+            if col in excluded or not re.fullmatch(r"[a-z][a-z0-9_]*", col):
+                continue
+            try:
+                rows = self.tools.connection.execute(
+                    "SELECT " + col + ", CAST((" + group + ") AS VARCHAR),"
+                    " COUNT(DISTINCT uid) FROM " + source + " AS observations"
+                    " WHERE (" + where + ") GROUP BY 1,2").fetchall()
+            except Exception:
+                continue
+            levels = sorted({row[0] for row in rows if row[0] is not None}, key=str)
+            if not (2 <= len(levels) <= 8):
+                continue
+            for values in (levels[:len(levels)//2], levels[len(levels)//2:]):
+                by_arm = {str(spec["control_value"]): 0, str(spec["treatment_value"]): 0}
+                for value, arm, count in rows:
+                    if value in values and arm in by_arm:
+                        by_arm[arm] += int(count)
+                if min(by_arm.values()) < 5:
+                    continue
+                literals = [str(v) if isinstance(v, (int, float)) else
+                            "'" + str(v).replace("'", "''") + "'" for v in values]
+                clause = col + " IN (" + ",".join(literals) + ")"
+                proposal = ("(" + where + ") AND (" + clause + ")"
+                            if where.upper() != "TRUE" else clause)
+                if proposal != spec["population_filter"]:
+                    result.append({"population_filter": proposal,
+                                   "support_users_by_arm": by_arm})
+            if len(result) >= 6:
+                break
+        return result[:6]
+
     def _measure(self, spec: dict, *, placebo: bool = False) -> dict:
         source_query = (spec["placebo_source_query"] if placebo and
                         spec["placebo_source_query"].strip() else spec["source_query"])
@@ -162,11 +208,17 @@ class ExperimentalWorkbench:
                 "source_query must preserve per-event rows and independent unit IDs; "
                 "do NOT pre-aggregate. Use source_query='' and outcome_expression='click' "
                 "(or another raw outcome). Workbench performs the user-level aggregation.")
-        source = _source(source_query, spec["source_table"])
+        source = (self.tools.rewrite_sources(_source(source_query, spec["source_table"]))
+                  if source_query.strip() else self.tools.active_table(spec["source_table"]))
         group = (spec["placebo_group_expression"] if placebo else spec["group_expression"])
         if placebo and not group.strip():
             raise ValueError("Placebo must have a different group expression")
         outcome, unit = _expr(spec["outcome_expression"]), _expr(spec["unit_expression"])
+        if re.search(r"\b(AVG|COUNT|SUM|MIN|MAX)\s*\(|\bAS\b|,", outcome, re.I):
+            raise ValueError("outcome_expression must be ONE per-event numeric scalar "
+                             "(such as click or long_view), not AVG(...), aliases, "
+                             "multiple selected expressions, or an aggregate; "
+                             "Workbench calculates per-user averages itself")
         condition = spec["population_filter"].strip()
         # A frequent LLM formatting mistake is writing the WHERE keyword in a
         # field whose semantic content is only the boolean population condition.
@@ -201,9 +253,21 @@ class ExperimentalWorkbench:
             raise ValueError("Experiment grouping cardinality too high")
         return {"sql": query, "sufficient_statistics": records}
 
-    def run(self, spec: dict) -> dict:
+    def run(self, spec: dict, *, required_feature: str | None = None) -> dict:
         from jsonschema import Draft202012Validator
         Draft202012Validator(EXPERIMENT_SCHEMA).validate(spec)
+        if required_feature is not None:
+            origin = self.tools.feature_records[required_feature]["source_table"]
+            if spec["source_table"] != origin:
+                raise ValueError("Registered feature source mismatch: " + required_feature +
+                                 " originates in " + origin)
+            fields = ("source_query", "population_filter", "group_expression",
+                      "outcome_expression", "strata_expression")
+            if not any(re.search(r"\b" + re.escape(required_feature) + r"\b", spec[f])
+                       for f in fields):
+                raise ValueError("Use registered feature name '" + required_feature +
+                                 "' in the executable Experiment Specification; "
+                                 "do not repeat its SQL definition")
         # Models sometimes provide a SQL-quoted literal instead of its value;
         # stripping only *matching outer quotes* does not change the group.
         spec = dict(spec)
@@ -215,12 +279,15 @@ class ExperimentalWorkbench:
         source = self._measure(spec)
         effect = _summary(source["sufficient_statistics"], spec, seed=20261024)
         placebo = None
-        if spec["placebo_group_expression"].strip():
-            if (spec["placebo_group_expression"].strip() == spec["group_expression"].strip()
+        omitted_placebo = None
+        if (spec["placebo_group_expression"].strip() == spec["group_expression"].strip()
                 and spec["placebo_source_query"].strip() == spec["source_query"].strip()):
-                raise ValueError(
-                    "A negative control cannot reuse the exact same treatment and source. "
-                    "Construct a different group or derived source, or leave placebo fields empty.")
+            # A copied treatment is not an independent negative control.
+            # Ignore the invalid optional placebo explicitly; never credit it.
+            omitted_placebo = "Identical treatment and placebo were not tested as a negative control"
+            spec["placebo_group_expression"] = ""
+            spec["placebo_source_query"] = ""
+        if spec["placebo_group_expression"].strip():
             placebo_stats = self._measure(spec, placebo=True)
             placebo = _summary(placebo_stats["sufficient_statistics"], spec, seed=20261025)
             placebo = {
@@ -231,6 +298,7 @@ class ExperimentalWorkbench:
         return {
             "specification": spec,
             "result": effect, "negative_control": placebo,
+            "omitted_invalid_placebo": omitted_placebo,
             "executed_sql": source["sql"],
             "scientific_status": "development_only_not_independent_confirmation",
             "identifies_causal_bias": False,

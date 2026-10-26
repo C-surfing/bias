@@ -159,6 +159,13 @@ def concept_test(model, secret, task, observation, seed):
         # hidden-answer ranking or an encoded Bias type list.
         cards = [card for card in observation["contrast_cards"]
                  if card["field"] in remaining]
+        # Present all public observational contrasts, most discriminating first,
+        # without revealing latent mechanisms or choosing experiments for the LLM.
+        # Signal/interval precision is a *heuristic for exploration*, not a
+        # mechanism label and never a causal or confirmatory test.
+        cards.sort(key=lambda card: abs(card["observed_difference_tag1"]) /
+                   max(1e-5, card["descriptive_interval95"][1] -
+                       card["descriptive_interval95"][0]), reverse=True)
         explorer_schema = {**CONCEPT_EXPLORER, "properties": {
             **CONCEPT_EXPLORER["properties"],
             "factor": {"type": "string", "enum": remaining}}}
@@ -170,8 +177,11 @@ def concept_test(model, secret, task, observation, seed):
                           "a competing explanation, and propose a paired intervention that "
                           "could disprove it. Small nonzero observational differences "
                           "can be sampling noise. This is not causal proof. "
-                          "Budget allows only three distinct factors; spend tests where "
-                          "the visible evidence is strongest or the mechanism most informative.",
+                          "Budget allows only three distinct factors; scrutinize the "
+                          "effect size and interval of ALL public variables before choosing. "
+                          "The cards are sorted by observational signal/uncertainty, NOT hidden "
+                          "mechanism likelihood. Test the most discriminating evidence rather "
+                          "than habitual semantic choices; prefer a rival-sensitive test.",
                           {"field_cards": cards,
                            "previous_measured_experiments": previous,
                            "available_fields": remaining,

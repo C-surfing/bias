@@ -67,6 +67,18 @@ REFLECTION_SCHEMA = {
                  "falsifier", "measurement", "next_sql"],
     "additionalProperties": False,
 }
+COUNTER_DELTA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "field": {"type": "string", "enum": [
+            "population_filter", "group_expression",
+            "outcome_expression"]},
+        "replacement": {"type": "string", "minLength": 1},
+        "reason": {"type": "string", "minLength": 8},
+    },
+    "required": ["field", "replacement", "reason"],
+    "additionalProperties": False,
+}
 QUERY_SCHEMA = {"type": "object", "properties": {
     "search_queries": {"type": "array", "items": TEXT, "minItems": 2, "maxItems": 3}
 }, "required": ["search_queries"], "additionalProperties": False}
@@ -132,6 +144,7 @@ class DevelopmentTools:
                 "enable_external_access": "false", "threads": "2", "memory_limit": "2GB"})
         self.history = []
         self.features = {"features": {}, "events": {}}
+        self.feature_records = {}
 
     def schema(self):
         tables = ("features", "events") + tuple(
@@ -149,15 +162,7 @@ class DevelopmentTools:
             raise ValueError("Only one bounded SELECT/WITH on development data is supported")
         if any(item["sql"] == clean for item in self.history):
             raise ValueError("This exact development query already ran; change the measurement or research direction")
-        executed = clean
-        # Transparently expose derived columns through the original table names.
-        # Keep base tables immutable and avoid recursive shadow views.
-        for base, fields in self.features.items():
-            if fields:
-                executed = re.sub(
-                    r"\b(FROM|JOIN)\s+" + base + r"\b",
-                    lambda m: m.group(1) + " research_" + base, executed,
-                    flags=re.I)
+        executed = self.rewrite_sources(clean)
         result = self.connection.execute(
             "SELECT * FROM (" + executed + ") AS research_result LIMIT 30")
         cols = [d[0] for d in result.description]
@@ -171,6 +176,20 @@ class DevelopmentTools:
         self.history.append(evidence)
         return evidence
 
+    def active_table(self, table: str) -> str:
+        if table not in self.features:
+            raise ValueError("Unknown development table")
+        return "research_" + table if self.features[table] else table
+
+    def rewrite_sources(self, sql: str) -> str:
+        """Use the same registered views for SQL and statistical experiments."""
+        for base, fields in self.features.items():
+            if fields:
+                sql = re.sub(r"\b(FROM|JOIN)\s+" + base + r"\b",
+                             lambda m: m.group(1) + " research_" + base,
+                             sql, flags=re.I)
+        return sql
+
     def define_feature(self, name: str, expression: str, source_table: str = "features"):
         if source_table not in ("features", "events"):
             raise ValueError("Derived feature source_table must be features or events")
@@ -178,6 +197,10 @@ class DevelopmentTools:
             raise ValueError("Feature name must be a fresh lowercase SQL identifier")
         if not expression.strip() or len(expression) > 1000 or ";" in expression or FORBIDDEN.search(expression):
             raise ValueError("Feature expression must be an SQL scalar expression")
+        if re.search(r"\b(click|hate|long_view|next_click)\b", expression, re.I):
+            raise ValueError("Do not build a predictor from the CURRENT outcome label; use "
+                             "previous_click/previous_hate, timestamps or other observed "
+                             "pre-event fields, and measure current outcomes separately")
         # Execute the definition on the chosen source before registering a view.
         evidence = self.sql(
             "SELECT (" + expression + ") AS " + name + ",count(*) n FROM " +
@@ -191,9 +214,17 @@ class DevelopmentTools:
             projections + " FROM main." + source_table)
         # The query gateway transparently maps the original source table
         # to this derived view when the model runs its next SELECT.
-        return {"name": name, "expression": expression, "evidence": evidence,
-                "usable_table": source_table, "explicit_view": view,
-                "source_table": source_table}
+        record = {"name": name, "expression": expression, "evidence": evidence,
+                  "usable_table": source_table, "explicit_view": view,
+                  "source_table": source_table}
+        self.feature_records[name] = record
+        return record
+
+    def feature_cards(self):
+        return [{"name": item["name"], "source_table": item["source_table"],
+                 "expression": item["expression"],
+                 "sample_distribution": item["evidence"]["rows"][:8]}
+                for item in self.feature_records.values()]
 
     def inspect_trajectory(self, query: str):
         # Agent may select a development user via a SELECT query, not assume an ID.
@@ -209,6 +240,17 @@ class DevelopmentTools:
         return {"selected_uid": uid, "selection": selector,
                 "trajectory": events, "note": "chronological development events only"}
 
+    def grounding_rows(self):
+        """Observed values rather than semantic guesses about opaque tag codes."""
+        available = {item["column"] for item in self.schema()["events"]}
+        fields = [field for field in (
+            "tags", "previous_click", "previous_hate", "is_random", "click", "hate")
+            if field in available]
+        rows = self.connection.execute(
+            "SELECT " + ",".join(fields) + " FROM events LIMIT 8").fetchall()
+        return [dict(zip(fields, (v if isinstance(v, (str,int,float,bool)) or v is None
+                                  else str(v) for v in row))) for row in rows]
+
     def close(self):
         self.connection.close()
 
@@ -222,12 +264,63 @@ def compact_query(record: dict):
             "model_excerpt_only": len(record["rows"]) > 8}
 
 
+def feasible_countertest_filters(tools, spec: dict) -> list[dict]:
+    """Candidate subgroup comparisons supported by real paired development users.
+
+    This returns context for the Designer, never a platform mechanism label.
+    The model chooses the rival-discriminating subgroup and Workbench runs it.
+    """
+    if spec["source_query"].strip() or spec["unit_expression"].strip() != "uid":
+        return []
+    from rsi_researcher.research.discovery.workbench import _expr
+    table = spec["source_table"]
+    columns = {item["column"] for item in tools.schema()[table]}
+    group = _expr(spec["group_expression"])
+    condition = _expr(spec["population_filter"]) if spec["population_filter"].strip() else "TRUE"
+    result = []
+    for column in ("previous_click", "previous_hate", "is_random"):
+        if column not in columns or column == spec["group_expression"]:
+            continue
+        sql = (f"SELECT uid,CAST(({group}) AS VARCHAR) grp,{column} val "
+               f"FROM {tools.active_table(table)} "
+               f"WHERE ({condition}) AND {column} IS NOT NULL GROUP BY 1,2,3")
+        data = tools.connection.execute(sql).fetchall()
+        groups = {}
+        for uid, arm, value in data:
+            groups.setdefault(value, {}).setdefault(arm, set()).add(uid)
+        if len(groups) < 2:
+            continue
+        for value, arms in groups.items():
+            paired = arms.get(spec["control_value"], set()) & arms.get(
+                spec["treatment_value"], set())
+            if len(paired) >= 10:
+                result.append({"population_filter": (
+                    f"({condition}) AND {column} = {int(value)}"),
+                    "factor": column, "paired_users": len(paired)})
+    return sorted(result, key=lambda item: -item["paired_users"])[:8]
+
+
+def model_statistics(stats: dict) -> dict:
+    """Keep every numeric conclusion but only the most supported strata in prompts.
+
+    Complete stratum results remain in the machine-readable journal.
+    """
+    view = {k: v for k, v in stats.items() if k != "strata"}
+    strata = stats.get("strata", {})
+    view["strata_total"] = len(strata)
+    view["strata"] = dict(sorted(
+        strata.items(),
+        key=lambda pair: min(pair[1]["n_control"], pair[1]["n_treatment"]),
+        reverse=True)[:10])
+    return view
+
+
 def compact_step(entry: dict):
     action = entry["action"]
     result = {"round": entry["round"], "action": action["action"],
               "reason": action["reason"][:200], "concept_id": action["concept_id"],
               "concept": action["concept"][:170]}
-    for k in ("result", "test", "critic_test"):
+    for k in ("result", "test", "critic_test", "critic_sql_countertest"):
         if k in entry:
             result[k] = compact_query(entry[k])
     if "trajectory" in entry:
@@ -237,15 +330,22 @@ def compact_step(entry: dict):
         result["experiment"] = {
             "question": record["specification"]["question"],
             "specification": record["specification"],
-            "result": record["result"],
-            "negative_control": (record["negative_control"] or {}).get("result"),
+            "result": model_statistics(record["result"]),
+            "negative_control": (model_statistics(record["negative_control"]["result"])
+                                 if record["negative_control"] else None),
         }
     if "critic_experiment" in entry:
         result["critic_experiment"] = entry["critic_experiment"]["result"]
+    if "experiment_specification" in entry and "experiment" not in entry:
+        result["failed_experiment"] = {
+            "group": entry["experiment_specification"]["group_expression"],
+            "outcome": entry["experiment_specification"]["outcome_expression"]}
     if "derived_feature" in entry:
+        feature = entry["derived_feature"]
         result["derived_feature"] = {
-            "name": entry["derived_feature"]["name"],
-            "expression": entry["derived_feature"]["expression"]}
+            "name": feature["name"], "source_table": feature["source_table"],
+            "expression": feature["expression"],
+            "observed_values": compact_query(feature["evidence"])}
     for k in ("critique", "tool_error", "gate", "revised_concept", "literature_summary",
               "formed_concept_id", "concept_formation", "reflection",
               "contrast_audit", "reflection_veto"):
@@ -352,6 +452,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "development": prep, "holdout_exposed": False,
         "source_fingerprint_input": str(Path(source_db).resolve())})
     tools = DevelopmentTools(dev_path)
+    # Development-only grounding, cached once. Tag values are opaque IDs, not words.
+    data_examples = tools.grounding_rows()
     from rsi_researcher.research.discovery.workbench import (
         ExperimentalWorkbench, EXPERIMENT_SCHEMA)
     workbench = ExperimentalWorkbench(tools)
@@ -373,6 +475,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "never invent feature1 or generic names. Use CASE WHEN bins rather than "
         "grouping by unbinned continuous timestamps. Do not join two event-level "
         "tables on uid alone. If a proposal is contradicted, revise or discard it. "
+        "Tags are OPAQUE numeric ID strings (such as '39,43'), NOT natural-language "
+        "topics. 'hate' is a binary RESPONSE column, not a tag name; do not query "
+        "tags LIKE '%hate%'. Current click/hate/long_view are OUTCOMES and cannot "
+        "be used to define the independent treatment variable. "
+        "When a numerical tool says a comparison arm has zero observations, inspect "
+        "actual values and choose a supported contrast, never submit it unchanged. "
         "A descriptive difference is NOT evidence of an algorithmically harmful Bias. "
         "Do not claim independent replication or intervention from this dev dataset. "
         "For define_feature choose source_table events to access previous_tags or next_tags; "
@@ -438,7 +546,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 _save(dest / "journal.json", history)
             instruction = {
                 "tables": tools.schema(),
+                "development_value_examples": data_examples,
                 "derived_features": tools.features,
+                "registered_variable_cards": tools.feature_cards(),
                 "concepts": [_concept_summary(c) for c in concepts[-4:]],
                 "recent_evidence": [compact_step(s) for s in history[-4:]],
                 "steps_left": max_rounds - step,
@@ -451,8 +561,11 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "Prioritize an actual test using EXACT H001/H002 IDs now; "
                     "then revise the mechanism if contradicted; request literature "
                     "before attempting freeze." if concepts else
-                    "Explore informative trajectories and define reusable features "
-                    "before concept formation. Do not just select known Bias names."),
+                    "Inspect actual data, register a reusable row-level variable with "
+                    "define_feature, then verify it with SQL before experimental design."
+                    if not any(tools.features.values()) else
+                    "Test the registered variable with a conditional comparison and "
+                    "form a falsifiable hypothesis with a competing explanation."),
             }
             decision = scientist.act(instruction, "open-" + str(step), ACTION_SCHEMA)
             entry = {"round": step, "action": decision}
@@ -573,12 +686,34 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "optional negative-control calculation, a precise falsifier and meaningful "
                         "effect margin. Do NOT predefine Bias categories. Source_query optionally "
                         "calculates derived columns using a single SELECT or WITH expression. "
-                        "Use actual available schema; do not confuse same-time batched exposure "
-                        "with sequential recommender updates. Prefer user_paired when both groups "
-                        "exist per user; otherwise cluster_weighted. Empty optional SQL fields "
-                        "are empty strings. Placebo group expression may be empty if unjustified.")
+                        "Use the real schema and REGISTERED derived columns only. "
+                        "With source_query='' Workbench uses the development view with "
+                        "registered features, so use these features directly in group_expression, "
+                        "strata_expression or population_filter. Do not invent aliases. "
+                        "outcome_expression is a SINGLE per-event scalar, not AVG(), "
+                        "not SELECT expression lists, and never AS alias: Workbench "
+                        "aggregates over users. A custom source_query preserves uid and event rows. "
+                        "Do not treat same-time log records as sequential state updates. "
+                        "Prefer paired_user when both groups exist per user, otherwise "
+                        "cluster_weighted. Optional SQL fields may be empty. "
+                        "If you have no separate scientifically valid negative-control "
+                        "assignment, set BOTH placebo fields to empty strings. "
+                        "Never copy the treatment group into the placebo.")
                     event_days = tools.connection.execute(
                         "SELECT MIN(event_day), MAX(event_day) FROM events").fetchone()
+                    first_workbench = not any(
+                        "workbench" in test for test in selected["tests"])
+                    feature_pairs = [(table, name) for table, items in tools.features.items()
+                                     for name in items]
+                    design_schema = EXPERIMENT_SCHEMA
+                    if first_workbench and feature_pairs:
+                        design_schema = {**EXPERIMENT_SCHEMA, "properties": {
+                            **EXPERIMENT_SCHEMA["properties"],
+                            "source_query": {"type": "string", "enum": [""]},
+                            "source_table": {"type": "string",
+                                             "enum": sorted(set(table for table, _ in feature_pairs))},
+                            "group_expression": {"type": "string",
+                                                 "enum": [name for _, name in feature_pairs]}}}
                     experiment_spec = designer.act({
                         "available_event_day_range": list(event_days),
                         "population_filter_syntax": "Boolean SQL condition only, no leading WHERE",
@@ -586,14 +721,95 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "concept": _concept_summary(selected),
                         "claim": selected["claim"],
                         "schema": tools.schema(), "created_features": tools.features,
+                        "registered_variable_cards": tools.feature_cards(),
+                        "binding_instruction": "Bind experiments to registered feature NAME, "
+                           "not a newly copied CASE expression.",
+                        "registered_feature_observations": [
+                            compact_step(item)["derived_feature"]
+                            for item in history if "derived_feature" in item],
+                        "example_data_values": data_examples,
+                        "critical_design_rule": "A binary group must have observed users in BOTH actual arms; opaque tags are numeric IDs, and click/hate are current outcomes, not tag names.",
                         "prior_experiments": [
                             {"question": t["test_question"],
                              "numerical_evidence": compact_query(t["result"])}
                             for t in selected["tests"][-3:]],
                         "scientist_request": decision["reason"],
-                    }, "experiment-design-" + str(step), EXPERIMENT_SCHEMA)
-                    measured_experiment = workbench.run(experiment_spec)
+                    }, "experiment-design-" + str(step), design_schema)
+                    # Give the Designer an explicit opportunity to cite its own
+                    # measured variable instead of silently repeating the same
+                    # CASE expression in each experiment plan.
+                    registered = [name for values in tools.features.values()
+                                  for name in values]
+                    specified = " ".join(str(experiment_spec[key]) for key in
+                                         ("source_query", "population_filter",
+                                          "group_expression", "outcome_expression",
+                                          "strata_expression"))
+                    if registered and not any(re.search(
+                            r"\b" + re.escape(name) + r"\b", specified)
+                            for name in registered):
+                        referenced = designer.act({
+                            "previous": experiment_spec,
+                            "registered_features": tools.features,
+                            "real_schema": tools.schema(),
+                            "request": "Use a REGISTERED derived feature by its COLUMN NAME "
+                                       "in the group_expression, population_filter, "
+                                       "strata_expression or source_query. You already "
+                                       "computed and verified it; do not inline its CASE "
+                                       "again. Preserve your scientific comparison and "
+                                       "one per-event numeric outcome.",
+                        }, "experiment-reuse-feature-" + str(step), EXPERIMENT_SCHEMA)
+                        if any(re.search(r"\b" + re.escape(name) + r"\b",
+                                      " ".join(str(referenced[k]) for k in
+                                               ("source_query", "population_filter",
+                                                "group_expression", "strata_expression")))
+                               for name in registered):
+                            experiment_spec = referenced
+                            entry["feature_reuse_design"] = True
+                        else:
+                            entry["feature_reuse_warning"] = (
+                                "Model did not reference any registered feature")
+                    import duckdb
+                    entry["experiment_specification"] = experiment_spec
+                    required_feature = next(reversed(tools.feature_records), None)
+                    try:
+                        measured_experiment = workbench.run(
+                            experiment_spec, required_feature=required_feature)
+                    except (ValueError, duckdb.Error) as error:
+                        corrected = designer.act({
+                            "original": experiment_spec,
+                            "execution_error": str(error),
+                            "created_features": tools.features,
+                            "registered_variable_cards": tools.feature_cards(),
+                            "must_bind_feature": required_feature or "",
+                            "schema": tools.schema(),
+                            "observed_rows": data_examples,
+                            "instruction": "Repair the actual experiment to use TWO SUPPORTED "
+                                           "groups and real row-level fields. Change the group "
+                                           "or population, not just the hypothesis wording.",
+                        }, "experiment-repair-" + str(step), design_schema)
+                        if corrected == experiment_spec:
+                            raise ValueError("Designer repeated an invalid experiment")
+                        entry["experiment_repair"] = {"old": experiment_spec,
+                                                       "error": str(error)}
+                        experiment_spec = corrected
+                        measured_experiment = workbench.run(
+                            experiment_spec, required_feature=required_feature)
                     entry["experiment"] = measured_experiment
+                    entry["feature_binding"] = {
+                        "registered_feature": required_feature,
+                        "original_expression": (
+                            tools.feature_records[required_feature]["expression"]
+                            if required_feature else None),
+                        "executed_sql": measured_experiment["executed_sql"]}
+                    entry["feature_lineage"] = {
+                        "used": [name for _, name in feature_pairs
+                                 if re.search(r"\b" + re.escape(name) + r"\b",
+                                              " ".join(str(experiment_spec[k]) for k in
+                                              ("source_query", "population_filter",
+                                               "group_expression", "outcome_expression",
+                                               "strata_expression")))],
+                        "source_tables": sorted(set(table for table, _ in feature_pairs)),
+                    }
                     numeric = {"sql": measured_experiment["sql"],
                                "columns": measured_experiment["columns"],
                                "rows": measured_experiment["rows"]}
@@ -606,8 +822,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "concept": _concept_summary(selected),
                         "hypothesis": selected["claim"],
                         "experiment_specification": experiment_spec,
-                        "observed_statistics": measured_experiment["result"],
-                        "negative_control": measured_experiment["negative_control"],
+                        "observed_statistics": model_statistics(measured_experiment["result"]),
+                        "negative_control": (model_statistics(
+                            measured_experiment["negative_control"]["result"])
+                            if measured_experiment["negative_control"] else None),
                         "request": "Evaluate rival mechanism, logging artifacts, and whether a DIFFERENT experiment is needed.",
                     }, "experiment-critique-" + str(step), CRITIC_SCHEMA)
                     entry["critique"] = critique
@@ -616,18 +834,85 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         followup_spec = designer.act({
                             "concept": _concept_summary(selected),
                             "previous_experiment": experiment_spec,
-                            "results": measured_experiment["result"],
-                            "placebo": measured_experiment["negative_control"],
+                            "results": model_statistics(measured_experiment["result"]),
+                            "placebo": (model_statistics(measured_experiment["negative_control"]["result"])
+                                        if measured_experiment["negative_control"] else None),
                             "critic_feedback": critique,
                             "schema": tools.schema(),
                             "available_event_day_range": list(event_days),
                             "instruction": "Propose a different experiment, grouping, control, time window or placebo that distinguishes the rival. Do not repeat the earlier specification.",
                         }, "experiment-countertest-" + str(step), EXPERIMENT_SCHEMA)
+                        # Reformatting the prompt or adding strata alone
+                        # does not produce a different primary numeric contrast.
+                        material = ("source_query", "population_filter",
+                                    "group_expression", "control_value",
+                                    "treatment_value", "outcome_expression")
+                        if all(followup_spec[k] == experiment_spec[k] for k in material):
+                            # One controlled model-chosen mutation is easier for an
+                            # 8B model than regenerating 17 interdependent fields.
+                            supported_filters = feasible_countertest_filters(
+                                tools, experiment_spec)
+                            delta_schema = COUNTER_DELTA_SCHEMA
+                            if supported_filters:
+                                delta_schema = {**COUNTER_DELTA_SCHEMA, "properties": {
+                                    **COUNTER_DELTA_SCHEMA["properties"],
+                                    "field": {"type": "string", "enum": ["population_filter"]},
+                                    "replacement": {"type": "string", "enum": [
+                                        item["population_filter"] for item in supported_filters]}}}
+                            delta = designer.act({
+                                "feasible_development_subgroups": supported_filters,
+                                "original": experiment_spec,
+                                "critic_reason": critique["reason"],
+                                "critic_sql": critique["next_sql"],
+                                "observed_statistics": model_statistics(
+                                    measured_experiment["result"]),
+                                "schema": tools.schema(),
+                                "registered_features": tools.features,
+                                "task": "Change ONE experimental contrast dimension. "
+                                        "Choose a DIFFERENT supported user subgroup, "
+                                        "grouping, outcome or effect modifier. "
+                                        "Do not repeat the original string. "
+                                        "Keep unit_expression, data table, group labels "
+                                        "and inferential analysis unchanged.",
+                            }, "experiment-countertest-delta-" + str(step),
+                                delta_schema)
+                            followup_spec = dict(experiment_spec)
+                            followup_spec[delta["field"]] = delta["replacement"]
+                            entry["countertest_delta"] = delta
                         if followup_spec == experiment_spec:
-                            entry["critic_experiment_error"] = "Repeated experiment specification"
+                            # The Critic's concrete falsification SQL remains independently
+                            # selectable even if the Designer fails to modify a whole plan.
+                            # It is exploratory and never a substitute for a paired CI.
+                            entry["critic_experiment_error"] = "Designer repeated the experiment"
+                            if critique["next_sql"].strip():
+                                try:
+                                    entry["critic_sql_countertest"] = tools.sql(critique["next_sql"])
+                                except Exception as exc:
+                                    entry["critic_sql_error"] = str(exc)[:280]
                         else:
                             try:
-                                followup = workbench.run(followup_spec)
+                                try:
+                                    followup = workbench.run(followup_spec)
+                                except (ValueError, duckdb.Error) as error:
+                                    repaired = designer.act({
+                                        "failed_countertest": followup_spec,
+                                        "execution_error": str(error),
+                                        "original_experiment": experiment_spec,
+                                        "registered_features": tools.features,
+                                        "exact_schema": tools.schema(),
+                                        "instruction": "Repair the COUNTERTEST, not the original. "
+                                                       "Replace nonexistent columns with real "
+                                                       "registered names, ensure different group/"
+                                                       "population/stratum and both comparison "
+                                                       "groups have user-level support. "
+                                                       "Return ONE per-event numeric outcome.",
+                                    }, "countertest-execution-repair-" + str(step),
+                                        EXPERIMENT_SCHEMA)
+                                    if repaired == followup_spec or repaired == experiment_spec:
+                                        raise ValueError("No distinct corrected countertest")
+                                    followup_spec = repaired
+                                    followup = workbench.run(followup_spec)
+                                    entry["critic_experiment_repaired"] = str(error)[:260]
                                 entry["critic_experiment"] = followup
                                 selected["tests"].append({
                                     "version": selected["version"],
@@ -647,39 +932,77 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     # A countertest that does not resolve the rival forces a real
                     # next-research choice rather than reusing the same hypothesis.
                     if (critique["decision"] == "test"
-                            and "critic_experiment" in entry
-                            and selected["status"] == "investigating"):
+                            and ("critic_experiment" in entry
+                                 or "critic_sql_countertest" in entry)
+                            and selected["status"] != "rejected_development"):
+                        # A Critic-authored SQL probe is legitimate numerical
+                        # falsification evidence but has no user-level uncertainty;
+                        # it must NEVER be presented as a Workbench paired test.
+                        counter_result = (
+                            model_statistics(entry["critic_experiment"]["result"])
+                            if "critic_experiment" in entry else
+                            {"descriptive_sql_only": True,
+                             "observations": compact_query(entry["critic_sql_countertest"])})
                         reflector = ResearchAgent(model)
                         reflector.role = "discovery-reflection"
                         reflector.instruction = (
-                            "You have an initial statistical experiment AND a countertest "
-                            "requested by Critic. Their NUMERIC results are authoritative. "
+                            "You have an initial statistical experiment AND an actually executed "
+                            "Critic countertest. Distinguish descriptive SQL from paired inferential "
+                            "statistics; their NUMERIC results are authoritative within scope. "
                             "Decide whether to revise the mechanism/measurement, abandon "
                             "or request literature. Merely renaming the same hypothesis "
                             "is NOT revision. State a falsifiable alternative.")
-                        reflection = reflector.act({
+                        reflection_input = {
                             "concept": selected["claim"],
-                            "initial_result": measured_experiment["result"],
-                            "countertest_result": entry["critic_experiment"]["result"],
+                            "initial_result": model_statistics(measured_experiment["result"]),
+                            "countertest_result": counter_result,
                             "critique": critique,
-                        }, "experiment-reflection-" + str(step), REFLECTION_SCHEMA)
+                        }
+                        reflection = reflector.act(
+                            reflection_input, "experiment-reflection-" + str(step),
+                            REFLECTION_SCHEMA)
+                        if (reflection["decision"] == "revise"
+                                and all(reflection[k].strip() == selected["claim"][k].strip()
+                                        for k in ("falsifier", "measurement"))):
+                            entry["rejected_cosmetic_reflection"] = reflection
+                            # Scientific invalidity should cause a clear stop,
+                            # not infinite rewording of the original hypothesis.
+                            reflection = reflector.act({
+                                **reflection_input,
+                                "invalid_previous_revision": reflection,
+                                "instruction": "Your proposed revision was only a rephrasing. "
+                                               "Either ABANDON this unsupported mechanism "
+                                               "or specify a DIFFERENT falsifiable measurement "
+                                               "and an executable SQL query that distinguishes "
+                                               "it from the rival. Do not invent a result.",
+                            }, "experiment-reflection-recheck-" + str(step),
+                                REFLECTION_SCHEMA)
                         entry["reflection"] = reflection
                         revised = any(
                             reflection[key].strip() != selected["claim"][key].strip()
-                            for key in ("mechanism", "rival", "falsifier", "measurement"))
+                            for key in ("falsifier", "measurement"))
                         if reflection["decision"] == "revise" and revised:
-                            selected["revisions"].append({
-                                "previous": selected["claim"],
-                                "reason": reflection["reason"],
-                                "triggering_tests": len(selected["tests"])})
-                            selected["claim"] = {
-                                **selected["claim"],
-                                **{k: reflection[k] for k in (
-                                    "concept", "mechanism", "rival", "falsifier", "measurement")},
-                                "query": reflection["next_sql"], "reason": reflection["reason"]}
-                            selected["version"] += 1
-                            selected["critique"] = None
-                            entry["revised_concept"] = _concept_summary(selected)
+                            try:
+                                if not reflection["next_sql"].strip():
+                                    raise ValueError("Revision needs an executable new falsification query")
+                                entry["revision_probe"] = tools.sql(reflection["next_sql"])
+                            except Exception as exc:
+                                entry["reflection_veto"] = ("Proposed revised measurement did not execute: "
+                                                            + str(exc)[:250])
+                                selected["status"] = "needs_revision"
+                            else:
+                                selected["revisions"].append({
+                                    "previous": selected["claim"],
+                                    "reason": reflection["reason"],
+                                    "triggering_tests": len(selected["tests"])})
+                                selected["claim"] = {
+                                    **selected["claim"],
+                                    **{k: reflection[k] for k in (
+                                        "concept", "mechanism", "rival", "falsifier", "measurement")},
+                                    "query": reflection["next_sql"], "reason": reflection["reason"]}
+                                selected["version"] += 1
+                                selected["critique"] = None
+                                entry["revised_concept"] = _concept_summary(selected)
                         elif reflection["decision"] == "revise":
                             entry["reflection_veto"] = "No substantive change of mechanism, rival, falsifier or metric"
                             selected["status"] = "needs_revision"
@@ -695,6 +1018,14 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     if not all(decision[k].strip() for k in
                                ("concept", "mechanism", "rival", "falsifier", "measurement")):
                         raise ValueError("Revisions need a complete falsifiable concept")
+                    if not selected["tests"]:
+                        raise ValueError("A revision needs executed contradictory evidence")
+                    if all(decision[k].strip() == selected["claim"][k].strip()
+                           for k in ("falsifier", "measurement")):
+                        raise ValueError("Revision must change the falsifier or measurement")
+                    if not decision["query"].strip():
+                        raise ValueError("Revision must include a new executable measurement")
+                    entry["revision_probe"] = tools.sql(decision["query"])
                     selected["revisions"].append({
                         "previous": selected["claim"], "reason": decision["reason"],
                         "triggering_tests": len(selected["tests"])})
@@ -735,10 +1066,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             _save(dest / "journal.json", history)
             _save(dest / "research_state.json", {
                 "concepts": concepts, "rounds_completed": len(history),
+                "registered_features": tools.features,
                 "holdout_consulted": False})
         status = "frozen_unconfirmed" if last else "development_inconclusive"
         final = {"status": status, "frozen_id": last or None,
-                 "concepts": concepts, "development_queries": tools.history,
+                 "concepts": concepts, "registered_features": tools.features,
+                 "development_queries": tools.history,
                  "research_rounds": len(history), "holdout_consulted": False,
                  "independent_confirmation": False,
                  "causal_bias_established": False, "debias_verified": False}

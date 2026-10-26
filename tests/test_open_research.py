@@ -110,7 +110,10 @@ def test_real_research_loop_forms_tests_revises_and_checks_literature(tmp_path, 
          "measurement": "elapsed-time by feedback interaction",
          "next_sql": "SELECT after_long_gap,COUNT(*) n FROM features GROUP BY 1"},
         _act("revise", reason="new evidence suggests a weak lag interaction",
-             **{**base, "concept": "session conditional feedback memory"}),
+             query="SELECT topic_changed,COUNT(*) n,AVG(click) rate FROM features GROUP BY 1",
+             **{**base, "concept": "session conditional feedback memory",
+                "falsifier": "lag effect vanishes within user and topic",
+                "measurement": "click disparity by user topic and lag"}),
         _act("test", query="SELECT after_nonclick,COUNT(*) n,AVG(click) rate FROM features GROUP BY 1", **base),
         {"decision": "ready", "reason": "preliminary discriminating test",
          "next_sql": "", "observable_valid": True,
@@ -246,7 +249,8 @@ def test_auto_concept_stage_produces_unpreselected_hypotheses(tmp_path, monkeypa
         action("revise", concept_id="H001", concept="conditional state shift",
                mechanism="feedback persistence under long gaps",
                rival="user mix", falsifier="state effect disappears by user",
-               measurement="click interaction"),
+               measurement="click interaction",
+               query="SELECT activity,COUNT(*) n,AVG(click) rate FROM features GROUP BY 1"),
         action("test", concept_id="H001", query="SELECT after_nonclick,COUNT(*) n,AVG(click) rate FROM features GROUP BY 1"),
         {"decision": "ready", "reason": "pilot checks testable",
          "next_sql": "", "observable_valid": True,
@@ -283,6 +287,8 @@ def test_reflection_revises_failed_scientific_mechanism(tmp_path, monkeypatch):
     q3 = "SELECT after_long_gap,COUNT(*) n,AVG(click) r FROM features GROUP BY 1"
     q4 = "SELECT event_day,COUNT(*) n,AVG(click) r FROM features GROUP BY 1"
     q5 = "SELECT activity,after_nonclick,COUNT(*) n,AVG(click) r FROM features GROUP BY 1,2"
+    q6 = "SELECT topic_changed,after_nonclick,COUNT(*) n,AVG(click) r FROM features GROUP BY 1,2"
+    q7 = "SELECT activity,topic_changed,COUNT(*) n,AVG(click) r FROM features GROUP BY 1,2"
     responses = [
         _act("sql", query="SELECT tags,COUNT(*) n FROM features GROUP BY 1"),
         _act("form_concept", **claim),
@@ -295,7 +301,7 @@ def test_reflection_revises_failed_scientific_mechanism(tmp_path, monkeypatch):
          "mechanism": "session boundary effect", "rival": "user selection",
          "falsifier": "control within users", "measurement": "session-conditioned click",
          "next_sql": q3},
-        _act("test", query=q3, **claim),
+        _act("test", query=q6, **claim),
         {"decision": "test", "reason": "lag confounding persists", "next_sql": q4,
          "observable_valid": True, "rival_discriminated": False,
          "logging_artifact_excluded": False},
@@ -306,7 +312,7 @@ def test_reflection_revises_failed_scientific_mechanism(tmp_path, monkeypatch):
          "falsifier": "same-user stratified effect vanishes",
          "measurement": "tag by session split with support",
          "next_sql": q5},
-        _act("test", query=q5, **claim),
+        _act("test", query=q7, **claim),
         {"decision": "ready", "reason": "test sufficiently discriminating for a pilot",
          "next_sql": "", "observable_valid": True, "rival_discriminated": True,
          "logging_artifact_excluded": True},
