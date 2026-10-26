@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from rsi_researcher.research.discovery.opportunities import ResearchOpportunityPool
 from rsi_researcher.research.scientific_agents import ResearchAgent
 from rsi_researcher.runtime.limits import RunLimits
 from rsi_researcher.runtime.models import create_model
@@ -22,7 +23,8 @@ ACTION_SCHEMA = {
     "properties": {
         "action": {"type": "string", "enum": [
             "sql", "inspect_trajectory", "define_feature", "form_concept",
-            "test", "experiment", "revise", "literature", "freeze", "stop"]},
+            "select_opportunity", "test", "experiment", "revise", "literature",
+            "freeze", "stop"]},
         "reason": TEXT, "query": TEXT, "feature_name": TEXT, "expression": TEXT,
         "source_table": {"type": "string", "enum": ["features", "events"]},
         "concept_id": TEXT, "concept": TEXT, "mechanism": TEXT, "rival": TEXT,
@@ -56,6 +58,25 @@ CONCEPT_PAIR_SCHEMA = {
             "additionalProperties": False}}},
     "required": ["concepts"], "additionalProperties": False,
 }
+OPPORTUNITY_CHOICE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "selected_concept_id": TEXT,
+        "reason": TEXT,
+        "discriminating_prediction": TEXT,
+        "prediction_if_mechanism": TEXT,
+        "prediction_if_rival": TEXT,
+        "why_not_other": TEXT,
+        "next_action": {"type": "string", "enum": ["observe", "experiment"]},
+        "next_sql": TEXT,
+        "experimental_cost": TEXT,
+    },
+    "required": ["selected_concept_id", "reason", "discriminating_prediction",
+                 "prediction_if_mechanism", "prediction_if_rival",
+                 "why_not_other", "next_action", "next_sql", "experimental_cost"],
+    "additionalProperties": False,
+}
+
 REFLECTION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -503,6 +524,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "artifacts were probed. A test can justify provisional freezing for "
         "independent confirmation, not a causal Bias claim.")
     history, concepts = [], []
+    opportunity_pool = ResearchOpportunityPool()
     last = ""
     try:
         for step in range(max_rounds):
@@ -518,6 +540,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "mechanism, substantive competing explanation, falsifying "
                     "prediction, new measurement and executable test SQL. "
                     "Invent conceptual relationships, not old named Bias cards. "
+                    "For each concept specify an observable prediction if the mechanism "
+                    "is true, a DIFFERENT observable prediction if its rival is true, "
+                    "and what follow-up observation or experiment best separates them. "
+                    "Use the actual measured rows; do not make up evidence, effect "
+                    "sizes or sample counts. We want research opportunity selection, "
+                    "not generic significant findings. "
                     "Do not claim causality or novelty. Use exact schema columns.")
                 formed = former.act({
                     "observations": [compact_query(x) for x in tools.history[-4:]],
@@ -537,12 +565,64 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "id": identifier, "version": 1, "status": "investigating",
                         "claim": claim, "tests": [], "revisions": [],
                         "literature": None, "critique": None})
+                    opportunity_pool.register(identifier, hypothesis, tools.history)
                     stage_ids.append(identifier)
                 stage_action = {"action": "concept_formation", "reason": "hypothesis synthesis",
                                 "concept_id": "", "concept": "", "query": ""}
                 history.append({"round": step, "action": stage_action,
                                 "concept_formation": stage_ids})
                 _save(dest / "concept_formation.json", formed)
+                # The autonomous choice runs INSIDE the same research cycle and
+                # consumes the same Qwen/tool budget. Test fixtures without an
+                # actual configured LLM still exercise the normal action route.
+                if model_config.get("llm"):
+                    chooser = ResearchAgent(model)
+                    chooser.role = "research-opportunity-selector"
+                    chooser.instruction = (
+                        "Choose which AGENT-PROPOSED phenomenon to investigate next. "
+                        "Compare the mechanism-vs-rival predictions; select the "
+                        "observation or statistical experiment where they disagree "
+                        "most, taking real measured support and cost into account. "
+                        "State distinct observable predictions for BOTH the proposed "
+                        "mechanism and its rival; repeating the same prediction is "
+                        "not an informative experiment. "
+                        "Do NOT rank by significance alone, invent an additional "
+                        "candidate, or use any hidden confirmation data. An observe "
+                        "decision needs an executable development SQL query.")
+                    choice = chooser.act({
+                        "opportunities": opportunity_pool.for_agent(),
+                        "recent_observations": [compact_query(
+                            q) for q in tools.history[-4:]],
+                        "available_schema": tools.schema(),
+                        "budget_left": max_rounds - step,
+                    }, "opportunity-choice-" + str(step),
+                        OPPORTUNITY_CHOICE_SCHEMA)
+                    opportunity_pool.choose(
+                        choice["selected_concept_id"], choice["reason"],
+                        choice["next_sql"] if choice["next_action"] == "observe" else "")
+                    chosen_item = opportunity_pool.records[choice["selected_concept_id"]]
+                    chosen_item["prediction_if_mechanism"] = choice["prediction_if_mechanism"]
+                    chosen_item["prediction_if_rival"] = choice["prediction_if_rival"]
+                    chosen_item["discriminating_experiment"] = choice["discriminating_prediction"]
+                    chosen_item["experiment_cost"] = choice["experimental_cost"]
+                    chosen_entry = {
+                        "round": step,
+                        "action": {"action": "select_opportunity",
+                                   "reason": choice["reason"], "concept_id":
+                                   choice["selected_concept_id"], "query":
+                                   choice["next_sql"], "concept": ""},
+                        "opportunity_selection": choice}
+                    if choice["next_action"] == "observe" and choice["next_sql"].strip():
+                        try:
+                            chosen_entry["result"] = tools.sql(choice["next_sql"])
+                            opportunity_pool.observation(
+                                choice["selected_concept_id"],
+                                chosen_entry["result"]["sql"],
+                                chosen_entry["result"]["rows"])
+                        except Exception as exc:
+                            chosen_entry["tool_error"] = str(exc)[:300]
+                    history.append(chosen_entry)
+                _save(dest / "research_opportunities.json", opportunity_pool.snapshot())
                 _save(dest / "journal.json", history)
             instruction = {
                 "tables": tools.schema(),
@@ -550,6 +630,15 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 "derived_features": tools.features,
                 "registered_variable_cards": tools.feature_cards(),
                 "concepts": [_concept_summary(c) for c in concepts[-4:]],
+                "research_opportunity_pool": opportunity_pool.for_agent(),
+                "opportunity_selection_principle": (
+                    "You own the next research choice: select_opportunity with a "
+                    "concept_id and optionally a fresh SQL observation, or choose "
+                    "SQL/define_feature/experiment directly. Prefer the question "
+                    "whose next MEASURED outcome would distinguish competing "
+                    "mechanisms. Explain the discriminating prediction, expected "
+                    "information, observable support and cost. Do NOT prioritize "
+                    "a hypothesis merely because its p-value or effect is large."),
                 "recent_evidence": [compact_step(s) for s in history[-4:]],
                 "steps_left": max_rounds - step,
                 "successful_queries": len(tools.history),
@@ -572,8 +661,22 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             act = decision["action"]
             selected = next((c for c in concepts if c["id"] == decision["concept_id"]), None)
             try:
-                if act == "sql":
+                if act == "select_opportunity":
+                    chosen = opportunity_pool.choose(
+                        decision["concept_id"], decision["reason"], decision["query"])
+                    entry["opportunity_selection"] = {
+                        "id": chosen, "reason": decision["reason"],
+                        "next_observation": decision["query"]}
+                    if decision["query"].strip():
+                        entry["result"] = tools.sql(decision["query"])
+                        opportunity_pool.observation(
+                            chosen, entry["result"]["sql"], entry["result"]["rows"])
+                elif act == "sql":
                     entry["result"] = tools.sql(decision["query"])
+                    if opportunity_pool.focus:
+                        opportunity_pool.observation(
+                            opportunity_pool.focus, entry["result"]["sql"],
+                            entry["result"]["rows"])
                 elif act == "inspect_trajectory":
                     entry["trajectory"] = tools.inspect_trajectory(decision["query"])
                 elif act == "define_feature":
@@ -590,6 +693,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 "claim": decision, "tests": [], "revisions": [],
                                 "literature": None, "critique": None}
                     concepts.append(selected)
+                    opportunity_pool.register(identifier, {
+                        **decision, "suggested_sql": decision["query"]},
+                        tools.history)
                     entry["formed_concept_id"] = identifier
                 elif act == "test":
                     if selected is None:
@@ -720,6 +826,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "previous_execution_error": history[-1].get("tool_error") if history else None,
                         "concept": _concept_summary(selected),
                         "claim": selected["claim"],
+                        "research_opportunity": opportunity_pool.records.get(selected["id"]),
+                        "design_priority": "Choose the supported counterfactual observation "
+                            "that makes the mechanism and rival predict DIFFERENT outcomes; "
+                            "not the largest observed association.",
                         "schema": tools.schema(), "created_features": tools.features,
                         "registered_variable_cards": tools.feature_cards(),
                         "binding_instruction": "Bind experiments to registered feature NAME, "
@@ -813,6 +923,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     numeric = {"sql": measured_experiment["sql"],
                                "columns": measured_experiment["columns"],
                                "rows": measured_experiment["rows"]}
+                    if opportunity_pool.focus != selected["id"]:
+                        opportunity_pool.choose(
+                            selected["id"], decision["reason"] or
+                            "Agent selected this opportunity for a statistical experiment")
                     selected["tests"].append({
                         "version": selected["version"],
                         "test_question": experiment_spec["question"],
@@ -821,6 +935,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     critique = critic.act({
                         "concept": _concept_summary(selected),
                         "hypothesis": selected["claim"],
+                        "research_opportunity": opportunity_pool.records.get(selected["id"]),
                         "experiment_specification": experiment_spec,
                         "observed_statistics": model_statistics(measured_experiment["result"]),
                         "negative_control": (model_statistics(
@@ -1062,7 +1177,19 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     break
             except Exception as exc:
                 entry["tool_error"] = str(exc)[:400]
+            if selected is not None and selected["id"] in opportunity_pool.records:
+                if "experiment" in entry and "critique" in entry:
+                    opportunity_pool.experiment(
+                        selected["id"], entry["experiment"],
+                        entry.get("critic_experiment"), entry["critique"])
+                if ("reflection" in entry or "revised_concept" in entry
+                        or selected["status"] == "rejected_development"):
+                    opportunity_pool.update_claim(
+                        selected["id"], selected["claim"],
+                        ("abandoned" if selected["status"] == "rejected_development"
+                         else selected["status"]))
             history.append(entry)
+            _save(dest / "research_opportunities.json", opportunity_pool.snapshot())
             _save(dest / "journal.json", history)
             _save(dest / "research_state.json", {
                 "concepts": concepts, "rounds_completed": len(history),
@@ -1072,6 +1199,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         final = {"status": status, "frozen_id": last or None,
                  "concepts": concepts, "registered_features": tools.features,
                  "development_queries": tools.history,
+                 "research_opportunities": opportunity_pool.snapshot(),
                  "research_rounds": len(history), "holdout_consulted": False,
                  "independent_confirmation": False,
                  "causal_bias_established": False, "debias_verified": False}

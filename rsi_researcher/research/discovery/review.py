@@ -33,7 +33,11 @@ def assess(journal: list[dict], state: dict) -> dict:
                and "reflection" in event]
     abandoned = [event for event in journal
                  if event.get("reflection", {}).get("decision") == "abandon"]
+    explicit_opportunity_selections = [e for e in journal if "opportunity_selection" in e]
+    opportunity_bound_tests = [e for e in executed if e.get("feature_lineage", {}).get("used")]
     checks = {
+        "agent_explicitly_selected_opportunity": bool(explicit_opportunity_selections),
+        "opportunity_selection_has_numeric_experiment": bool(opportunity_bound_tests),
         "agent_computed_derived_feature": bool(derived),
         "experiment_references_registered_feature": bool(referenced),
         "workbench_executed_user_level_test": bool(executed),
@@ -52,7 +56,9 @@ def assess(journal: list[dict], state: dict) -> dict:
     return {
         "full_qwen_workflow_accepted": accepted,
         "checks": checks,
-        "counts": {"derived_features": len(derived),
+        "counts": {"explicit_opportunity_selections": len(explicit_opportunity_selections),
+                   "opportunity_bound_experiments": len(opportunity_bound_tests),
+                   "derived_features": len(derived),
                    "successful_workbench_experiments": len(executed),
                    "feature_bound_workbench_experiments": len(referenced),
                    "critic_workbench_tests": len(critic_workbench),
