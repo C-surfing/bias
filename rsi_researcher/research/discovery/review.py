@@ -99,6 +99,9 @@ def assess(journal: list[dict], state: dict) -> dict:
             for c in state.get("concepts", [])],
         "scientific_quality": {
             "observed_associations_are_not_causal_bias": True,
+            "bias_reference_discrepancy_verified": False,
+            "distortion_mechanism_identified": False,
+            "independently_confirmed_recommender_bias": False,
             "independent_mechanism_confirmation": "not_evaluated",
             "hidden_condition_consequence_agreement": "not_evaluated",
             "novelty_against_literature": "unverified",

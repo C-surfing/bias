@@ -82,13 +82,21 @@ OPPORTUNITY_CHOICE_SCHEMA = {
             "increase", "decrease", "no_change"]},
         "rival_direction": {"type": "string", "enum": [
             "increase", "decrease", "no_change"]},
+        "reference_kind": {"type": "string", "enum": [
+            "none", "randomized_exposure", "dense_relevance", "controlled_model"]},
+        "target_reference": TEXT,
+        "proposed_distortion": TEXT,
+        "mechanism_entry_point": TEXT,
+        "corrective_intervention": TEXT,
     },
     "required": ["selected_concept_id", "reason", "discriminating_prediction",
                  "prediction_if_mechanism", "prediction_if_rival",
                  "why_not_other", "next_action", "next_sql", "experimental_cost",
                  "contrast_source", "contrast_group", "contrast_outcome",
                  "contrast_filter", "control_value", "treatment_value",
-                 "analysis", "mechanism_direction", "rival_direction"],
+                 "analysis", "mechanism_direction", "rival_direction",
+                 "reference_kind", "target_reference", "proposed_distortion",
+                 "mechanism_entry_point", "corrective_intervention"],
     "additionalProperties": False,
 }
 
@@ -503,6 +511,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     scientist.instruction = (
         "You are an autonomous recommender-systems research scientist, not a "
         "candidate classifier. Investigate user and recommendation SEQUENCES. "
+        "Our goal is a CORRECTABLE SYSTEMATIC DISTORTION relative to a "
+        "credible target reference, not just ordinary behavior correlation. "
+        "A behavioral pattern is not automatically a recommender Bias. "
         "Choose the next ACTION yourself. Use SQL, inspect an actual trajectory, "
         "define a NEW derived feature, form multiple competing concepts, request "
         "an EXPERIMENT action so a Designer can specify test/control, outcome, "        " user-level inference, placebo and falsifier; revise based on results, "
@@ -561,6 +572,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "prediction, new measurement and executable test SQL. "
                     "Invent conceptual relationships, not old named Bias cards. "
                     "For each concept specify an observable prediction if the mechanism "
+                    "is true and explain what relevance, logging or feedback reference "
+                    "would reveal a SYSTEMATIC DISTORTION. Do not invent target values. "
                     "is true, a DIFFERENT observable prediction if its rival is true, "
                     "and what follow-up observation or experiment best separates them. "
                     "Use the actual measured rows; do not make up evidence, effect "
@@ -621,7 +634,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "are hypotheses, NOT observed results. Prefer at least 20 "
                         "independent paired users, and never confuse observations "
                         "with interventions. Do NOT rank by p-value or invent an "
-                        "additional candidate. An observe decision needs executable SQL.")
+                        "additional candidate. Specify which credible reference "
+                        "distribution or relevance signal could expose the distortion, "
+                        "the causal link in collection/learning/ranking, and a corrective "
+                        "intervention. If no reference is currently measurable, use "
+                        "reference_kind=none and do not call it a Bias. "
+                        "An observe decision needs executable SQL.")
                     available_records = list(tools.feature_records.values())
                     # The first discriminating experiment must use a variable
                     # previously created and measured by the scientist.
@@ -776,6 +794,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 "registered_variable_cards": tools.feature_cards(),
                 "concepts": [_concept_summary(c) for c in concepts[-4:]],
                 "research_opportunity_pool": opportunity_pool.for_agent(),
+                "active_concept_ids": [c["id"] for c in concepts
+                    if c["status"] != "rejected_development"],
+                "abandoned_concept_ids": [c["id"] for c in concepts
+                    if c["status"] == "rejected_development"],
                 "opportunity_selection_principle": (
                     "You own the next research choice: select_opportunity with a "
                     "concept_id and optionally a fresh SQL observation, or choose "

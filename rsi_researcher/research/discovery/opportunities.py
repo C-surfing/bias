@@ -33,6 +33,17 @@ class ResearchOpportunityPool:
             "priority_rationale": proposed.get("priority_rationale", ""),
             "tests": [],
             "selection_history": [],
+            # Scientific evidence stage is independent of experiment execution.
+            # Qwen can observe behavior without inventing a recommender Bias.
+            "evidence_status": "behavioral_pattern",
+            "bias_relevance": {
+                "reference_kind": "none",
+                "target_reference": "",
+                "proposed_distortion": "",
+                "mechanism_entry_point": "",
+                "corrective_intervention": "",
+                "reference_measured": False,
+            },
         }
 
     @staticmethod
@@ -105,7 +116,18 @@ class ResearchOpportunityPool:
                 self.focus = None
 
     def record_selection_design(self, identifier: str, choice: dict, support: dict):
-        self.records[identifier]["selection_contract"] = {
+        item = self.records[identifier]
+        # A model-written reference is a proposal, not empirical confirmation.
+        item["bias_relevance"] = {
+            "reference_kind": choice.get("reference_kind", "none"),
+            "target_reference": choice.get("target_reference", ""),
+            "proposed_distortion": choice.get("proposed_distortion", ""),
+            "mechanism_entry_point": choice.get("mechanism_entry_point", ""),
+            "corrective_intervention": choice.get("corrective_intervention", ""),
+            "reference_measured": False,
+        }
+        item["evidence_status"] = "behavioral_pattern"
+        item["selection_contract"] = {
             "source_table": choice["contrast_source"],
             "group_expression": choice["contrast_group"],
             "outcome_expression": choice["contrast_outcome"],

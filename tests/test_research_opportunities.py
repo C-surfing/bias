@@ -72,3 +72,28 @@ def test_rejected_opportunity_cannot_be_reselected_without_new_hypothesis():
     pool.update_claim("H001", hypothesis(), "abandoned")
     with pytest.raises(ValueError, match="abandoned"):
         pool.choose("H001", "Try same hypothesis again")
+
+
+def test_bias_relevance_is_a_proposal_not_a_verified_bias():
+    pool = ResearchOpportunityPool()
+    pool.register("H009", hypothesis(), [])
+    assert pool.records["H009"]["evidence_status"] == "behavioral_pattern"
+    choice = {
+        "reference_kind": "randomized_exposure",
+        "target_reference": "paired random-exposure response",
+        "proposed_distortion": "observed ranking exaggerates short-term signal",
+        "mechanism_entry_point": "feedback signal interpreted as persistent interest",
+        "corrective_intervention": "disable recent-click update of a controllable model",
+        "contrast_source": "events", "contrast_group": "registered_feature",
+        "contrast_outcome": "click", "contrast_filter": "",
+        "control_value": "0", "treatment_value": "1",
+        "analysis": "paired_user", "mechanism_direction": "increase",
+        "rival_direction": "no_change",
+    }
+    pool.record_selection_design("H009", choice, {
+        "valid_support": True, "n_paired_users": 42, "outcome_numeric": True})
+    opportunity = pool.records["H009"]
+    assert opportunity["bias_relevance"]["target_reference"] == (
+        "paired random-exposure response")
+    assert not opportunity["bias_relevance"]["reference_measured"]
+    assert opportunity["evidence_status"] == "behavioral_pattern"

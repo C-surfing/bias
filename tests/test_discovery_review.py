@@ -44,3 +44,10 @@ def test_review_cannot_credit_cosmetic_countertest_with_identical_numerics():
     result = assess([f, copied], {"concepts": []})
     assert not result["checks"]["critic_executed_distinct_workbench_test"]
     assert not result["full_qwen_workflow_accepted"]
+
+
+def test_development_association_never_self_confirms_recommender_bias():
+    audit = assess([], {"concepts": []})
+    assert audit["scientific_quality"]["bias_reference_discrepancy_verified"] is False
+    assert audit["scientific_quality"]["distortion_mechanism_identified"] is False
+    assert audit["scientific_quality"]["independently_confirmed_recommender_bias"] is False
