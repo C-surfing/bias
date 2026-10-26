@@ -1,5 +1,6 @@
 """The evidence pool belongs to the SAME active scientific research loop."""
 from rsi_researcher.research.discovery.opportunities import ResearchOpportunityPool
+import pytest
 
 
 def hypothesis():
@@ -40,3 +41,34 @@ def test_pool_preserves_model_mechanisms_and_numeric_countertests():
     assert pool.focus is None
     assert pool.records["H001"]["status"] == "abandoned"
     assert pool.for_agent()["opportunities"][0]["tests"][0]["counter_users"] == 30
+
+
+def test_competing_predictions_must_disagree_on_same_contrast():
+    pool = ResearchOpportunityPool()
+    choice = {
+        "contrast_source": "events",
+        "contrast_group": "measured_agent_feature",
+        "contrast_outcome": "click",
+        "contrast_filter": "is_random=1",
+        "control_value": "0", "treatment_value": "1",
+        "analysis": "paired_user", "mechanism_direction": "increase",
+        "rival_direction": "no_change",
+    }
+    pool.check_prediction(choice)
+    pool.register("H002", hypothesis(), [])
+    pool.record_selection_design("H002", choice, {
+        "valid_support": True, "outcome_type": "DOUBLE", "n_paired_users": 42})
+    saved = pool.records["H002"]["selection_contract"]
+    assert saved["group_expression"] == choice["contrast_group"]
+    assert saved["development_support"]["n_paired_users"] == 42
+    choice["rival_direction"] = "increase"
+    with pytest.raises(ValueError, match="same measured direction"):
+        pool.check_prediction(choice)
+
+
+def test_rejected_opportunity_cannot_be_reselected_without_new_hypothesis():
+    pool = ResearchOpportunityPool()
+    pool.register("H001", hypothesis(), [])
+    pool.update_claim("H001", hypothesis(), "abandoned")
+    with pytest.raises(ValueError, match="abandoned"):
+        pool.choose("H001", "Try same hypothesis again")

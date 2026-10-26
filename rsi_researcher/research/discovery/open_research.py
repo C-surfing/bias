@@ -15,6 +15,7 @@ from pathlib import Path
 from rsi_researcher.research.discovery.opportunities import ResearchOpportunityPool
 from rsi_researcher.research.scientific_agents import ResearchAgent
 from rsi_researcher.runtime.limits import RunLimits
+from rsi_researcher.runtime.client import BudgetExceeded, ModelFailure
 from rsi_researcher.runtime.models import create_model
 
 TEXT = {"type": "string"}
@@ -70,10 +71,24 @@ OPPORTUNITY_CHOICE_SCHEMA = {
         "next_action": {"type": "string", "enum": ["observe", "experiment"]},
         "next_sql": TEXT,
         "experimental_cost": TEXT,
+        "contrast_source": {"type": "string", "enum": ["events", "features"]},
+        "contrast_group": TEXT,
+        "contrast_outcome": TEXT,
+        "contrast_filter": TEXT,
+        "control_value": TEXT,
+        "treatment_value": TEXT,
+        "analysis": {"type": "string", "enum": ["paired_user", "cluster_weighted"]},
+        "mechanism_direction": {"type": "string", "enum": [
+            "increase", "decrease", "no_change"]},
+        "rival_direction": {"type": "string", "enum": [
+            "increase", "decrease", "no_change"]},
     },
     "required": ["selected_concept_id", "reason", "discriminating_prediction",
                  "prediction_if_mechanism", "prediction_if_rival",
-                 "why_not_other", "next_action", "next_sql", "experimental_cost"],
+                 "why_not_other", "next_action", "next_sql", "experimental_cost",
+                 "contrast_source", "contrast_group", "contrast_outcome",
+                 "contrast_filter", "control_value", "treatment_value",
+                 "analysis", "mechanism_direction", "rival_direction"],
     "additionalProperties": False,
 }
 
@@ -480,7 +495,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     workbench = ExperimentalWorkbench(tools)
     model_dir = dest / "model_calls"
     model_dir.mkdir()
-    limits = RunLimits(model_dir, max_requests=3 * max_rounds + 4,
+    limits = RunLimits(model_dir, max_requests=5 * max_rounds + 4,
                        max_tokens=250000, max_seconds=2400)
     model = create_model(model_dir, limits.max_requests, limits, model_config)
     scientist = ResearchAgent(model)
@@ -528,7 +543,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     last = ""
     try:
         for step in range(max_rounds):
-            if step >= 3 and not concepts and tools.history:
+            if (step >= 3 and tools.history and
+                    (not concepts or (
+                        max_rounds - step >= 3 and all(
+                            c["status"] == "rejected_development" for c in concepts)))):
+                # Return to candidate formation after *all* prior hypotheses
+                # were rejected, instead of repeatedly testing dead ends.
                 # A dedicated concept-formation turn prevents tool-format repairs
                 # from indefinitely displacing scientific hypothesis creation.
                 # It does not predefine variables, categories or candidate cards.
@@ -551,6 +571,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "observations": [compact_query(x) for x in tools.history[-4:]],
                     "tables": tools.schema(),
                     "existing_derived_features": tools.features,
+                    "rejected_prior_mechanisms": [
+                        _concept_summary(c) for c in concepts if
+                        c["status"] == "rejected_development"],
+                    "next_question_instruction": "Propose a mechanism that makes "
+                        "a NEW falsifiable prediction instead of renaming a "
+                        "previously abandoned hypothesis.",
                 }, "concept-formation-" + str(step), CONCEPT_PAIR_SCHEMA)
                 stage_ids = []
                 for hypothesis in formed["concepts"]:
@@ -586,42 +612,161 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "State distinct observable predictions for BOTH the proposed "
                         "mechanism and its rival; repeating the same prediction is "
                         "not an informative experiment. "
-                        "Do NOT rank by significance alone, invent an additional "
-                        "candidate, or use any hidden confirmation data. An observe "
-                        "decision needs an executable development SQL query.")
+                        "Choose one concrete comparison that separates H1/H2: "
+                        "real group and arm labels, one NUMERIC per-event outcome "
+                        "(not tags/next_tags or AVG), optional development cohort "
+                        "filter, and two DIFFERENT expected directions on that "
+                        "SAME contrast. Preserve the Agent-created registered "
+                        "variable name where appropriate. Your predicted directions "
+                        "are hypotheses, NOT observed results. Prefer at least 20 "
+                        "independent paired users, and never confuse observations "
+                        "with interventions. Do NOT rank by p-value or invent an "
+                        "additional candidate. An observe decision needs executable SQL.")
+                    available_records = list(tools.feature_records.values())
+                    # The first discriminating experiment must use a variable
+                    # previously created and measured by the scientist.
+                    allowed_tables = {record["source_table"] for record in available_records}
+                    allowed_groups = [record["name"] for record in available_records]
+                    numeric_prefixes = ("BOOLEAN", "INTEGER", "INT", "BIGINT",
+                                        "SMALLINT", "TINYINT", "HUGEINT",
+                                        "DOUBLE", "FLOAT", "REAL", "DECIMAL",
+                                        "UBIGINT", "USMALLINT", "UTINYINT")
+                    actual_numeric_columns = sorted({
+                        col["column"] for table in allowed_tables
+                        for col in tools.schema()[table]
+                        if col["type"].upper().startswith(numeric_prefixes)})
+                    constrained_schema = OPPORTUNITY_CHOICE_SCHEMA
+                    if allowed_groups and actual_numeric_columns:
+                        constrained_schema = {
+                            **OPPORTUNITY_CHOICE_SCHEMA, "properties": {
+                                **OPPORTUNITY_CHOICE_SCHEMA["properties"],
+                                "contrast_source": {"type": "string",
+                                                    "enum": sorted(allowed_tables)},
+                                "contrast_group": {"type": "string",
+                                                   "enum": allowed_groups},
+                                "contrast_outcome": {"type": "string",
+                                                     "enum": actual_numeric_columns},
+                            }}
                     choice = chooser.act({
+                        "available_numeric_outcomes_by_source": {
+                            table: [col for col in tools.schema()[table] if
+                                    col["type"].upper().startswith(numeric_prefixes)]
+                            for table in allowed_tables},
+                        "already_registered_groups": allowed_groups,
                         "opportunities": opportunity_pool.for_agent(),
                         "recent_observations": [compact_query(
                             q) for q in tools.history[-4:]],
                         "available_schema": tools.schema(),
                         "budget_left": max_rounds - step,
                     }, "opportunity-choice-" + str(step),
-                        OPPORTUNITY_CHOICE_SCHEMA)
-                    opportunity_pool.choose(
-                        choice["selected_concept_id"], choice["reason"],
-                        choice["next_sql"] if choice["next_action"] == "observe" else "")
-                    chosen_item = opportunity_pool.records[choice["selected_concept_id"]]
-                    chosen_item["prediction_if_mechanism"] = choice["prediction_if_mechanism"]
-                    chosen_item["prediction_if_rival"] = choice["prediction_if_rival"]
-                    chosen_item["discriminating_experiment"] = choice["discriminating_prediction"]
-                    chosen_item["experiment_cost"] = choice["experimental_cost"]
-                    chosen_entry = {
-                        "round": step,
-                        "action": {"action": "select_opportunity",
-                                   "reason": choice["reason"], "concept_id":
-                                   choice["selected_concept_id"], "query":
-                                   choice["next_sql"], "concept": ""},
-                        "opportunity_selection": choice}
-                    if choice["next_action"] == "observe" and choice["next_sql"].strip():
+                        constrained_schema)
+                    def check_choice(plan):
+                        opportunity_pool.check_prediction(plan)
+                        preview = {
+                            "question": plan["discriminating_prediction"],
+                            "source_table": plan["contrast_source"],
+                            "source_query": "",
+                            "population_filter": plan["contrast_filter"],
+                            "unit_expression": "uid",
+                            "group_expression": plan["contrast_group"],
+                            "control_value": plan["control_value"],
+                            "treatment_value": plan["treatment_value"],
+                            "outcome_expression": plan["contrast_outcome"],
+                            "strata_expression": "",
+                            "analysis": plan["analysis"],
+                            "placebo_source_query": "",
+                            "placebo_group_expression": "",
+                            "prediction": plan["prediction_if_mechanism"],
+                            "falsifier": plan["prediction_if_rival"],
+                            "meaningful_margin": 0.0}
+                        support = workbench.inspect_plan(preview)
+                        if not support["valid_support"]:
+                            raise ValueError("Chosen comparison lacks independent user support: "
+                                             + str(support))
+                        return support
+
+                    try:
+                        support = check_choice(choice)
+                    except Exception as error:
+                        # A condition can accidentally define the treatment
+                        # itself. Supply evidence about the unfiltered comparison
+                        # so Qwen can choose a scientifically meaningful repair.
+                        unfiltered_support = None
                         try:
-                            chosen_entry["result"] = tools.sql(choice["next_sql"])
-                            opportunity_pool.observation(
-                                choice["selected_concept_id"],
-                                chosen_entry["result"]["sql"],
-                                chosen_entry["result"]["rows"])
-                        except Exception as exc:
-                            chosen_entry["tool_error"] = str(exc)[:300]
-                    history.append(chosen_entry)
+                            unfiltered = {**choice, "contrast_filter": ""}
+                            unfiltered_support = check_choice(unfiltered)
+                        except Exception as unfiltered_error:
+                            unfiltered_support = {"reason": str(unfiltered_error)[:220]}
+                        try:
+                            repair_schema = constrained_schema
+                            if unfiltered_support.get("valid_support"):
+                                # The only support-preserving relaxation actually
+                                # measured here. No hand-coded bias-specific
+                                # candidate feature or experimental policy.
+                                repair_schema = {**constrained_schema, "properties": {
+                                    **constrained_schema["properties"],
+                                    "contrast_filter": {"type": "string", "enum": [""]}}}
+                            choice = chooser.act({
+                                "rejected_choice": choice,
+                                "numeric_or_support_error": str(error),
+                                "same_contrast_without_population_filter": unfiltered_support,
+                                "registered_variable_cards": tools.feature_cards(),
+                                "available_numeric_outcomes": actual_numeric_columns,
+                                "instruction": "This subgroup excludes a comparison "
+                                               "arm. Select an ACTUALLY supported "
+                                               "population; an unfiltered contrast "
+                                               "can be tested only if the mechanism "
+                                               "and rival still meaningfully differ. "
+                                               "Otherwise choose a different mechanism "
+                                               "in the next research turn.",
+                            }, "opportunity-choice-repair-" + str(step),
+                                repair_schema)
+                            support = check_choice(choice)
+                        except Exception as repair_error:
+                            support = {"valid_support": False,
+                                       "reason": str(repair_error)[:350]}
+                    if not support["valid_support"]:
+                        history.append({
+                            "round": step, "action": {
+                                "action": "opportunity_selection_failed",
+                                "reason": "No supported discriminating contrast",
+                                "concept_id": choice.get("selected_concept_id", ""),
+                                "query": "", "concept": ""},
+                            "rejected_opportunity_selection": choice,
+                            "selection_feasibility": support,
+                        })
+                        _save(dest / "research_opportunities.json",
+                              opportunity_pool.snapshot())
+                        _save(dest / "journal.json", history)
+                    else:
+                        opportunity_pool.choose(
+                            choice["selected_concept_id"], choice["reason"],
+                            choice["next_sql"] if choice["next_action"] == "observe" else "")
+                        opportunity_pool.record_selection_design(
+                            choice["selected_concept_id"], choice, support)
+                        chosen_item = opportunity_pool.records[choice["selected_concept_id"]]
+                        chosen_item["prediction_if_mechanism"] = choice["prediction_if_mechanism"]
+                        chosen_item["prediction_if_rival"] = choice["prediction_if_rival"]
+                        chosen_item["discriminating_experiment"] = choice["discriminating_prediction"]
+                        chosen_item["experiment_cost"] = choice["experimental_cost"]
+                        chosen_entry = {
+                            "round": step,
+                            "action": {"action": "select_opportunity",
+                                       "reason": choice["reason"], "concept_id":
+                                       choice["selected_concept_id"], "query":
+                                       choice["next_sql"], "concept": ""},
+                            "opportunity_selection": choice,
+                            "selection_feasibility": support}
+                        if choice["next_action"] == "observe" and choice["next_sql"].strip():
+                            try:
+                                chosen_entry["result"] = tools.sql(choice["next_sql"])
+                                opportunity_pool.observation(
+                                    choice["selected_concept_id"],
+                                    chosen_entry["result"]["sql"],
+                                    chosen_entry["result"]["rows"])
+                            except Exception as exc:
+                                chosen_entry["tool_error"] = str(exc)[:300]
+                        history.append(chosen_entry)
                 _save(dest / "research_opportunities.json", opportunity_pool.snapshot())
                 _save(dest / "journal.json", history)
             instruction = {
@@ -784,6 +929,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 elif act == "experiment":
                     if selected is None:
                         raise ValueError("Select an existing concept_id for a statistical experiment")
+                    if selected["status"] == "rejected_development":
+                        raise ValueError("Hypothesis already abandoned by Qwen; "
+                                         "explore another mechanism, not the same experiment")
                     designer = ResearchAgent(model)
                     designer.role = "research-designer"
                     designer.instruction = (
@@ -816,6 +964,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         design_schema = {**EXPERIMENT_SCHEMA, "properties": {
                             **EXPERIMENT_SCHEMA["properties"],
                             "source_query": {"type": "string", "enum": [""]},
+                            "strata_expression": {"type": "string", "enum": sorted(
+                                set(option for table, _ in feature_pairs
+                                    for option in workbench.observed_strata_columns(table)))},
                             "source_table": {"type": "string",
                                              "enum": sorted(set(table for table, _ in feature_pairs))},
                             "group_expression": {"type": "string",
@@ -827,6 +978,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "concept": _concept_summary(selected),
                         "claim": selected["claim"],
                         "research_opportunity": opportunity_pool.records.get(selected["id"]),
+                        "measured_selection_contract": opportunity_pool.records.get(
+                            selected["id"], {}).get("selection_contract"),
                         "design_priority": "Choose the supported counterfactual observation "
                             "that makes the mechanism and rival predict DIFFERENT outcomes; "
                             "not the largest observed association.",
@@ -878,10 +1031,45 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         else:
                             entry["feature_reuse_warning"] = (
                                 "Model did not reference any registered feature")
+                    contrast_keys = ("source_query", "population_filter",
+                                     "group_expression", "control_value",
+                                     "treatment_value", "outcome_expression")
+                    if any(all(previous["workbench"]["specification"][k] == experiment_spec[k]
+                               for k in contrast_keys)
+                           for previous in selected["tests"] if "workbench" in previous):
+                        raise ValueError("Repeated numerical estimand for this hypothesis. "
+                                         "Choose a different condition, outcome or mechanism")
+                    choice_contract = opportunity_pool.records.get(
+                        selected["id"], {}).get("selection_contract")
+                    if choice_contract:
+                        match_fields = ("source_table", "group_expression",
+                                        "outcome_expression", "control_value",
+                                        "treatment_value", "analysis")
+                        entry["selection_contract_audit"] = {
+                            "matches_original_contrast": all(
+                                experiment_spec[k] == choice_contract[k]
+                                for k in match_fields),
+                            "differences": {
+                                k: [choice_contract[k], experiment_spec[k]]
+                                for k in match_fields if
+                                experiment_spec[k] != choice_contract[k]},
+                        }
                     import duckdb
                     entry["experiment_specification"] = experiment_spec
                     required_feature = next(reversed(tools.feature_records), None)
+                    def validate_selected_contrast(specification):
+                        if choice_contract:
+                            keys = ("source_table", "group_expression", "outcome_expression",
+                                    "control_value", "treatment_value", "analysis")
+                            changed = [k for k in keys if
+                                       specification[k] != choice_contract[k]]
+                            if changed:
+                                raise ValueError("Experiment silently changed the selected "
+                                                 "rival-discriminating comparison: " +
+                                                 ", ".join(changed) +
+                                                 ". Use the prevalidated selection contract.")
                     try:
+                        validate_selected_contrast(experiment_spec)
                         measured_experiment = workbench.run(
                             experiment_spec, required_feature=required_feature)
                     except (ValueError, duckdb.Error) as error:
@@ -891,6 +1079,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "created_features": tools.features,
                             "registered_variable_cards": tools.feature_cards(),
                             "must_bind_feature": required_feature or "",
+                            "selected_contrast_must_match": choice_contract,
                             "schema": tools.schema(),
                             "observed_rows": data_examples,
                             "instruction": "Repair the actual experiment to use TWO SUPPORTED "
@@ -902,8 +1091,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         entry["experiment_repair"] = {"old": experiment_spec,
                                                        "error": str(error)}
                         experiment_spec = corrected
+                        validate_selected_contrast(experiment_spec)
                         measured_experiment = workbench.run(
                             experiment_spec, required_feature=required_feature)
+                    # Auditing must use the *executed* repaired spec, not a
+                    # superseded first draft that may have been rejected.
+                    if choice_contract:
+                        material = ("source_table", "group_expression",
+                                    "outcome_expression", "control_value",
+                                    "treatment_value", "analysis")
+                        entry["selection_contract_audit"] = {
+                            "matches_original_contrast": all(
+                                experiment_spec[key] == choice_contract[key]
+                                for key in material),
+                            "differences": {
+                                key: [choice_contract[key], experiment_spec[key]]
+                                for key in material if
+                                experiment_spec[key] != choice_contract[key]},
+                        }
                     entry["experiment"] = measured_experiment
                     entry["feature_binding"] = {
                         "registered_feature": required_feature,
@@ -1206,6 +1411,30 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         _save(dest / "journal.json", history)
         _save(dest / "research_state.json", {
             "concepts": concepts, "rounds_completed": len(history),
+            "holdout_consulted": False})
+        _save(dest / "frozen_candidate.json", final)
+        return final
+    except (BudgetExceeded, ModelFailure) as error:
+        # A bounded research run must preserve its actual evidence even when
+        # a subsequent Qwen call cannot be completed.
+        reason = "budget_exhausted" if isinstance(error, BudgetExceeded) else "model_failed"
+        history.append({"round": len(history),
+                        "action": {"action": "runtime_stopped",
+                                   "reason": reason, "concept_id": "",
+                                   "query": "", "concept": ""},
+                        "runtime_error": str(error)[:280]})
+        final = {
+            "status": reason, "frozen_id": None, "concepts": concepts,
+            "registered_features": tools.features,
+            "development_queries": tools.history,
+            "research_opportunities": opportunity_pool.snapshot(),
+            "research_rounds": len(history), "holdout_consulted": False,
+            "independent_confirmation": False,
+            "causal_bias_established": False, "debias_verified": False}
+        _save(dest / "journal.json", history)
+        _save(dest / "research_opportunities.json", opportunity_pool.snapshot())
+        _save(dest / "research_state.json", {"concepts": concepts,
+            "rounds_completed": len(history), "registered_features": tools.features,
             "holdout_consulted": False})
         _save(dest / "frozen_candidate.json", final)
         return final

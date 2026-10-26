@@ -35,9 +35,28 @@ class ResearchOpportunityPool:
             "selection_history": [],
         }
 
+    @staticmethod
+    def check_prediction(choice: dict) -> None:
+        """A single measurable contrast must discriminate the two hypotheses."""
+        directions = {"increase", "decrease", "no_change"}
+        first = choice["mechanism_direction"]
+        rival = choice["rival_direction"]
+        if first not in directions or rival not in directions or first == rival:
+            raise ValueError("H1 and H2 predict the same measured direction; "
+                             "choose a different subgroup, outcome, or contrast")
+        if not all(str(choice[k]).strip() for k in (
+            "contrast_group", "contrast_outcome", "contrast_source",
+            "control_value", "treatment_value")):
+            raise ValueError("Comparison needs actual group, outcome, source, and arms")
+        if choice["control_value"] == choice["treatment_value"]:
+            raise ValueError("Control and treatment labels must differ")
+
     def choose(self, identifier: str, rationale: str, next_query: str = ""):
         if identifier not in self.records:
             raise ValueError("Select an existing research opportunity")
+        if self.records[identifier]["status"] in ("abandoned", "rejected_development"):
+            raise ValueError("This hypothesis has been abandoned after counterevidence; "
+                             "select another mechanism or form a new concept")
         self.focus = identifier
         opportunity = self.records[identifier]
         opportunity["status"] = "selected"
@@ -84,6 +103,20 @@ class ResearchOpportunityPool:
         if status in ("abandoned", "rejected_development"):
             if self.focus == identifier:
                 self.focus = None
+
+    def record_selection_design(self, identifier: str, choice: dict, support: dict):
+        self.records[identifier]["selection_contract"] = {
+            "source_table": choice["contrast_source"],
+            "group_expression": choice["contrast_group"],
+            "outcome_expression": choice["contrast_outcome"],
+            "population_filter": choice["contrast_filter"],
+            "control_value": choice["control_value"],
+            "treatment_value": choice["treatment_value"],
+            "analysis": choice["analysis"],
+            "prediction_if_mechanism": choice["mechanism_direction"],
+            "prediction_if_rival": choice["rival_direction"],
+            "development_support": support,
+        }
 
     def snapshot(self) -> dict:
         return {"focus": self.focus, "opportunities": list(self.records.values())}

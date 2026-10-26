@@ -21,12 +21,23 @@ def assess(journal: list[dict], state: dict) -> dict:
     # not a genuinely different rival-discriminating numeric experiment.
     material_keys = ("source_query", "population_filter", "group_expression",
                      "control_value", "treatment_value", "outcome_expression")
+    def materially_different_numeric(a: dict, b: dict) -> bool:
+        # Changing an unused filter, query wording, or adding a cosmetic
+        # stratum is not independent numeric falsification evidence.
+        quantities = ("estimate", "mean_control", "mean_treatment",
+                      "n_control", "n_treatment", "n_paired_units")
+        if any(a.get(k) != b.get(k) for k in quantities):
+            return True
+        return a.get("ci95_bootstrap") != b.get("ci95_bootstrap")
+
     critic_workbench = [
         event for event in journal if "critic_experiment" in event
         and "experiment" in event
         and any(event["experiment"]["specification"].get(k)
                 != event["critic_experiment"]["specification"].get(k)
-                for k in material_keys)]
+                for k in material_keys)
+        and materially_different_numeric(event["experiment"]["result"],
+                                         event["critic_experiment"]["result"])]
     critic_sql = [event for event in journal
                   if "critic_sql_countertest" in event]
     revised = [event for event in journal if "revised_concept" in event
@@ -35,8 +46,17 @@ def assess(journal: list[dict], state: dict) -> dict:
                  if event.get("reflection", {}).get("decision") == "abandon"]
     explicit_opportunity_selections = [e for e in journal if "opportunity_selection" in e]
     opportunity_bound_tests = [e for e in executed if e.get("feature_lineage", {}).get("used")]
+    checked_selections = [e for e in explicit_opportunity_selections
+                          if e.get("selection_feasibility", {}).get("valid_support")
+                          and e["opportunity_selection"].get("mechanism_direction") !=
+                              e["opportunity_selection"].get("rival_direction")
+                          and e.get("selection_feasibility", {}).get("outcome_numeric")]
+    aligned = [e for e in executed if e.get("selection_contract_audit", {}).get(
+        "matches_original_contrast")]
     checks = {
         "agent_explicitly_selected_opportunity": bool(explicit_opportunity_selections),
+        "rival_predictions_disagree_and_support_is_measured": bool(checked_selections),
+        "selected_contrast_reaches_workbench": bool(aligned),
         "opportunity_selection_has_numeric_experiment": bool(opportunity_bound_tests),
         "agent_computed_derived_feature": bool(derived),
         "experiment_references_registered_feature": bool(referenced),
@@ -53,6 +73,11 @@ def assess(journal: list[dict], state: dict) -> dict:
         "critic_executed_distinct_workbench_test")) and (
         checks["agent_substantively_revised_hypothesis"]
         or checks["agent_abandoned_hypothesis_after_countertest"])
+    # Backward-compatible audit for runs before opportunity selection existed.
+    if explicit_opportunity_selections:
+        accepted = (accepted and
+                    checks["rival_predictions_disagree_and_support_is_measured"] and
+                    checks["selected_contrast_reaches_workbench"])
     return {
         "full_qwen_workflow_accepted": accepted,
         "checks": checks,

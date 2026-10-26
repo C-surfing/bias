@@ -343,3 +343,75 @@ def test_registered_feature_name_is_required_to_bind_experiment(tmp_path):
         assert card["sample_distribution"][0]["n"] > 0
     finally:
         tools.close()
+
+
+def test_preflight_rejects_categorical_outcome_before_expensive_inference(tmp_path):
+    db = development_db(tmp_path)
+    import duckdb
+    con = duckdb.connect(str(db))
+    con.execute("ALTER TABLE events ADD COLUMN next_tags VARCHAR DEFAULT '39,43'")
+    con.close()
+    tools = DevelopmentTools(str(db))
+    try:
+        candidate = spec()
+        candidate["outcome_expression"] = "next_tags"
+        with pytest.raises(ValueError, match="not a numeric per-event outcome"):
+            ExperimentalWorkbench(tools).run(candidate)
+        candidate["outcome_expression"] = "click"
+        checked = ExperimentalWorkbench(tools).inspect_plan(candidate)
+        assert checked["outcome_numeric"] and checked["valid_support"]
+        assert checked["n_paired_users"] == 22
+        assert checked["n_control_users"] == 22
+    finally:
+        tools.close()
+
+
+def test_unpaired_cluster_weighted_design_is_valid_with_independent_users(tmp_path):
+    db = development_db(tmp_path)
+    tools = DevelopmentTools(str(db))
+    try:
+        candidate = spec()
+        candidate.update(group_expression="uid%2", control_value="0",
+                         treatment_value="1", analysis="cluster_weighted",
+                         placebo_group_expression="")
+        plan = ExperimentalWorkbench(tools).inspect_plan(candidate)
+        assert plan["n_paired_users"] == 0
+        assert min(plan["n_control_users"], plan["n_treatment_users"]) >= 5
+        assert plan["valid_support"]
+        measured = ExperimentalWorkbench(tools).run(candidate)["result"]
+        assert measured["n_paired_units"] == 0
+        assert measured["bootstrap_replicates"] >= 100
+    finally:
+        tools.close()
+
+
+def test_strata_options_derive_from_actual_observed_cardinalities(tmp_path):
+    db = development_db(tmp_path)
+    tools = DevelopmentTools(str(db))
+    try:
+        candidates = ExperimentalWorkbench(tools).observed_strata_columns("events")
+        assert "" in candidates
+        assert "cohort" in candidates and "exposure" in candidates
+        # High-cardinality event timestamps and outcome-defined strata are
+        # not accepted as the first study's conditioning variables.
+        assert "moment_ms" not in candidates
+        assert "click" not in candidates
+    finally:
+        tools.close()
+
+
+def test_selection_with_zero_observed_control_users_is_rejected(tmp_path):
+    db = development_db(tmp_path)
+    tools = DevelopmentTools(str(db))
+    try:
+        candidate = spec()
+        candidate.update(group_expression="exposure",
+                         population_filter="exposure=1",
+                         placebo_group_expression="")
+        checked = ExperimentalWorkbench(tools).inspect_plan(candidate)
+        assert checked["n_control_users"] == 0
+        assert not checked["valid_support"]
+        with pytest.raises(ValueError, match="independent user support"):
+            ExperimentalWorkbench(tools).run(candidate)
+    finally:
+        tools.close()

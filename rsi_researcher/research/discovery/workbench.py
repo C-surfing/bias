@@ -94,8 +94,13 @@ def _summary(rows: list[dict], spec: dict, *, seed: int) -> dict:
         unit: values for unit, values in user_data.items()
         if all(values[group][0] > 0 for group in (control, treatment))
     }
-    if len(paired) < 5:
+    if spec["analysis"] == "paired_user" and len(paired) < 5:
         raise ValueError("Too few independent users with both comparison groups")
+    if spec["analysis"] == "cluster_weighted" and any(
+        sum(values[arm][0] > 0 for values in user_data.values()) < 5
+        for arm in (control, treatment)
+    ):
+        raise ValueError("Cluster-weighted inference needs at least five independent users per group")
     def contrast(values: dict) -> float:
         return (values[treatment][1] / values[treatment][0]
                 - values[control][1] / values[control][0])
@@ -200,6 +205,98 @@ class ExperimentalWorkbench:
                 break
         return result[:6]
 
+    def observed_strata_columns(self, table: str) -> list[str]:
+        """Discover cheap, low-cardinality pre-outcome strata from actual rows.
+
+        No bias categories or experimental questions are hard-coded here.
+        """
+        columns = [
+            c["column"] for c in self.tools.schema()[table]
+            if re.fullmatch(r"[a-z][a-z0-9_]*", c["column"])
+            and c["column"] not in (
+                "uid", "vid", "click", "hate", "long_view", "next_click")]
+        columns.extend(self.tools.features.get(table, {}))
+        if not columns:
+            return [""]
+        source = self.tools.active_table(table)
+        query = ("SELECT " + ", ".join(
+            "approx_count_distinct(" + field + ")" for field in columns) +
+            " FROM (SELECT * FROM " + source + " LIMIT 20000)")
+        counts = self.tools.connection.execute(query).fetchone()
+        return [""] + [
+            field for field, count in zip(columns, counts)
+            if 2 <= count <= 32]
+
+    def inspect_plan(self, spec: dict) -> dict:
+        """Check the *proposed* estimand on development rows before inference.
+
+        All counts and types come from DuckDB, not from a model prediction.
+        Group sample support refers to distinct users (not repeated events).
+        """
+        from jsonschema import Draft202012Validator
+        Draft202012Validator(EXPERIMENT_SCHEMA).validate(spec)
+        if spec["control_value"] == spec["treatment_value"]:
+            raise ValueError("Control and treatment values must differ")
+        if spec["source_query"].strip():
+            if re.search(r"\bGROUP\s+BY\b|\bAVG\s*\(|\bCOUNT\s*\(", spec["source_query"], re.I):
+                raise ValueError("source_query must preserve per-event rows and independent unit IDs")
+            source = self.tools.rewrite_sources(_source(spec["source_query"], spec["source_table"]))
+        else:
+            source = self.tools.active_table(spec["source_table"])
+        outcome = _expr(spec["outcome_expression"])
+        if re.search(r"\b(AVG|COUNT|SUM|MIN|MAX)\s*\(|\bAS\b|,", outcome, re.I):
+            raise ValueError("Use one numeric per-event outcome; Workbench handles aggregation")
+        where = re.sub(r"^WHERE\s+", "", spec["population_filter"].strip(), flags=re.I)
+        where = _expr(where) if where else "TRUE"
+        group = _expr(spec["group_expression"])
+        uid = _expr(spec["unit_expression"])
+        dtype = self.tools.connection.execute(
+            "SELECT typeof((" + outcome + ")) FROM " + source +
+            " AS observations LIMIT 1").fetchone()
+        dtype = dtype[0].upper() if dtype else "UNKNOWN"
+        numeric = ("INTEGER", "INT", "BIGINT", "SMALLINT", "TINYINT",
+                   "HUGEINT", "UBIGINT", "USMALLINT", "UTINYINT",
+                   "DOUBLE", "FLOAT", "REAL", "DECIMAL", "BOOLEAN")
+        if not dtype.startswith(numeric):
+            available = []
+            for field in self.tools.schema()[spec["source_table"]]:
+                if field.get("type", "").upper().startswith(numeric):
+                    available.append(field["column"])
+            raise ValueError("Outcome '" + outcome + "' has type " + dtype +
+                             ", not a numeric per-event outcome. Actual numeric columns: " +
+                             ", ".join(available[:18]))
+        labels = (spec["control_value"].strip("'"), spec["treatment_value"].strip("'"))
+        if any(len(label) > 100 or "'" in label for label in labels):
+            raise ValueError("Unsupported comparison labels")
+        sql = (
+            "WITH observed AS (SELECT CAST((" + uid + ") AS VARCHAR) u,"
+            " CAST((" + group + ") AS VARCHAR) arm,"
+            " CAST((" + outcome + ") AS DOUBLE) y"
+            " FROM " + source + " AS observations WHERE (" + where + "))"
+            " SELECT u,"
+            " SUM(CASE WHEN arm='" + labels[0] + "' THEN 1 ELSE 0 END) n_control,"
+            " SUM(CASE WHEN arm='" + labels[1] + "' THEN 1 ELSE 0 END) n_treatment"
+            " FROM observed WHERE y IS NOT NULL AND isfinite(y)"
+            " AND arm IN ('" + labels[0] + "','" + labels[1] + "')"
+            " GROUP BY u"
+        )
+        groups = self.tools.connection.execute(sql).fetchall()
+        control = sum(c > 0 for _, c, t in groups)
+        treatment = sum(t > 0 for _, c, t in groups)
+        paired = sum(c > 0 and t > 0 for _, c, t in groups)
+        valid = paired >= 5 if spec["analysis"] == "paired_user" else min(control, treatment) >= 5
+        return {
+            "outcome_type": dtype, "outcome_numeric": True,
+            "n_control_users": control, "n_treatment_users": treatment,
+            "n_paired_users": paired,
+            "n_control_events": sum(c for _, c, _ in groups),
+            "n_treatment_events": sum(t for _, _, t in groups),
+            "analysis": spec["analysis"],
+            "valid_support": valid,
+            "low_information_warning": (paired < 20 if spec["analysis"] == "paired_user"
+                                        else min(control, treatment) < 20),
+        }
+
     def _measure(self, spec: dict, *, placebo: bool = False) -> dict:
         source_query = (spec["placebo_source_query"] if placebo and
                         spec["placebo_source_query"].strip() else spec["source_query"])
@@ -276,6 +373,9 @@ class ExperimentalWorkbench:
             if len(label) >= 2 and label.startswith("'") and label.endswith("'"):
                 label = label[1:-1]
             spec[key] = label
+        feasibility = self.inspect_plan(spec)
+        if not feasibility["valid_support"]:
+            raise ValueError("Insufficient independent user support: " + str(feasibility))
         source = self._measure(spec)
         effect = _summary(source["sufficient_statistics"], spec, seed=20261024)
         placebo = None
@@ -297,6 +397,7 @@ class ExperimentalWorkbench:
         # Return compact evidence to the LLM, keep full reproducibility in journal.
         return {
             "specification": spec,
+            "feasibility": feasibility,
             "result": effect, "negative_control": placebo,
             "omitted_invalid_placebo": omitted_placebo,
             "executed_sql": source["sql"],
