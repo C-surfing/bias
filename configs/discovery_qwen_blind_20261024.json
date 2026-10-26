@@ -1,0 +1,27 @@
+{
+  "llm": {
+    "provider": "vllm",
+    "base_url": "http://127.0.0.1:18523/v1",
+    "model": "qwen3-8b",
+    "enable_thinking": false,
+    "temperature": 0,
+    "top_p": 1,
+    "top_k": -1,
+    "max_tokens": 1024,
+    "seed": 20261029,
+    "timeout_seconds": 120
+  },
+  "research": {
+    "protocol": "qwen-discovery-blind-v1",
+    "arms": [
+      "fixed",
+      "one_shot",
+      "concept_test",
+      "active"
+    ],
+    "rounds": 2,
+    "development_n": 384,
+    "confirmation_n": 768,
+    "note": "Mechanism type and truth remain evaluator-private. No new tree."
+  }
+}

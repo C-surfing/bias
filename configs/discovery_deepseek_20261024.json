@@ -1,0 +1,4 @@
+{
+  "llm": {"provider": "deepseek"},
+  "research": {"max_rounds": 3, "registered_interventions_only": true}
+}
