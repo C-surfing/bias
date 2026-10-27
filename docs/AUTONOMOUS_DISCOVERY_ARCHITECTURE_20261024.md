@@ -145,3 +145,10 @@ gate passes, the model fails, or six consecutive actions generate no new
 observations, numerical experiments or substantive revisions. The latter is a
 no-information safety guard, not a cap on productive research; the state
 scientific_stalled does NOT mean no novel Bias exists. Operators can interrupt.
+
+
+## BADF-inspired evidence-first discovery (2026-10-27)
+
+The former seven hardcoded O001-O007 questions were retired. The open mode writes data_profile.json, exploration_evidence.json and phenomena.json from generic operations over actually observed columns, not preselected is_random or click prompts. Candidate group support comes from observed field levels. Qwen P-prefixed phenomena must cite E-prefixed profile evidence or Q-prefixed executed SQL evidence. H-prefixed mechanisms cite real P IDs and retain independent Workbench/Critic validation. Scientist cannot bypass phenomenon extraction with the old free-form concept action. The same scientific acceptance and holdout contract remains unchanged.
+
+Method inspiration: Pan et al., BADF, AAAI 2026, https://github.com/JP-25/Discover-Open-Ended-Generation. BADF identity-concept significance is NOT causal evidence for recommender bias.

@@ -109,7 +109,8 @@ def test_qwen_style_intent_executes_through_scientist_designer_critic(tmp_path, 
     monkeypatch.setattr(research,"create_model",lambda *args: fake)
     output=tmp_path/"run"
     result=research.run_open_discovery("unused",str(output),
-        {"llm":{"provider":"vllm"}},max_rounds=5,development_path=db)
+        {"llm":{"provider":"vllm"},
+         "discovery":{"open_phenomena":False}},max_rounds=5,development_path=db)
     journal=json.loads((output/"journal.json").read_text())
     experiments=[x for x in journal if "experiment" in x]
     assert len(experiments)==1

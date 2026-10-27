@@ -4,13 +4,13 @@ import pytest
 from jsonschema import ValidationError
 
 from rsi_researcher.research.discovery.open_research import DevelopmentTools
-from rsi_researcher.research.discovery.observations import build_observation_cards
+from rsi_researcher.research.discovery.observations import build_exploration_evidence
 from rsi_researcher.research.discovery.experiment_contract import (
     compile_experiment_intent, experiment_intent_schema)
 from rsi_researcher.research.discovery.workbench import ExperimentalWorkbench
 
 
-def test_observation_cards_and_compact_intent_are_executable(tmp_path):
+def test_open_exploration_evidence_and_compact_intent_are_executable(tmp_path):
     db = str(tmp_path / "isolated_development.duckdb")
     conn = duckdb.connect(db)
     conn.execute("CREATE TABLE events(uid INTEGER, vid INTEGER, event_day INTEGER, "
@@ -27,10 +27,15 @@ def test_observation_cards_and_compact_intent_are_executable(tmp_path):
 
     tools = DevelopmentTools(db)
     try:
-        cards = build_observation_cards(tools)
-        assert {c["observation_id"] for c in cards} >= {"O001", "O003", "O004", "O005"}
-        assert all(c["measurement_sql"] and c["evidence_level"]
-                   == "descriptive_development_only" for c in cards)
+        cards = build_exploration_evidence(tools)
+        assert len(cards) > 7
+        assert all(c["observation_id"].startswith("E") for c in cards)
+        assert all(c["measurement_sql"] and
+                   c["evidence_level"] == "sampled_descriptive_development_only"
+                   for c in cards)
+        assert {c["column"] for c in cards} >= {"uid", "vid", "tags", "click"}
+        assert any(c["operation"] == "generic_conditional_mean" for c in cards)
+
         feature = tools.define_feature(
             "item_tag_binary", "CASE WHEN tags='tagA' THEN 1 ELSE 0 END", "events")
         assert len(feature["evidence"]["rows"]) == 2

@@ -19,6 +19,7 @@ class ResearchOpportunityPool:
             "id": identifier,
             "status": "proposed",
             "phenomenon": proposed["concept"],
+            "phenomenon_ids": proposed.get("phenomenon_ids", []),
             "mechanism": proposed["mechanism"],
             "rival": proposed["rival"],
             "falsifier": proposed["falsifier"],

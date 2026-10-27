@@ -1,101 +1,159 @@
-"""Development-only observations: executable evidence, never named bias candidates.
-
-Cards document what was measured and preserve their SQL; observations do not
-establish item merit, policy causality, or a normative exposure target.
-"""
-from __future__ import annotations
+"""Schema-derived, non-prescriptive evidence for autonomous discovery."""
+from collections import Counter
+import math
 
 
-def build_observation_cards(tools) -> list[dict]:
-    """Bounded, diverse, reproducible evidence for Qwen's first research decisions."""
-    schema = tools.schema()
-    events = {x["column"] for x in schema["events"]}
-    features = {x["column"] for x in schema["features"]}
+def build_data_profile(tools, sample_size=4000):
+    profile = {"sampling": "DuckDB reservoir seed=17", "tables": {}}
+    for table in ("events", "features"):
+        query = f"SELECT * FROM {table} USING SAMPLE {sample_size} ROWS (reservoir, 17)"
+        cursor = tools.connection.execute(query)
+        names = [r[0] for r in cursor.description]
+        rows = cursor.fetchall()
+        columns = []
+        for i, name in enumerate(names):
+            values = [r[i] for r in rows if r[i] is not None]
+            frequency = Counter(str(v) for v in values)
+            top = sorted(frequency.items(), key=lambda p: (-p[1], p[0]))[:8]
+            columns.append({
+                "name": name, "type": tools.schema()[table][i]["type"],
+                "sample_distinct": len(frequency),
+                "sample_non_null": len(values),
+                "observed_levels": [{"value": v, "count": n} for v,n in top],
+                "sample_null": len(rows) - len(values)})
+        profile["tables"][table] = {
+            "sample_rows": len(rows), "columns": columns, "source_sql": query}
+    return profile
+
+
+def build_exploration_evidence(tools, profile=None):
+    """Compatibility name: cards are generated per observed FIELD, never topic."""
+    profile = profile if profile is not None else build_data_profile(tools)
     cards = []
-
-    def observe(identifier, question, table, required, sql, limit, caveat):
-        columns = events if table == "events" else features
-        if not set(required).issubset(columns):
-            return
-        result = tools.connection.execute(sql)
-        names = [x[0] for x in result.description]
-        rows = [dict(zip(names, row)) for row in result.fetchmany(limit)]
-        cards.append({
-            "observation_id": identifier,
-            "question": question,
-            "source_table": table,
-            "measurement_sql": sql.strip(),
-            "measured_rows": rows,
-            "evidence_level": "descriptive_development_only",
-            "caveat": caveat,
-        })
-
-    # Standard and randomly inserted exposures coexist only on overlapping
-    # dates. A difference between them is NOT an algorithmic-bias estimand.
-    common = ("event_day IN (SELECT event_day FROM events GROUP BY event_day "
-              "HAVING COUNT(*) FILTER (WHERE is_random=0)>0 "
-              "AND COUNT(*) FILTER (WHERE is_random=1)>0)")
-    observe(
-        "O001", "What differs between exposure modes on shared dates?",
-        "events", ("event_day", "is_random", "uid", "vid", "click"),
-        "SELECT is_random,COUNT(*) n_events,COUNT(DISTINCT uid) n_users,"
-        "COUNT(DISTINCT vid) n_items,ROUND(AVG(click),5) click_rate "
-        "FROM events WHERE " + common + " GROUP BY 1 ORDER BY 1",
-        2, "Modes draw from different item policies and opportunity sets; no causal or merit claim.")
-    observe(
-        "O002", "Which observed item groups have support in both modes?",
-        "events", ("event_day", "is_random", "tags", "click"),
-        "SELECT tags,COUNT(*) FILTER (WHERE is_random=0) n_standard,"
-        "COUNT(*) FILTER (WHERE is_random=1) n_random,"
-        "ROUND(AVG(click) FILTER (WHERE is_random=0),5) response_standard,"
-        "ROUND(AVG(click) FILTER (WHERE is_random=1),5) response_random "
-        "FROM events WHERE " + common + " AND tags IS NOT NULL "
-        "GROUP BY tags HAVING COUNT(*) FILTER (WHERE is_random=1)>=100 "
-        "AND COUNT(*) FILTER (WHERE is_random=0)>=100 "
-        "ORDER BY n_random DESC LIMIT 12",
-        12, "Tag values are opaque IDs and may encode multiple tags; response is not merit.")
-    observe(
-        "O003", "Does previous feedback interact with exposure mode?",
-        "events", ("is_random", "previous_click", "uid", "click"),
-        "SELECT is_random,previous_click,COUNT(*) n_events,"
-        "COUNT(DISTINCT uid) n_users,ROUND(AVG(click),5) response "
-        "FROM events WHERE " + common + " AND previous_click IN (0,1) "
-        "GROUP BY 1,2 ORDER BY 1,2",
-        4, "Previous-click differences can reflect user interest or sequential logging.")
-    observe(
-        "O004", "Are the exposure populations and responses stable over time?",
-        "events", ("event_day", "is_random", "uid", "click"),
-        "SELECT event_day,is_random,COUNT(*) n_events,"
-        "COUNT(DISTINCT uid) n_users,ROUND(AVG(click),5) response "
-        "FROM events WHERE " + common +
-        " GROUP BY 1,2 ORDER BY event_day DESC,is_random LIMIT 24",
-        24, "Date shifts and selection can confound all cross-mode contrasts.")
-    observe(
-        "O005", "How do pre-event context and observed response vary by users?",
-        "features", ("activity", "after_long_gap", "uid", "click"),
-        "SELECT activity,after_long_gap,COUNT(*) n_events,"
-        "COUNT(DISTINCT uid) n_users,ROUND(AVG(click),5) response "
-        "FROM features WHERE after_long_gap IN (0,1) "
-        "GROUP BY 1,2 ORDER BY n_events DESC LIMIT 12",
-        12, "This only describes response variation; it is not item exposure distortion.")
-    observe(
-        "O006", "Which authors of recommended items have support in both modes?",
-        "events", ("event_day", "is_random", "author", "click"),
-        "SELECT author,COUNT(*) FILTER (WHERE is_random=0) n_standard,"
-        "COUNT(*) FILTER (WHERE is_random=1) n_random,"
-        "ROUND(AVG(click) FILTER (WHERE is_random=0),5) response_standard,"
-        "ROUND(AVG(click) FILTER (WHERE is_random=1),5) response_random "
-        "FROM events WHERE " + common + " AND author IS NOT NULL "
-        "GROUP BY author HAVING COUNT(*) FILTER (WHERE is_random=0)>=100 "
-        "AND COUNT(*) FILTER (WHERE is_random=1)>=20 "
-        "ORDER BY n_random DESC LIMIT 12", 12,
-        "Author allocation is descriptive; author-specific supply and merit remain unknown.")
-    observe(
-        "O007", "Does interface placement context alter observed exposure composition?",
-        "events", ("event_day", "is_random", "tab", "uid", "click"),
-        "SELECT is_random,tab,COUNT(*) n_events,COUNT(DISTINCT uid) n_users,"
-        "ROUND(AVG(click),5) response "
-        "FROM events WHERE " + common + " AND tab IS NOT NULL "
-        "GROUP BY 1,2 ORDER BY n_events DESC LIMIT 12", 12,
-        "The tab label describes a collection context, not a randomized assignment.")
+    for table, part in profile["tables"].items():
+        for c in part["columns"]:
+            cards.append({
+                "observation_id": "E" + str(len(cards)+1).zfill(3),
+                "operation": "distribution_profile",
+                "column": c["name"], "source_table": table,
+                "question": "Observed values in " + table + "." + c["name"],
+                "measurement_sql": part["source_sql"],
+                "measured_rows": c["observed_levels"],
+                "sample_n": part["sample_rows"],
+                "evidence_level": "sampled_descriptive_development_only",
+                "caveat": "Sampled field distribution, not causal or bias evidence."})
+    # Data-driven conditional scans: enumerate every eligible pair from the
+    # observed schema and spread a small sample across that space. No preset
+    # exposure/response pair, hypothesis or significance ranking is used.
+    from collections import defaultdict
+    native = supported_native_levels(profile)
+    pairs = []
+    for table, section in profile["tables"].items():
+        outcomes = [c["name"] for c in section["columns"]
+                    if c["type"].upper().startswith(
+                        ("INTEGER", "INT", "BIGINT", "DOUBLE", "FLOAT", "SMALLINT"))
+                    and 2 <= c["sample_distinct"] <= 20
+                    and c["name"] not in ("uid", "vid", "event_day", "moment_ms")]
+        for source, group in native:
+            if source == table:
+                pairs.extend((table, group, y) for y in outcomes if y != group)
+    profile["eligible_conditional_pairs"] = len(pairs)
+    if pairs:
+        amount = min(len(pairs), 12)
+        indices = list(dict.fromkeys(
+            round(i * (len(pairs)-1) / max(1, amount-1))
+            for i in range(amount)))
+        cached = {}
+        for table in profile["tables"]:
+            cursor = tools.connection.execute(
+                f"SELECT * FROM {table} USING SAMPLE 6000 ROWS (reservoir, 23)")
+            cached[table] = ([d[0] for d in cursor.description], cursor.fetchall())
+        for index in indices:
+            table, group, outcome = pairs[index]
+            columns, sampled = cached[table]
+            g, y = columns.index(group), columns.index(outcome)
+            aggregates = defaultdict(list)
+            for row in sampled:
+                if row[g] is not None and isinstance(row[y], (int, float)):
+                    aggregates[str(row[g])].append(float(row[y]))
+            rows = [{"group_value": key, "n": len(values),
+                     "mean": round(sum(values) / len(values), 6)}
+                    for key, values in sorted(aggregates.items())
+                    if len(values) >= 5]
+            if len(rows) < 2:
+                continue
+            cards.append({
+                "observation_id": "E" + str(len(cards)+1).zfill(3),
+                "operation": "generic_conditional_mean",
+                "source_table": table, "column": group, "outcome": outcome,
+                "question": f"Sampled {outcome} conditional on {group}",
+                "measurement_sql": f"reservoir_group_mean({table},{group},{outcome})",
+                "measured_rows": rows[:8], "sample_n": len(sampled),
+                "evidence_level": "sampled_descriptive_development_only",
+                "caveat": "Exploratory sample contrast; no independence, causal or bias identification."})
+    # Data-driven conditional scans: enumerate every eligible pair from the
+    # observed schema and spread a small sample across that space. No preset
+    # exposure/response pair, hypothesis or significance ranking is used.
+    from collections import defaultdict
+    native = supported_native_levels(profile)
+    pairs = []
+    for table, section in profile["tables"].items():
+        outcomes = [c["name"] for c in section["columns"]
+                    if c["type"].upper().startswith(
+                        ("INTEGER", "INT", "BIGINT", "DOUBLE", "FLOAT", "SMALLINT"))
+                    and 2 <= c["sample_distinct"] <= 20
+                    and c["name"] not in ("uid", "vid", "event_day", "moment_ms")]
+        for source, group in native:
+            if source == table:
+                pairs.extend((table, group, y) for y in outcomes if y != group)
+    profile["eligible_conditional_pairs"] = len(pairs)
+    if pairs:
+        amount = min(len(pairs), 12)
+        indices = list(dict.fromkeys(
+            round(i * (len(pairs)-1) / max(1, amount-1))
+            for i in range(amount)))
+        cached = {}
+        for table in profile["tables"]:
+            cursor = tools.connection.execute(
+                f"SELECT * FROM {table} USING SAMPLE 6000 ROWS (reservoir, 23)")
+            cached[table] = ([d[0] for d in cursor.description], cursor.fetchall())
+        for index in indices:
+            table, group, outcome = pairs[index]
+            columns, sampled = cached[table]
+            g, y = columns.index(group), columns.index(outcome)
+            aggregates = defaultdict(list)
+            for row in sampled:
+                if row[g] is not None and isinstance(row[y], (int, float)):
+                    aggregates[str(row[g])].append(float(row[y]))
+            rows = [{"group_value": key, "n": len(values),
+                     "mean": round(sum(values) / len(values), 6)}
+                    for key, values in sorted(aggregates.items())
+                    if len(values) >= 5]
+            if len(rows) < 2:
+                continue
+            cards.append({
+                "observation_id": "E" + str(len(cards)+1).zfill(3),
+                "operation": "generic_conditional_mean",
+                "source_table": table, "column": group, "outcome": outcome,
+                "question": f"Sampled {outcome} conditional on {group}",
+                "measurement_sql": f"reservoir_group_mean({table},{group},{outcome})",
+                "measured_rows": rows[:8], "sample_n": len(sampled),
+                "evidence_level": "sampled_descriptive_development_only",
+                "caveat": "Exploratory sample contrast; no independence, causal or bias identification."})
     return cards
+
+
+def supported_native_levels(profile):
+    """Ground native candidate groups in measured values, not handpicked cards."""
+    excluded = {"uid", "vid", "event_day", "moment_ms",
+                "click", "hate", "long_view", "next_click"}
+    found = {}
+    for table, section in profile["tables"].items():
+        for c in section["columns"]:
+            if c["name"] in excluded or not 2 <= c["sample_distinct"] <= 6:
+                continue
+            levels = c["observed_levels"]
+            if (len(levels) == c["sample_distinct"]
+                    and all(p["count"] >= 5 for p in levels)):
+                found[(table,c["name"])] = [v["value"] for v in levels]
+    return found

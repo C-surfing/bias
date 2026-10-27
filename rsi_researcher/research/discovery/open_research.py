@@ -78,6 +78,7 @@ CONCEPT_PAIR_SCHEMA = {
         "items": {"type": "object", "properties": {
             "concept": TEXT, "mechanism": TEXT, "rival": TEXT,
             "falsifier": TEXT, "measurement": TEXT, "suggested_sql": TEXT,
+            "phenomenon_ids": {"type": "array", "items": {"type": "string"}},
             "target_reference": TEXT, "reference_identification": TEXT,
             "distortion_quantity": TEXT, "distortion_estimate": TEXT,
             "prediction_if_mechanism": TEXT, "prediction_if_rival": TEXT,
@@ -330,18 +331,21 @@ class DevelopmentTools:
                 "trajectory": events, "note": "chronological development events only"}
 
     def grounding_rows(self):
-        """Observed values rather than semantic guesses about opaque tag codes."""
-        available = {item["column"] for item in self.schema()["events"]}
-        fields = [field for field in (
-            "tags", "previous_click", "previous_hate", "is_random", "click", "hate")
-            if field in available]
+        """Neutral reproducible observed examples, no forced exposure-mode strata."""
         rows = []
-        for mode in (0, 1):
-            rows.extend(self.connection.execute(
-                "SELECT " + ",".join(fields) + " FROM events WHERE is_random=? "
-                "ORDER BY hash(uid,vid,event_day) LIMIT 8", [mode]).fetchall())
-        return [dict(zip(fields, (v if isinstance(v, (str,int,float,bool)) or v is None
-                                  else str(v) for v in row))) for row in rows]
+        for table in ("events", "features"):
+            schema = self.schema()[table]
+            fields = [item["column"] for item in schema]
+            if len(fields) > 12:
+                ids = [round(i*(len(fields)-1)/11) for i in range(12)]
+                fields = [fields[i] for i in ids]
+            query = ("SELECT " + ",".join(fields) + " FROM " + table
+                     + " USING SAMPLE 8 ROWS (reservoir, 29)")
+            for record in self.connection.execute(query).fetchall():
+                rows.append({"source_table": table, **dict(zip(
+                    fields, (v if isinstance(v, (str,int,float,bool)) or v is None
+                             else str(v) for v in record)))})
+        return rows
 
     def close(self):
         self.connection.close()
@@ -427,7 +431,8 @@ def compact_step(entry: dict):
                                  if record["negative_control"] else None),
         }
     if "critic_experiment" in entry:
-        result["critic_experiment"] = entry["critic_experiment"]["result"]
+        result["critic_experiment"] = model_statistics(
+            entry["critic_experiment"]["result"])
     if "experiment_specification" in entry and "experiment" not in entry:
         result["failed_experiment"] = {
             "group": entry["experiment_specification"]["group_expression"],
@@ -532,6 +537,7 @@ def compact_opportunity_pool(pool) -> dict:
     """Research state for 8B models: keep decisive evidence, not repeated transcripts."""
     return {"focus": pool.focus, "opportunities": [{
         "id": item["id"], "status": item["status"],
+        "phenomenon_ids": item.get("phenomenon_ids", []),
         "phenomenon": item["phenomenon"][:180],
         "mechanism": item["mechanism"][:280],
         "rival": item["rival"][:250],
@@ -563,13 +569,6 @@ def compact_opportunity_pool(pool) -> dict:
         "next_research_decision": item.get("next_research_decision"),
     } for item in list(pool.records.values())[-5:]]}
 
-
-def compact_observation_cards(cards: list[dict]) -> list[dict]:
-    return [{"observation_id": c["observation_id"], "question": c["question"],
-             "measurement_sql": c["measurement_sql"][:260],
-             "measured_rows": c["measured_rows"][:5],
-             "caveat": c["caveat"]}
-            for c in cards]
 
 
 def _save(path: Path, value):
@@ -652,14 +651,25 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     tools = DevelopmentTools(dev_path)
     # Development-only grounding, cached once. Tag values are opaque IDs, not words.
     data_examples = tools.grounding_rows()
-    from rsi_researcher.research.discovery.observations import build_observation_cards
+    from rsi_researcher.research.discovery.observations import (
+        build_data_profile, build_exploration_evidence, supported_native_levels)
+    from rsi_researcher.research.discovery.phenomenon_miner import (
+        PHENOMENON_SCHEMA, compact_profile, evidence_for_agent, unify_phenomena)
     discovery_options = model_config.get("discovery", {})
-    observation_cards = (build_observation_cards(tools)
-                         if discovery_options.get("observation_cards", True) else [])
-    _save(dest / "observation_cards.json", observation_cards)
+    open_phenomena = bool(model_config.get("llm") and
+                          discovery_options.get("open_phenomena", True))
+    data_profile = build_data_profile(tools)
+    evidence_cards = build_exploration_evidence(tools, data_profile)
+    _save(dest / "data_profile.json", data_profile)
+    _save(dest / "exploration_evidence.json", evidence_cards)
+    phenomena = []
+    _save(dest / "phenomena.json", phenomena)
+    native_dimensions = supported_native_levels(data_profile)
     import hashlib
     _save(dest / "discovery_protocol.json", {
-        "observation_cards_enabled": discovery_options.get("observation_cards", True),
+        "observation_protocol": "schema_derived_open_phenomena_v1",
+        "open_phenomena": open_phenomena,
+        "predefined_observation_cards": False,
         "compact_experiment_enabled": discovery_options.get("compact_experiment", True),
         "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "model_config": model_config.get("llm", {}),
@@ -689,13 +699,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "Our goal is a CORRECTABLE SYSTEMATIC DISTORTION relative to a "
         "credible target reference, not just ordinary behavior correlation. "
         "A behavioral pattern is not automatically a recommender Bias. "
-        "Generic popularity, tag frequency, feedback loop, and historical "
+        "Known prior bias categories and simple feedback correlations "
         "CTR correlations are NOT new Bias discoveries. Start with numbered "
-        "measured observation cards; seek a distinctive CONDITIONAL "
+        "seek a distinctive CONDITIONAL "
         "distortion in ITEM allocation against an explicit supported "
         "reference, not a mere cross-policy CTR contrast. "
         "Choose the next ACTION yourself. Use SQL, inspect an actual trajectory, "
-        "define a NEW derived feature, form multiple competing concepts, request "
+        "define a NEW derived feature, investigate grounded phenomena, request "
         "an EXPERIMENT action so a Designer can specify test/control, outcome, "        " user-level inference, placebo and falsifier; revise based on results, "
         "and consult literature. Existing columns are observational conveniences "
         "NOT predefined Bias categories. SQL uses exactly the given column names; "
@@ -744,15 +754,51 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     last = ""
     stop_reason = ""
     no_information_actions = 0
+    last_phenomenon_query_count = -1
+    last_concept_phenomena = 0
     try:
         for step in (itertools.count() if max_rounds is None
                      else range(max_rounds)):
-            evidence_before = research_evidence_signature(tools, concepts, opportunity_pool)
-            if (step >= 3 and tools.history and
-                    (not concepts or (
-                        (max_rounds is None or max_rounds - step >= 3)
-                        and all(c["status"] in ("rejected_development", "design_blocked")
-                                for c in concepts)))):
+            evidence_before = research_evidence_signature(
+                tools, concepts, opportunity_pool) + (len(phenomena),)
+            if (open_phenomena and
+                    (last_phenomenon_query_count < 0 or
+                     len(tools.history) - last_phenomenon_query_count >= 2)):
+                extractor = ResearchAgent(model)
+                extractor.role = "open-phenomenon-extractor"
+                extractor.instruction = (
+                    "Extract MEASURABLE unusual patterns from data evidence, "
+                    "not named biases and not causal explanations. Cite only "
+                    "evidence IDs in input; each proposition must be grounded "
+                    "in an actual measured distribution or conditional contrast. "
+                    "Never compare independent table samples as if paired. "
+                    "Cite relevant E conditional or Q SQL evidence for comparisons. "
+                    "No invented statistics. Preserve rarity, scope and rival "
+                    "non-algorithmic explanations. If evidence only supports "
+                    "marginal values rather than a relationship, say so or "
+                    "return an empty list. Do not preferentially study any "
+                    "named field, exposure mode or click metric.")
+                visible = evidence_for_agent(evidence_cards, tools.history)
+                extracted = extractor.act({
+                    "profile": compact_profile(data_profile),
+                    "evidence": visible,
+                    "prior_phenomena": phenomena[-5:],
+                    "instruction": "Find independent, evidenced, nonredundant "
+                        "phenomena, or abstain. Never assert Bias at this stage."},
+                    "phenomenon-extraction-" + str(step), PHENOMENON_SCHEMA)
+                evidence_catalog = {item["id"]: item for item in visible}
+                unify_phenomena(phenomena, extracted["phenomena"], evidence_catalog)
+                last_phenomenon_query_count = len(tools.history)
+                _save(dest / "phenomena.json", phenomena)
+            legacy_formation = (not open_phenomena and step >= 3
+                                and bool(tools.history))
+            evidence_formation = (open_phenomena and len(phenomena) >= 2
+                                  and len(phenomena) > last_concept_phenomena)
+            if ((legacy_formation or evidence_formation) and
+                    (not concepts or all(
+                        c["status"] in ("rejected_development", "design_blocked")
+                        for c in concepts))):
+                last_concept_phenomena = len(phenomena)
                 # Return to candidate formation after *all* prior hypotheses
                 # were rejected, instead of repeatedly testing dead ends.
                 # A dedicated concept-formation turn prevents tool-format repairs
@@ -790,26 +836,37 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 if model_config.get("llm"):
                     item = CONCEPT_PAIR_SCHEMA["properties"]["concepts"]["items"]
                     required = list(item["required"]) + [
+                        *(["phenomenon_ids"] if open_phenomena else []),
                         "target_reference", "reference_identification",
                         "distortion_quantity", "distortion_estimate",
                         "prediction_if_mechanism", "prediction_if_rival",
                         "affected_population", "mechanism_entry_point",
                         "reference_status", "next_information_needed",
                         "discriminating_experiment"]
+                    item_properties = dict(item["properties"])
+                    if open_phenomena:
+                        item_properties["phenomenon_ids"] = {
+                            "type": "array", "minItems": 1,
+                            "items": {"type": "string",
+                                      "enum": [p["id"] for p in phenomena]}}
                     concept_contract = {**CONCEPT_PAIR_SCHEMA, "properties": {
                         "concepts": {**CONCEPT_PAIR_SCHEMA["properties"]["concepts"],
-                                     "items": {**item, "required": required}}}}
+                                     "items": {**item, "properties": item_properties,
+                                               "required": required}}}}
                 formed = former.act({
                     "observations": [compact_query(x) for x in tools.history[-4:]],
-                    "observation_cards": observation_cards,
+                    "phenomena": phenomena[-8:],
+                    "exploration_evidence": evidence_for_agent(
+                        evidence_cards, tools.history),
+                    "data_profile": compact_profile(data_profile),
                     "tables": tools.schema(),
                     "existing_derived_features": tools.features,
                     "rejected_prior_mechanisms": [
                         _concept_summary(c) for c in concepts if
                         c["status"] == "rejected_development"],
-                    "next_question_instruction": "Propose a mechanism that makes "
-                        "a NEW falsifiable prediction instead of renaming a "
-                        "previously abandoned hypothesis.",
+                    "next_question_instruction": "Ground each candidate in "
+                        "one or more actual phenomenon_ids, and give a fresh "
+                        "falsifiable H1/H2 prediction, not a renamed association.",
                 }, "concept-formation-" + str(step), concept_contract)
                 stage_ids = []
                 for hypothesis in formed["concepts"]:
@@ -820,6 +877,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                              "reason": "scientific concept formation from measured evidence",
                              "feature_name": "", "expression": "",
                              "source_table": "features"}
+                    if open_phenomena and not (
+                            set(hypothesis.get("phenomenon_ids", [])) &
+                            {p["id"] for p in phenomena}):
+                        continue  # ungrounded proposal is not an observed candidate
                     concepts.append({
                         "id": identifier, "version": 1, "status": "investigating",
                         "claim": claim, "tests": [], "revisions": [],
@@ -875,17 +936,15 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     # Ground native comparison dimensions in measured rows.
                     # They are possible measurements, never pre-named Bias cards.
                     native_levels = {}
-                    event_columns = {c["column"] for c in tools.schema()["events"]}
-                    for card in observation_cards:
-                        for row in card["measured_rows"]:
-                            for name in ("tab", "previous_click", "previous_hate"):
-                                if name in event_columns and row.get(name) is not None:
-                                    native_levels.setdefault(name, set()).add(str(row[name]))
-                    native_levels = {
-                        name: levels for name, levels in native_levels.items()
-                        if 2 <= len(levels) <= 8}
+                    native_sources = {}
+                    for (table, name), labels in native_dimensions.items():
+                        if name not in native_levels:
+                            native_levels[name] = set(labels)
+                            native_sources[name] = table
+                        # If a field is present in both tables, prefer its
+                        # first observed source; all chosen labels are grounded.
                     if native_levels:
-                        allowed_tables.add("events")
+                        allowed_tables.update(native_sources.values())
                         allowed_groups.extend(native_levels)
                     numeric_prefixes = ("BOOLEAN", "INTEGER", "INT", "BIGINT",
                                         "SMALLINT", "TINYINT", "HUGEINT",
@@ -926,16 +985,17 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "native_observed_groups": {
                             col: sorted(levels) for col, levels in native_levels.items()},
                         "scientific_restriction": (
-                            "Exposure-mode vs click difference alone cannot "
-                            "discriminate platform bias from user and item mix. "
-                            "Use a measured contextual interaction or an "
-                            "Agent-defined item-side binary feature; if no "
-                            "valid contrast exists, gather evidence instead."),
+                            "A response gap across non-equivalent observed groups "
+                            "does not by itself imply system-caused distortion. "
+                            "Use an informative measurable prediction shared by "
+                            "H1/H2, explicit reference eligibility, and actual "
+                            "support; otherwise gather evidence."),
                         "opportunities": compact_opportunity_pool(opportunity_pool),
                         "recent_observations": [
                             {"sql": q["sql"][:160], "rows": q["rows"][:3]}
                             for q in tools.history[-2:]],
-                        "observation_cards": compact_observation_cards(observation_cards),
+                        "exploration_evidence": evidence_for_agent(
+                            evidence_cards, tools.history),
                         "available_schema": {
                             table: [c["column"] for c in cols]
                             for table, cols in tools.schema().items()},
@@ -946,6 +1006,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         constrained_schema)
                     def check_choice(plan):
                         opportunity_pool.check_prediction(plan)
+                        group = plan["contrast_group"]
+                        if group in native_sources and (
+                                plan["contrast_source"] != native_sources[group]
+                                or plan["control_value"] not in native_levels[group]
+                                or plan["treatment_value"] not in native_levels[group]):
+                            raise ValueError("Native group source or arm labels "
+                                             "must match observed data-profile levels")
                         if (plan["contrast_group"] == "is_random"
                                 and plan["contrast_outcome"] in ("click", "long_view", "hate")):
                             raise ValueError(
@@ -1074,11 +1141,17 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             instruction = {
                 "tables": tools.schema(),
                 "development_value_examples": data_examples,
-                "observation_cards": compact_observation_cards(observation_cards),
+                "exploration_evidence": evidence_for_agent(
+                    evidence_cards, tools.history),
+                "phenomena": phenomena[-8:],
+                "data_profile": compact_profile(data_profile),
                 "derived_features": tools.features,
                 "registered_variable_cards": tools.feature_cards(),
                 "concepts": [_concept_summary(c) for c in concepts[-4:]],
                 "research_opportunity_pool": compact_opportunity_pool(opportunity_pool),
+                "new_phenomenon_questions": [
+                    {"id": p["id"], "next_measurement": p["next_measurement"]}
+                    for p in phenomena[-5:]],
                 "active_concept_ids": [c["id"] for c in concepts
                     if c["status"] not in ("rejected_development", "design_blocked")],
                 "abandoned_concept_ids": [c["id"] for c in concepts
@@ -1125,6 +1198,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             }
             live_ids = instruction["active_concept_ids"]
             live_actions = ACTION_SCHEMA["properties"]["action"]["enum"]
+            if open_phenomena:
+                # Scientific hypotheses require grounded phenomenon evidence.
+                live_actions = [a for a in live_actions if a != "form_concept"]
             if not live_ids:
                 live_actions = [a for a in live_actions if a not in (
                     "select_opportunity", "test", "experiment",
@@ -1132,9 +1208,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             model_action_schema = ACTION_SCHEMA
             if model_config.get("llm"):
                 # Repeated identical SQL is a dead-end, not another hypothesis test.
-                if len(history) >= 2 and all(
-                        "This exact development query already ran" in e.get(
-                            "tool_error", "") for e in history[-2:]):
+                if (len(history) >= 2 and history[-1].get("tool_error")
+                        and history[-1].get("tool_error") ==
+                            history[-2].get("tool_error")
+                        and any(t in history[-1]["tool_error"] for t in (
+                            "This exact development query already ran",
+                            "Only one bounded SELECT/WITH"))):
                     live_actions = [a for a in live_actions
                                     if a not in ("sql", "inspect_trajectory", "test")]
                     instruction["next_action_guidance"] += (
@@ -1384,7 +1463,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             compact_step(item)["derived_feature"]
                             for item in history if "derived_feature" in item],
                         "example_data_values": data_examples,
-                        "observation_cards": observation_cards,
+                        "exploration_evidence": evidence_for_agent(
+                            evidence_cards, tools.history),
                         "critical_design_rule": "A binary group must have observed users in BOTH actual arms; opaque tags are numeric IDs, and click/hate are current outcomes, not tag names.",
                         "prior_experiments": [
                             {"question": t["test_question"],
@@ -1883,7 +1963,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             # New observations, measured contrasts or a corrected mechanism
             # are information; merely naming another hypothesis or retrying
             # invalid SQL is not. The stall guard is NOT a total research budget.
-            evidence_after = research_evidence_signature(tools, concepts, opportunity_pool)
+            evidence_after = research_evidence_signature(
+                tools, concepts, opportunity_pool) + (len(phenomena),)
             no_information_actions = (
                 0 if evidence_after != evidence_before
                 else no_information_actions + 1)
@@ -1892,6 +1973,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             _save(dest / "research_state.json", {
                 "concepts": concepts, "rounds_completed": len(history),
                 "registered_features": tools.features,
+                "phenomena": phenomena,
                 "no_information_actions": no_information_actions,
                 "holdout_consulted": False})
             if max_rounds is None and no_information_actions >= 6:
@@ -1911,7 +1993,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         final = {"status": status, "frozen_id": last or None,
                  "concepts": concepts, "registered_features": tools.features,
                  "development_queries": tools.history,
-                 "observation_cards": observation_cards,
+                 "exploration_evidence": evidence_cards,
+                 "phenomena": phenomena,
                  "research_opportunities": opportunity_pool.snapshot(),
                  "research_rounds": len(history), "holdout_consulted": False,
                  "termination_reason": stop_reason or (
@@ -1940,6 +2023,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "runtime_error": str(error)[:280]})
         final = {
             "status": reason, "frozen_id": None, "concepts": concepts,
+            "phenomena": phenomena, "exploration_evidence": evidence_cards,
             "registered_features": tools.features,
             "development_queries": tools.history,
             "research_opportunities": opportunity_pool.snapshot(),

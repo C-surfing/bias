@@ -543,3 +543,98 @@ def test_unbounded_operator_interrupt_preserves_partial_science(tmp_path, monkey
     assert result["status"] == "interrupted"
     assert (path / "journal.json").exists()
     assert result["holdout_consulted"] is False
+
+
+
+def test_open_phenomena_provenance_precedes_concept_formation(tmp_path, monkeypatch):
+    source = _raw(tmp_path)
+    dev = tmp_path / "dev.duckdb"
+    o.development_db(str(source), str(dev))
+    proposal = dict(
+        concept="item opportunity discrepancy", mechanism="ranking feedback",
+        rival="latent preference", falsifier="reference removes gap",
+        measurement="within-user item exposure", suggested_sql="SELECT COUNT(*) FROM events",
+        target_reference="unmeasured", reference_identification="not yet",
+        distortion_quantity="allocation share", distortion_estimate="unknown",
+        prediction_if_mechanism="persists", prediction_if_rival="disappears",
+        affected_population="users with opportunities",
+        mechanism_entry_point="ranking", reference_status="unidentified",
+        next_information_needed="item merit reference",
+        discriminating_experiment="conditional allocation contrast")
+    stages = []
+    class Model:
+        def ask(self, prompt, schema, context):
+            role = context["stage"]
+            stages.append(role)
+            if role == "open-phenomenon-extractor":
+                return {"phenomena": [
+                    dict(description=f"uid pattern {i}", evidence_ids=["E001"],
+                         conditions=f"cohort {i}", observed_pattern="measured values",
+                         alternative="composition", next_measurement="SQL contrast")
+                    for i in (1, 2)]}
+            if role == "concept-formation":
+                return {"concepts": [
+                    {**proposal, "phenomenon_ids": ["P001"]},
+                    {**proposal, "concept": "another mechanism",
+                     "phenomenon_ids": ["P002"]}]}
+            if role == "research-opportunity-selector":
+                return {k: (v.get("enum") or [""])[0] for k,v in schema["properties"].items()}
+            assert role == "open-discovery-scientist"
+            assert "form_concept" not in schema["properties"]["action"]["enum"]
+            return _act("stop")
+    monkeypatch.setattr(o, "create_model", lambda *args: Model())
+    output = tmp_path / "open"
+    result = o.run_open_discovery(
+        str(source), str(output),
+        {"llm": {"provider": "vllm"}, "discovery": {"open_phenomena": True}},
+        max_rounds=3, development_path=str(dev))
+    assert "open-phenomenon-extractor" in stages
+    assert "concept-formation" in stages
+    assert len(result["phenomena"]) == 2
+    assert len(result["concepts"]) == 2
+    assert result["research_opportunities"]["opportunities"][0]["phenomenon_ids"] == ["P001"]
+    assert not (output / "observation_cards.json").exists()
+    assert (output / "data_profile.json").exists()
+
+
+
+def test_phenomenon_miner_rejects_unmatched_cross_table_claim():
+    from rsi_researcher.research.discovery.phenomenon_miner import unify_phenomena
+    evidence = {
+        "E001": {"source": "events", "field": "long_view",
+                 "operation": "distribution_profile"},
+        "E002": {"source": "features", "field": "long_view",
+                 "operation": "distribution_profile"},
+        "E003": {"source": "events", "field": "previous_click",
+                 "outcome": "is_random", "operation": "generic_conditional_mean"},
+    }
+    invalid = {"description": "higher long_view in features compared with events",
+               "conditions": "comparing events and features",
+               "observed_pattern": "a significant difference",
+               "evidence_ids": ["E001", "E002"]}
+    valid = {"description": "difference in is_random by previous_click",
+             "conditions": "within observed events",
+             "observed_pattern": "sampled conditional means differ",
+             "evidence_ids": ["E003"]}
+    shared = dict(alternative="different item and user mix",
+                  next_measurement="match users before inference")
+    out = unify_phenomena([], [{**invalid, **shared}, {**valid, **shared}], evidence)
+    assert len(out) == 1
+    assert out[0]["evidence_ids"] == ["E003"]
+    assert out[0]["status"] == "observed_unverified"
+
+
+
+def test_compact_critic_statistics_do_not_overflow_scientist_context():
+    rows = {f"stratum_{i}": {
+        "n_control": i+5, "n_treatment": i+4,
+        "control_mean": 0.15, "treatment_mean": 0.12}
+        for i in range(400)}
+    entry = {"round": 3, "action": _act("experiment"),
+             "critic_experiment": {"result": {"strata": rows,
+                 "estimate": 0.03, "ci95_bootstrap": [0.01, 0.05]}}}
+    packed = o.compact_step(entry)["critic_experiment"]
+    assert packed["strata_total"] == 400
+    assert len(packed["strata"]) == 10
+    assert packed["estimate"] == 0.03
+    assert len(json.dumps(packed)) < 2500
