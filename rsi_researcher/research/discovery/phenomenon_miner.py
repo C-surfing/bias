@@ -39,7 +39,10 @@ def evidence_for_agent(cards, queries, max_fields=12, max_contrasts=12):
                        max_contrasts)
     out = [{"id": c["observation_id"], "source": c["source_table"],
             "field": c["column"], "operation": c["operation"],
-            "outcome": c.get("outcome"), "sample_n": c["sample_n"],
+            "outcome": c.get("outcome"),
+            "measured_direction": (f"mean({c['outcome']}) BY {c['column']}"
+                                   if c.get("outcome") else "marginal distribution"),
+            "sample_n": c["sample_n"],
             "values": c["measured_rows"][:6]} for c in fields + contrasts]
     out.extend({"id": "Q"+str(i+1).zfill(3), "query": q["sql"][:280],
                 "rows": q["rows"][:5], "operation": "executed_dev_sql"}
@@ -73,6 +76,14 @@ def unify_phenomena(prior, proposals, evidence_catalog):
                      re.search(r"(?<![a-z0-9_])"+re.escape(name.lower())+
                                r"(?![a-z0-9_])", statement)}
         if named and not named.issubset(mentioned):
+            continue
+        # Evidence records mean(outcome) BY group, never the reverse.
+        # Require the claimed condition to name the actual grouping field.
+        if any(e.get("operation") == "generic_conditional_mean" and
+               e.get("field") and not re.search(
+                   r"(?<![a-z0-9_])" + re.escape(e["field"].lower()) +
+                   r"(?![a-z0-9_])", candidate["conditions"].lower())
+               for e in cited):
             continue
         sources = {e.get("source") for e in cited if e.get("source")}
         if any(table in statement and table not in sources

@@ -773,11 +773,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "in an actual measured distribution or conditional contrast. "
                     "Never compare independent table samples as if paired. "
                     "Cite relevant E conditional or Q SQL evidence for comparisons. "
-                    "No invented statistics. Preserve rarity, scope and rival "
-                    "non-algorithmic explanations. If evidence only supports "
-                    "marginal values rather than a relationship, say so or "
-                    "return an empty list. Do not preferentially study any "
-                    "named field, exposure mode or click metric.")
+                    "No invented statistics. Prefer measured conditional "
+                    "contrasts with two actual groups and outcome counts. "
+                    "Marginal rarity by itself is a lead for further SQL, "
+                    "not a mechanism; abstain if only marginals are supported. "
+                    "Preserve the strongest non-algorithmic explanation. "
+                    "Do not privilege any named field or Bias category.")
                 visible = evidence_for_agent(evidence_cards, tools.history)
                 extracted = extractor.act({
                     "profile": compact_profile(data_profile),
@@ -792,7 +793,17 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 _save(dest / "phenomena.json", phenomena)
             legacy_formation = (not open_phenomena and step >= 3
                                 and bool(tools.history))
-            evidence_formation = (open_phenomena and len(phenomena) >= 2
+            # Field rarity is only an exploration lead, not a mechanism.
+            relational_ids = {c["observation_id"] for c in evidence_cards
+                              if c["operation"] == "generic_conditional_mean"}
+            recent_start = max(0, len(tools.history) - 5)
+            for i, query in enumerate(tools.history[-5:], start=recent_start):
+                if len(query["columns"]) >= 2 and len(query["rows"]) >= 2:
+                    relational_ids.add("Q" + str(i + 1).zfill(3))
+            relational_phenomena = sum(
+                bool(set(p.get("evidence_ids", [])) & relational_ids)
+                for p in phenomena)
+            evidence_formation = (open_phenomena and relational_phenomena >= 2
                                   and len(phenomena) > last_concept_phenomena)
             if ((legacy_formation or evidence_formation) and
                     (not concepts or all(

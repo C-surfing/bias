@@ -68,3 +68,23 @@ This validates an unlimited-round **execution and stopping mechanism**,
 not better scientific Bias discovery. The prior bounded experiments
 remain an exploratory fixed-cap comparator; there is no claim of
 significant discovery-rate improvement or of independent confirmation.
+
+
+## 2026-10-27 post-BADF experiment-driven science audit
+
+Same frozen development-only KuaiRand-27K DB: runs/kuairand27k-open-agent-enriched-development-20261027.duckdb (2,608 dev users). Local Qwen3-8B, GPU7. Independent holdout was NOT consulted.
+
+| Run directory under runs/ | Setting | Verdict |
+| --- | --- | --- |
+| kuairand27k-open-phenomena-exp-seed20261027 | Original open phenomena, fixed rounds, seed 20261027 | budget_exhausted, numerical Workbench countertest but invalid mechanism/estimand alignment |
+| kuairand27k-open-phenomena-thinking-seed20261027 | Thinking on, max_tokens 3800 | model_failed with HTTP 400 |
+| kuairand27k-open-phenomena-relational-seed20261028 | Relational-evidence-only concept gate | scientific_stalled, marginals did not become false scientific candidates |
+| kuairand27k-open-phenomena-episodes-seed20261028 | Same seed, deterministic episode sampling on | scientific_stalled, five experiment actions, but reversed conditional interpretation |
+| kuairand27k-open-phenomena-thinking2200-seed20261029 | Lower-token Thinking, directional evidence audit | scientific_stalled on repeated SQL and illegal aggregate-as-feature |
+| kuairand27k-open-phenomena-direction-replay-seed20261028 | Same seed and episode sampling with directional evidence audit | scientific_stalled; misleading phenomenon excluded; repeated actions persisted |
+
+Initial development-only user-level previous_long_view-to-click estimate was +0.1517559, bootstrap CI95 [0.1482565, 0.1557442] across 2,607 paired users; a critic-subgroup previous_hate=1 estimate was +0.0774358, CI95 [0.0223653, 0.1343656] on 242 paired users. These DID NOT measure the claimed activity-dependent exposure-allocation mechanism, and lack an identified reference, so neither is a new Bias discovery.
+
+Harness changes: relational conditional evidence prerequisite before concept formation; measured-direction label (mean outcome BY group) and provenance guard; optional reproducible per-episode seeds only in research roles. Same-seed comparison yielded more exploratory experiments but ZERO additional validated bias mechanisms. Targeted tests: 27 pass.
+
+Scientific status: 0 discovered and independently confirmed novel recommender biases; 0 verified interventions. Actual bottleneck is mechanism-to-estimand alignment and repetitive no-information SQL/derived feature actions. Next high-value experiment: Qwen identifies an item-level allocation against defensible response/relevance reference, makes distinct same-estimand H1/H2 predictions, and uses independently executed falsification. Randomized insertions are a limited reference and cannot identify whole-policy counterfactuals. Preserve frozen confirmation boundary. Source journals and model calls are retained in the six run directories.

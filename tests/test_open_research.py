@@ -589,10 +589,10 @@ def test_open_phenomena_provenance_precedes_concept_formation(tmp_path, monkeypa
         {"llm": {"provider": "vllm"}, "discovery": {"open_phenomena": True}},
         max_rounds=3, development_path=str(dev))
     assert "open-phenomenon-extractor" in stages
-    assert "concept-formation" in stages
+    assert "concept-formation" not in stages  # marginal-only evidence is insufficient
     assert len(result["phenomena"]) == 2
-    assert len(result["concepts"]) == 2
-    assert result["research_opportunities"]["opportunities"][0]["phenomenon_ids"] == ["P001"]
+    assert len(result["concepts"]) == 0
+    assert not result["research_opportunities"]["opportunities"]
     assert not (output / "observation_cards.json").exists()
     assert (output / "data_profile.json").exists()
 
@@ -613,12 +613,17 @@ def test_phenomenon_miner_rejects_unmatched_cross_table_claim():
                "observed_pattern": "a significant difference",
                "evidence_ids": ["E001", "E002"]}
     valid = {"description": "difference in is_random by previous_click",
-             "conditions": "within observed events",
+             "conditions": "within observed events grouped by previous_click",
              "observed_pattern": "sampled conditional means differ",
              "evidence_ids": ["E003"]}
+    inverted = {"description": "difference in previous_click by is_random",
+                "conditions": "within is_random groups",
+                "observed_pattern": "mean previous_click differs",
+                "evidence_ids": ["E003"]}
     shared = dict(alternative="different item and user mix",
                   next_measurement="match users before inference")
-    out = unify_phenomena([], [{**invalid, **shared}, {**valid, **shared}], evidence)
+    out = unify_phenomena([], [{**invalid, **shared}, {**inverted, **shared},
+                                {**valid, **shared}], evidence)
     assert len(out) == 1
     assert out[0]["evidence_ids"] == ["E003"]
     assert out[0]["status"] == "observed_unverified"

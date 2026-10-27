@@ -35,6 +35,7 @@ def model_description(config=None):
     return {"provider": provider, "base_url": base_url, "model_parameters": parameters,
             "designer_sampler":sampler,
             "enable_thinking": options.get("enable_thinking", False),
+            "discovery_episode_sampling": bool(options.get("discovery_episode_sampling", False)),
             "request_timeout": options.get("timeout_seconds", 180),
             "api_key_env": options.get("api_key_env"),
             "api_protocol": "vllm_json_schema_v1", "ranking_protocol": RANKING_PROTOCOL,
@@ -70,9 +71,21 @@ class VLLMModel(ModelTransport):
         payload["response_format"] = {"type": "json_schema", "json_schema": {
             "name": "research_result", "strict": True, "schema": schema}}
         payload["chat_template_kwargs"] = {"enable_thinking": self.metadata["enable_thinking"]}
-        # Keep Qwen ranking at fixed temperature / model seed for paired
-        # comparisons; only the scientific DESIGN role explores varied
-        # proposals. Stable episode-derived seeds make runs reproducible.
+        # Preserve fixed seeds for ranking comparisons. Opt-in Open Discovery
+        # varies the seed by scientific episode, deterministically, to avoid
+        # repeated identical exploratory actions under a constant sampler.
+        episode = (self.scope or {}).get("episode", "")
+        role = (self.scope or {}).get("scientific_role", "")
+        if self.metadata["discovery_episode_sampling"] and role in (
+                "open-discovery-scientist", "open-phenomenon-extractor",
+                "concept-formation", "research-opportunity-selector",
+                "research-designer", "discovery-critic"):
+            import hashlib
+            episode_hash = int.from_bytes(
+                hashlib.sha256(episode.encode()).digest()[:4], "big")
+            payload["seed"] = (
+                self.model_parameters["seed"] + episode_hash) % 2147483647
+        # Designer role-specific sampler stays independent of this option.
         sampler=self.metadata.get("designer_sampler")
         if sampler is not None and (self.scope or {}).get("scientific_role") in ("design", "research-designer"):
             import hashlib

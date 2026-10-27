@@ -57,6 +57,19 @@ class ModelBackendTests(unittest.TestCase):
         self.assertNotIn('Authorization', headers)
         self.assertIsNone(usage_summary(self.root)['usd_upper_estimate_for_reported_usage'])
 
+    def test_discovery_episode_sampling_is_reproducible_and_scoped(self):
+        config = {'llm': {**self.config['llm'], 'seed': 20261028,
+                          'discovery_episode_sampling': True}}
+        model = create_model(self.root, 4, config=config)
+        schema = object_schema({'hypothesis': {'type': 'string'}})
+        model.scope = {'scientific_role': 'open-discovery-scientist', 'episode': 'open-1'}
+        seed1 = model.build_payload('investigate', schema)['seed']
+        self.assertEqual(seed1, model.build_payload('investigate', schema)['seed'])
+        model.scope['episode'] = 'open-2'
+        self.assertNotEqual(seed1, model.build_payload('investigate', schema)['seed'])
+        model.scope = {'scientific_role': 'ranking', 'episode': 'open-2'}
+        self.assertEqual(model.build_payload('investigate', schema)['seed'], 20261028)
+
     def test_schema_retry_is_specific_and_remains_in_the_same_budget(self):
         self.responses = [{'strength': .03}, {'strength': .02}]
         model = create_model(self.root, 2, config=self.config)
