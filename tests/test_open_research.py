@@ -409,3 +409,16 @@ def test_literature_retrieval_excludes_irrelevant_click_homonyms(monkeypatch):
     assert result["papers"][0]["id"] == "https://openalex.org/Wr"
     assert result["excluded_irrelevant"][0]["id"] == "https://openalex.org/Wd"
     assert "recommender systems" in result["executed_queries"][0]
+
+
+def test_scientific_gaps_require_a_valid_reference_and_numeric_rival_countertest():
+    # The model saying "ready" cannot identify a recommender bias.
+    concept = {"tests": [{"workbench": {"result": {"estimate": 0.1}}}],
+               "critique": {"decision": "ready", "observable_valid": True,
+                           "rival_discriminated": True}}
+    opportunity = {"bias_relevance": {"numeric_discrepancy": {
+        "measured": True, "normative_target_validated": False}}}
+    gaps = o.scientific_evidence_gaps(concept, opportunity)
+    assert "normative_reference_not_identified" in gaps
+    assert "no_executed_inferential_rival_countertest" in gaps
+    assert "recommendation_consequence_not_identified" in gaps

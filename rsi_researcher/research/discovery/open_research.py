@@ -18,6 +18,29 @@ from rsi_researcher.runtime.limits import RunLimits
 from rsi_researcher.runtime.client import BudgetExceeded, ModelFailure
 from rsi_researcher.runtime.models import create_model
 
+BIAS_RESEARCH_CONTRACT = (
+    "Shared recommender bias research contract. Study a specific RECOMMENDER "
+    "decision, exposure allocation, data collection, preference learning, or "
+    "feedback update relative to an identified and defensible target. "
+    "A difference in click rates, user preferences, tag frequency or activity "
+    "is a behavioral observation, NOT automatically algorithmic distortion. "
+    "Name the affected population, distorted quantity, decision stage, "
+    "reference and its identification assumptions. Randomly inserted KuaiRand "
+    "items provide a limited exposure-mode response reference, NOT randomized "
+    "user histories, known utility merit, or a valid policy counterfactual. "
+    "Missing references are UNMEASURED or UNIDENTIFIED research gaps: "
+    "investigate support rather than invent targets or abandon promising leads. "
+    "Derive competing H1 and H2 predictions on the same population, estimand "
+    "and conditioning variables; choose an informative contrast where they "
+    "disagree, not a test maximizing significance. "
+    "Distinguish observing a phenomenon, measuring reference deviation, "
+    "discriminating a mechanism, and testing a corrective intervention. "
+    "Use measured data and tool uncertainty only. Diagnose whether failure "
+    "comes from invalid reference, unsupported mechanism, insufficient "
+    "identification/support or an invalid experiment. Do not claim causal "
+    "bias, harm, novelty or independent confirmation from exploratory logs. "
+)
+
 TEXT = {"type": "string"}
 ACTION_SCHEMA = {
     "type": "object",
@@ -56,7 +79,11 @@ CONCEPT_PAIR_SCHEMA = {
             "falsifier": TEXT, "measurement": TEXT, "suggested_sql": TEXT,
             "target_reference": TEXT, "reference_identification": TEXT,
             "distortion_quantity": TEXT, "distortion_estimate": TEXT,
-            "prediction_if_mechanism": TEXT, "prediction_if_rival": TEXT},
+            "prediction_if_mechanism": TEXT, "prediction_if_rival": TEXT,
+            "affected_population": TEXT, "mechanism_entry_point": TEXT,
+            "reference_status": {"type": "string", "enum": [
+                "unmeasured", "unidentified", "identified"]},
+            "next_information_needed": TEXT, "discriminating_experiment": TEXT},
             "required": ["concept", "mechanism", "rival", "falsifier",
                          "measurement", "suggested_sql"],
             "additionalProperties": False}}},
@@ -504,12 +531,35 @@ def _save(path: Path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
 
+def scientific_evidence_gaps(concept: dict, opportunity: dict) -> list[str]:
+    """Evidence gaps based on executed artifacts, not prose or model confidence."""
+    gaps = []
+    bias = opportunity.get("bias_relevance", {})
+    reference = bias.get("numeric_discrepancy", {})
+    if not reference.get("measured"):
+        gaps.append("numeric_reference_deviation_unmeasured")
+    elif not reference.get("normative_target_validated"):
+        gaps.append("normative_reference_not_identified")
+    if not any(t.get("requested_by") == "critic" and "workbench" in t
+               for t in concept.get("tests", [])):
+        gaps.append("no_executed_inferential_rival_countertest")
+    critique = concept.get("critique") or {}
+    if critique and not critique.get("observable_valid"):
+        gaps.append("experiment_observable_invalid")
+    if critique and not critique.get("rival_discriminated"):
+        gaps.append("competing_mechanism_not_discriminated")
+    # Consequence cannot be inferred from an exposure-mode share difference.
+    gaps.append("recommendation_consequence_not_identified")
+    return gaps
+
+
 def research_funnel(concepts: list[dict], pool) -> dict:
     "Evidence-stage counts, never free-text 'successful discovery' claims."
     workbench = sum(any("workbench" in trial for trial in c["tests"]) for c in concepts)
     discriminated = sum(
-        any("workbench" in trial for trial in c["tests"]) and
         bool((c.get("critique") or {}).get("rival_discriminated"))
+        and any("workbench" in t and t.get("requested_by") == "critic"
+                for t in c["tests"])
         for c in concepts)
     measured = sum(bool(c["bias_relevance"].get(
         "numeric_discrepancy", {}).get("measured"))
@@ -519,6 +569,10 @@ def research_funnel(concepts: list[dict], pool) -> dict:
         "candidates_with_executed_workbench": workbench,
         "candidates_with_rival_discrimination": discriminated,
         "candidates_with_numeric_reference_diagnostic": measured,
+        "candidates_with_credible_distortion_measurement": sum(
+            bool(r["bias_relevance"].get("numeric_discrepancy", {}).get(
+                "normative_target_validated"))
+            for r in pool.records.values()),
         "workbench_completion_rate": workbench / len(concepts) if concepts else 0.0,
         "independently_confirmed": 0,
     }
@@ -606,6 +660,15 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "has a relevant development falsification check, and obvious logging "
         "artifacts were probed. A test can justify provisional freezing for "
         "independent confirmation, not a causal Bias claim.")
+    scientist.instruction += BIAS_RESEARCH_CONTRACT
+    critic.instruction += (
+        BIAS_RESEARCH_CONTRACT
+        + " Audit distortion validity, reference validity, H1/H2 "
+        "mechanism discrimination, consequence, and current evidence stage "
+        "separately. A Critic assertion of ready cannot replace a measured "
+        "reference gap or independently executed countertest. "
+        "Report the specific identification or test failure in reason."
+    )
     history, concepts = [], []
     experiment_failures = {}
     opportunity_pool = ResearchOpportunityPool()
@@ -642,13 +705,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "sizes or sample counts. We want research opportunity selection, "
                     "not generic significant findings. "
                     "Do not claim causality or novelty. Use exact schema columns.")
+                former.instruction += (
+                    BIAS_RESEARCH_CONTRACT
+                    + " Begin each concept with the suspected recommender "
+                    "decision, affected users/items, outcome-reference "
+                    "discrepancy, and distinct rival predictions BEFORE SQL. "
+                    "Declare reference_status and next_information_needed. "
+                    "Unknown reference is a valid lead but not established bias."
+                )
                 concept_contract = CONCEPT_PAIR_SCHEMA
                 if model_config.get("llm"):
                     item = CONCEPT_PAIR_SCHEMA["properties"]["concepts"]["items"]
                     required = list(item["required"]) + [
                         "target_reference", "reference_identification",
                         "distortion_quantity", "distortion_estimate",
-                        "prediction_if_mechanism", "prediction_if_rival"]
+                        "prediction_if_mechanism", "prediction_if_rival",
+                        "affected_population", "mechanism_entry_point",
+                        "reference_status", "next_information_needed",
+                        "discriminating_experiment"]
                     concept_contract = {**CONCEPT_PAIR_SCHEMA, "properties": {
                         "concepts": {**CONCEPT_PAIR_SCHEMA["properties"]["concepts"],
                                      "items": {**item, "required": required}}}}
@@ -713,6 +787,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "intervention. If no reference is currently measurable, use "
                         "reference_kind=none and do not call it a Bias. "
                         "An observe decision needs executable SQL.")
+                    chooser.instruction += (
+                        BIAS_RESEARCH_CONTRACT
+                        + " Prefer the next observation that resolves the "
+                        "reference identification gap or separates H1/H2. "
+                        "Never mistake a statistical treatment/control group "
+                        "for an actual intervention on the recommender."
+                    )
                     available_records = list(tools.feature_records.values())
                     # The first discriminating experiment must use a variable
                     # previously created and measured by the scientist.
@@ -904,14 +985,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 "successful_queries": len(tools.history),
                 "minimum_queries_before_freeze": min_queries,
                 "available_actions": ACTION_SCHEMA["properties"]["action"]["enum"],
-                "research_mission": "Invent a testable mechanism not supplied as a candidate card.",
+                "research_mission": (
+                    "Find a previously unspecified systematic recommender "
+                    "distortion relative to a credible reference; distinguish "
+                    "it from real user taste with H1/H2 predictions, and "
+                    "measure it before calling it a bias."),
                 "sql_hint": "For new concepts measure conditional interactions, with counts and user units.",
                 "next_action_guidance": (
-                    "Prioritize an actual test using EXACT H001/H002 IDs now; "
-                    "then revise the mechanism if contradicted; request literature "
-                    "before attempting freeze." if concepts else
-                    "Inspect actual data, register a reusable row-level variable with "
-                    "define_feature, then verify it with SQL before experimental design."
+                    "Use EXACT existing concept IDs. Select the next action by "
+                    "the unresolved scientific gaps in the opportunity pool: "
+                    "identify a defensible reference when unmeasured, then test "
+                    "a contrast where the mechanism and preference rival disagree; "
+                    "revise or abandon when contradicted. Request literature "
+                    "before freeze." if concepts else
+                    "Inspect observed allocation and response first; identify "
+                    "which recommender decision and reference would distinguish "
+                    "a systematic distortion from preferences. Use SQL or a "
+                    "trajectory if reference support is unclear; define_feature "
+                    "only when a chosen scientific question needs it."
                     if not any(tools.features.values()) else
                     "Test the registered variable with a conditional comparison and "
                     "form a falsifiable hypothesis with a competing explanation."),
@@ -1009,6 +1100,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "falsification plan), ABANDON it, or consult LITERATURE. "
                             "Do not repeat the same SQL, invent significant results, or "
                             "treat correlation as a confirmed Bias.")
+                        reflector.instruction += BIAS_RESEARCH_CONTRACT
                         reflection = reflector.act({
                             "hypothesis": selected["claim"],
                             "tests": [compact_query(t["result"]) for t in selected["tests"][-3:]],
@@ -1068,6 +1160,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "If you have no separate scientifically valid negative-control "
                         "assignment, set BOTH placebo fields to empty strings. "
                         "Never copy the treatment group into the placebo.")
+                    designer.instruction += (
+                        BIAS_RESEARCH_CONTRACT
+                        + " This test must answer a concrete bias research "
+                        "question, not only a valid statistical comparison. "
+                        "Specify the decision stage, distorted quantity, "
+                        "reference eligibility and assumptions, strongest "
+                        "user-preference rival, comparable H1/H2 predictions, "
+                        "estimand, user unit, negative control if justified "
+                        "and what result would falsify the mechanism. "
+                        "When the reference is unidentified, design a "
+                        "reference-support probe, not a fake causal test."
+                    )
                     event_days = tools.connection.execute(
                         "SELECT MIN(event_day), MAX(event_day) FROM events").fetchone()
                     first_workbench = not any(
@@ -1304,10 +1408,21 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "negative_control": (model_statistics(
                             measured_experiment["negative_control"]["result"])
                             if measured_experiment["negative_control"] else None),
-                        "request": "Evaluate rival mechanism, logging artifacts, and whether a DIFFERENT experiment is needed.",
+                        "request": (
+                            "Evaluate distortion measurement, reference "
+                            "identification, H1/H2 numerical disagreement, "
+                            "logging artifacts and consequence separately. "
+                            "If any is unsupported, name exactly which "
+                            "scientific requirement failed and choose a "
+                            "reference-support or rival-discriminating test."),
                     }, "experiment-critique-" + str(step), CRITIC_SCHEMA)
                     entry["critique"] = critique
                     selected["critique"] = critique
+                    scientific_gaps = scientific_evidence_gaps(
+                        selected, opportunity_pool.records.get(selected["id"], {}))
+                    entry["scientific_evidence_gaps"] = scientific_gaps
+                    opportunity_pool.records[selected["id"]][
+                        "scientific_evidence_gaps"] = scientific_gaps
                     if critique["decision"] == "test":
                         followup_generated = designer.act({
                             "concept": _concept_summary(selected),
@@ -1441,6 +1556,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "countertest_result": counter_result,
                             "critique": critique,
                         }
+                        reflector.instruction += BIAS_RESEARCH_CONTRACT
+                        reflection_input["bias_relevance"] = opportunity_pool.records.get(
+                            selected["id"], {}).get("bias_relevance", {})
+                        reflection_input["scientific_evidence_gaps"] = (
+                            scientific_evidence_gaps(
+                                selected, opportunity_pool.records.get(
+                                    selected["id"], {})))
+                        reflection_input["next_research_requirement"] = (
+                            "Identify whether a reference, discrimination or "
+                            "experiment-support failure caused this result; "
+                            "change the next measurable test accordingly."
+                        )
                         reflection = reflector.act(
                             reflection_input, "experiment-reflection-" + str(step),
                             REFLECTION_SCHEMA)
@@ -1450,7 +1577,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             entry["rejected_cosmetic_reflection"] = reflection
                             # Scientific invalidity should cause a clear stop,
                             # not infinite rewording of the original hypothesis.
-                            reflection = reflector.act({
+                            reflector.instruction += BIAS_RESEARCH_CONTRACT
+                        reflection = reflector.act({
                                 **reflection_input,
                                 "invalid_previous_revision": reflection,
                                 "instruction": "Your proposed revision was only a rephrasing. "
@@ -1534,6 +1662,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "two_exploratory_queries": len(tools.history) >= min_queries,
                         "has_development_test": bool(selected["tests"]),
                         "critic_ready": (selected["critique"] or {}).get("decision") == "ready",
+                        "executed_rival_countertest": any(
+                            t.get("requested_by") == "critic" and "workbench" in t
+                            for t in selected["tests"]),
                         "observable_valid": bool((selected["critique"] or {}).get("observable_valid")),
                         "rival_tested": bool((selected["critique"] or {}).get("rival_discriminated")),
                         "logging_checked": bool((selected["critique"] or {}).get("logging_artifact_excluded")),

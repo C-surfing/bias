@@ -103,3 +103,24 @@ Only local Qwen3-8B via existing serving stack. Do not use DeepSeek. No unrelate
 - MechHypoBench (October 2026): https://arxiv.org/abs/2610.05197 ; distinguish data regularities from mechanisms by checking consequences under withheld conditions.
 
 **Next vertical slice:** review the above data -> model-action -> executor path; fix the between-user statistical contract; run one Qwen-designed feature + valid Workbench experiment + numerical countertest + meaningful revision. Do not touch independent holdout or start a Debias claim until a candidate survives development audit.
+
+## Bias research semantic contract (2026-10-27)
+
+Open Discovery now gives Scientist, Concept Formation, Opportunity Selector, Designer,
+Critic and Reflection a shared scientific definition: study a recommender decision or
+feedback mechanism relative to a defensible target, not merely a click association.
+Concepts retain affected population, mechanism entry point, reference identification,
+reference status, competing predictions and missing information. An unidentified
+reference is a research gap, never an established Bias.
+
+The research opportunity pool carries programmatically derived evidence gaps into the
+next agent turn; missing normative reference, an unexecuted inferential rival countertest,
+and unknown recommendation consequences remain separate reasons. An LLM's Critic
+ready flag is insufficient for freezing. Workbench remains the numerical authority;
+KuaiRand random insertion alone does not identify arbitrary policy counterfactuals.
+
+For a strictly controlled Qwen comparison, the pre-contract implementation can be
+read from commit 200512b while the present main contains the revised contract.
+Run equal model/tool budgets with identical frozen dev data; evaluate meaningful
+H1/H2 numeric tests and credible reference deviations, not merely candidate count.
+No independent new Bias confirmation is claimed by these code changes.

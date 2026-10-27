@@ -27,7 +27,10 @@ class ResearchOpportunityPool:
                 key: proposed.get(key, "") for key in (
                     "target_reference", "reference_identification",
                     "distortion_quantity", "distortion_estimate",
-                    "prediction_if_mechanism", "prediction_if_rival")},
+                    "prediction_if_mechanism", "prediction_if_rival",
+                    "affected_population", "mechanism_entry_point",
+                    "reference_status", "next_information_needed",
+                    "discriminating_experiment")},
             "observed_evidence": [{
                 "sql": record.get("sql", ""),
                 "rows": record.get("rows", [])[:8]} for record in observations[-4:]],

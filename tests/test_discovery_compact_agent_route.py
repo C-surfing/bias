@@ -41,7 +41,12 @@ def test_qwen_style_intent_executes_through_scientist_designer_critic(tmp_path, 
                   "distortion_quantity": "allocation share difference",
                   "distortion_estimate": "unmeasured",
                   "prediction_if_mechanism": "within-user gap persists",
-                  "prediction_if_rival": "conditional gap disappears"}
+                  "prediction_if_rival": "conditional gap disappears",
+                  "affected_population": "users who encountered both item groups",
+                  "mechanism_entry_point": "ranking allocation",
+                  "reference_status": "unidentified",
+                  "next_information_needed": "credible conditioned allocation reference",
+                  "discriminating_experiment": "matched exposure and preference contrast"}
     compact = {
         "question": "Does actual item content group affect user response?",
         "group_feature": "item_group", "control_value": "0",
