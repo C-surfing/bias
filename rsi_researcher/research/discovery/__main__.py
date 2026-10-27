@@ -29,7 +29,9 @@ def main():
                          help="frozen raw trajectory DuckDB (only opened during dev export)")
     explore.add_argument("--output", required=True)
     explore.add_argument("--config", required=True)
-    explore.add_argument("--max-rounds", type=int, default=14)
+    explore.add_argument("--max-rounds", type=int, default=None,
+                         help="optional fixed round cap for fair comparisons; "
+                              "omitted means evidence-driven research")
     explore.add_argument("--min-queries", type=int, default=2)
     explore.add_argument("--development-db", help="optional existing isolated dev DB")
     args = p.parse_args()
@@ -51,8 +53,11 @@ def main():
         print(json.dumps({"hypotheses": len(result["hypotheses"]),
                           "model_requests": result["total_model_requests"]}))
     elif args.step == "explore":
-        if args.max_rounds < 3 or args.min_queries < 1 or args.max_rounds <= args.min_queries:
-            p.error("max-rounds must exceed min-queries and be >= 3")
+        if args.min_queries < 1 or (args.max_rounds is not None and
+                                      (args.max_rounds < 3 or
+                                       args.max_rounds <= args.min_queries)):
+            p.error("min-queries must be positive; explicit max-rounds "
+                    "must exceed min-queries and be >= 3")
         from rsi_researcher.research.discovery.open_research import run_open_discovery
         result = run_open_discovery(args.source_db, args.output,
                                     json.loads(Path(args.config).read_text()),

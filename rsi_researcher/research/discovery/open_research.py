@@ -7,6 +7,7 @@ proposal. Only the evaluator (outside this module) may touch holdout.
 from __future__ import annotations
 
 import json
+import itertools
 import re
 import urllib.parse
 import urllib.request
@@ -559,6 +560,7 @@ def compact_opportunity_pool(pool) -> dict:
                      "critic_reason")}
             for t in item.get("tests", [])[-1:]],
         "scientific_evidence_gaps": item.get("scientific_evidence_gaps", []),
+        "next_research_decision": item.get("next_research_decision"),
     } for item in list(pool.records.values())[-5:]]}
 
 
@@ -621,10 +623,25 @@ def research_funnel(concepts: list[dict], pool) -> dict:
     }
 
 
+def research_evidence_signature(tools, concepts: list[dict], pool) -> tuple:
+    """Evidence changes, not elapsed turns or mere renamed hypotheses."""
+    return (len(tools.history), len(tools.feature_records),
+            sum(len(c["tests"]) + len(c["revisions"]) for c in concepts),
+            sum(len(p.get("tests", [])) for p in pool.records.values()),
+            sum(bool(p.get("bias_relevance", {}).get("numeric_discrepancy", {}).get(
+                "measured")) for p in pool.records.values()))
+
+
 def run_open_discovery(source_db: str, output: str, model_config: dict,
-                       max_rounds: int = 12, min_queries: int = 2,
+                       max_rounds: int | None = None, min_queries: int = 2,
                        development_path: str | None = None) -> dict:
-    """Run a reproducible multi-role active research episode; no holdout reads."""
+    """Continue until a research decision or information stall; never read holdout.
+
+    Explicit max_rounds retains the legacy bounded mode for evaluation.
+    """
+    if (max_rounds is not None and
+            (type(max_rounds) is not int or max_rounds < 3 or max_rounds <= min_queries)):
+        raise ValueError("max_rounds must exceed min_queries and be >= 3")
     dest = Path(output)
     dest.mkdir(parents=True, exist_ok=False)
     dev_path = development_path or str(dest / "development_only.duckdb")
@@ -646,15 +663,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "compact_experiment_enabled": discovery_options.get("compact_experiment", True),
         "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "model_config": model_config.get("llm", {}),
+        "research_stop_policy": ("evidence_or_stall" if max_rounds is None
+                                 else "fixed_rounds"),
+        "max_rounds": max_rounds,
         "holdout_exposed": False})
     from rsi_researcher.research.discovery.workbench import (
         ExperimentalWorkbench, EXPERIMENT_SCHEMA)
     workbench = ExperimentalWorkbench(tools)
     model_dir = dest / "model_calls"
     model_dir.mkdir()
-    limits = RunLimits(model_dir, max_requests=5 * max_rounds + 4,
-                       max_tokens=250000, max_seconds=2400)
-    model = create_model(model_dir, limits.max_requests, limits, model_config)
+    # Live science mode has no model-request, token or wall-clock research quota.
+    # Each HTTP call still has its ordinary timeout and retry policy. Bounded
+    # quotas remain for controlled comparisons when --max-rounds is explicit.
+    limits = (RunLimits(model_dir, max_requests=5 * max_rounds + 4,
+                        max_tokens=250000, max_seconds=2400)
+              if max_rounds is not None else None)
+    model = create_model(model_dir,
+                         limits.max_requests if limits else float("inf"),
+                         limits, model_config)
     scientist = ResearchAgent(model)
     scientist.role = "open-discovery-scientist"
     scientist.instruction = (
@@ -716,13 +742,17 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     experiment_failures = {}
     opportunity_pool = ResearchOpportunityPool()
     last = ""
+    stop_reason = ""
+    no_information_actions = 0
     try:
-        for step in range(max_rounds):
+        for step in (itertools.count() if max_rounds is None
+                     else range(max_rounds)):
+            evidence_before = research_evidence_signature(tools, concepts, opportunity_pool)
             if (step >= 3 and tools.history and
                     (not concepts or (
-                        max_rounds - step >= 3 and all(
-                            c["status"] in ("rejected_development", "design_blocked")
-                            for c in concepts)))):
+                        (max_rounds is None or max_rounds - step >= 3)
+                        and all(c["status"] in ("rejected_development", "design_blocked")
+                                for c in concepts)))):
                 # Return to candidate formation after *all* prior hypotheses
                 # were rejected, instead of repeatedly testing dead ends.
                 # A dedicated concept-formation turn prevents tool-format repairs
@@ -802,7 +832,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 "concept_formation": stage_ids})
                 _save(dest / "concept_formation.json", formed)
                 # The autonomous choice runs INSIDE the same research cycle and
-                # consumes the same Qwen/tool budget. Test fixtures without an
+                # shares the same logged Qwen/tool calls. Fixtures without an
                 # actual configured LLM still exercise the normal action route.
                 if model_config.get("llm"):
                     chooser = ResearchAgent(model)
@@ -811,7 +841,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "Choose which AGENT-PROPOSED phenomenon to investigate next. "
                         "Compare the mechanism-vs-rival predictions; select the "
                         "observation or statistical experiment where they disagree "
-                        "most, taking real measured support and cost into account. "
+                        "most, using actual executable support and information gain. "
                         "State distinct observable predictions for BOTH the proposed "
                         "mechanism and its rival; repeating the same prediction is "
                         "not an informative experiment. "
@@ -909,7 +939,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "available_schema": {
                             table: [c["column"] for c in cols]
                             for table, cols in tools.schema().items()},
-                        "budget_left": max_rounds - step,
+                        "unresolved_research_question":
+                            "Find the next credible reference or H1/H2 contrast;"
+                            " no predetermined research-round quota is imposed.",
                     }, "opportunity-choice-" + str(step),
                         constrained_schema)
                     def check_choice(plan):
@@ -1057,10 +1089,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "SQL/define_feature/experiment directly. Prefer the question "
                     "whose next MEASURED outcome would distinguish competing "
                     "mechanisms. Explain the discriminating prediction, expected "
-                    "information, observable support and cost. Do NOT prioritize "
+                    "information and executable support. Do NOT prioritize "
                     "a hypothesis merely because its p-value or effect is large."),
                 "recent_evidence": [compact_step(s) for s in history[-2:]],
-                "steps_left": max_rounds - step,
+                "research_stop_policy": (
+                    "continue on new evidence; stop on scientific exhaustion, "
+                    "confirmed freeze, repeated no-information actions or interruption"),
+                "no_information_actions": no_information_actions,
                 "successful_queries": len(tools.history),
                 "minimum_queries_before_freeze": min_queries,
                 "available_actions": ACTION_SCHEMA["properties"]["action"]["enum"],
@@ -1075,8 +1110,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "the unresolved scientific gaps in the opportunity pool: "
                     "identify a defensible reference when unmeasured, then test "
                     "a contrast where the mechanism and preference rival disagree; "
-                    "revise or abandon when contradicted. Request literature "
-                    "before freeze." if concepts else
+                    "revise or abandon when contradicted. Use each opportunity's "
+                    "next_research_decision (including reference gaps, numerical "
+                    "counterevidence and execution failures), not just its name. "
+                    "Request literature before freeze." if concepts else
                     "Inspect observed allocation and response first; identify "
                     "which recommender decision and reference would distinguish "
                     "a systematic distortion from preferences. Use SQL or a "
@@ -1808,6 +1845,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         break
                     entry["gate"] = "not ready; choose another research action"
                 elif act == "stop":
+                    stop_reason = "scientist_stop: " + decision["reason"]
+                    entry["termination_reason"] = stop_reason
                     history.append(entry)
                     break
             except Exception as exc:
@@ -1838,33 +1877,62 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         selected["id"], selected["claim"],
                         ("abandoned" if selected["status"] == "rejected_development"
                          else selected["status"]))
+                opportunity_pool.record_research_decision(
+                    selected["id"], selected, entry)
             history.append(entry)
+            # New observations, measured contrasts or a corrected mechanism
+            # are information; merely naming another hypothesis or retrying
+            # invalid SQL is not. The stall guard is NOT a total research budget.
+            evidence_after = research_evidence_signature(tools, concepts, opportunity_pool)
+            no_information_actions = (
+                0 if evidence_after != evidence_before
+                else no_information_actions + 1)
             _save(dest / "research_opportunities.json", opportunity_pool.snapshot())
             _save(dest / "journal.json", history)
             _save(dest / "research_state.json", {
                 "concepts": concepts, "rounds_completed": len(history),
                 "registered_features": tools.features,
+                "no_information_actions": no_information_actions,
                 "holdout_consulted": False})
-        status = "frozen_unconfirmed" if last else "development_inconclusive"
+            if max_rounds is None and no_information_actions >= 6:
+                stop_reason = (
+                    "scientific_stall: six consecutive actions produced no "
+                    "new observation, measured contrast or substantive revision")
+                history.append({
+                    "round": step, "action": {"action": "research_stalled",
+                        "reason": stop_reason, "concept_id": "",
+                        "query": "", "concept": ""},
+                    "termination_reason": stop_reason})
+                break
+        status = ("frozen_unconfirmed" if last else
+                  "development_inconclusive" if max_rounds is not None else
+                  "scientific_stalled" if stop_reason.startswith("scientific_stall") else
+                  "scientific_stop" if stop_reason else "development_inconclusive")
         final = {"status": status, "frozen_id": last or None,
                  "concepts": concepts, "registered_features": tools.features,
                  "development_queries": tools.history,
                  "observation_cards": observation_cards,
                  "research_opportunities": opportunity_pool.snapshot(),
                  "research_rounds": len(history), "holdout_consulted": False,
+                 "termination_reason": stop_reason or (
+                     "fixed_round_limit" if max_rounds is not None and not last else ""),
                  "independent_confirmation": False,
                  "causal_bias_established": False, "debias_verified": False,
                  "research_funnel": research_funnel(concepts, opportunity_pool)}
         _save(dest / "journal.json", history)
         _save(dest / "research_state.json", {
             "concepts": concepts, "rounds_completed": len(history),
+            "termination_reason": final["termination_reason"],
+            "no_information_actions": no_information_actions,
             "holdout_consulted": False})
         _save(dest / "frozen_candidate.json", final)
         return final
-    except (BudgetExceeded, ModelFailure) as error:
-        # A bounded research run must preserve its actual evidence even when
-        # a subsequent Qwen call cannot be completed.
-        reason = "budget_exhausted" if isinstance(error, BudgetExceeded) else "model_failed"
+    except (BudgetExceeded, ModelFailure, KeyboardInterrupt) as error:
+        # Preserve the observed science state on an operator interrupt,
+        # bounded-comparison quota or Qwen transport failure.
+        reason = ("interrupted" if isinstance(error, KeyboardInterrupt) else
+                  "budget_exhausted" if isinstance(error, BudgetExceeded)
+                  else "model_failed")
         history.append({"round": len(history),
                         "action": {"action": "runtime_stopped",
                                    "reason": reason, "concept_id": "",

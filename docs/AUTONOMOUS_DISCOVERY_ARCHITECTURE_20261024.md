@@ -124,3 +124,24 @@ read from commit 200512b while the present main contains the revised contract.
 Run equal model/tool budgets with identical frozen dev data; evaluate meaningful
 H1/H2 numeric tests and credible reference deviations, not merely candidate count.
 No independent new Bias confirmation is claimed by these code changes.
+
+
+## Evidence-driven research loop (2026-10-27)
+
+By default, discovery explore has no total round, request, token, or research
+wall-clock quota. Supplying --max-rounds N opts into the prior bounded protocol
+for fair comparisons. Per-request timeouts/retries and scientific acceptance
+remain intact; no holdout is consulted in exploration.
+
+ResearchOpportunityPool is the shared hypothesis state consumed by Scientist
+and Opportunity Selector. Each concept includes measured evidence, reference
+status, rival hypotheses, negative findings and a next_research_decision.
+An execution error triggers repair or changing a blocked mechanism; missing
+normative reference prompts a reference study; unresolved H1/H2 predictions
+lead to falsification. Substantive Reflection changes update the same record.
+
+The loop ends when an Agent chooses scientific stop, the existing freeze
+gate passes, the model fails, or six consecutive actions generate no new
+observations, numerical experiments or substantive revisions. The latter is a
+no-information safety guard, not a cap on productive research; the state
+scientific_stalled does NOT mean no novel Bias exists. Operators can interrupt.

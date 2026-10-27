@@ -119,13 +119,65 @@ class ResearchOpportunityPool:
             return
         item = self.records[identifier]
         item["status"] = status
+        item["phenomenon"] = concept["concept"]
         item["mechanism"] = concept["mechanism"]
         item["rival"] = concept["rival"]
         item["falsifier"] = concept["falsifier"]
         item["measurement"] = concept["measurement"]
+        if concept.get("query"):
+            item["next_observation"] = concept["query"]
+        for field in item["scientific_contract"]:
+            if field in concept:
+                item["scientific_contract"][field] = concept[field]
         if status in ("abandoned", "rejected_development", "design_blocked"):
             if self.focus == identifier:
                 self.focus = None
+
+    def record_research_decision(self, identifier: str, concept: dict, entry: dict):
+        """Keep one evidence-linked next choice after execution and Reflection."""
+        item = self.records[identifier]
+        execution_failure = entry.get("tool_error")
+        revision_failure = entry.get("reflection_veto")
+        gaps = item.get("scientific_evidence_gaps", [])
+        critique = concept.get("critique") or {}
+        reflection = entry.get("reflection") or {}
+        if concept["status"] in ("rejected_development", "design_blocked"):
+            mode = "change_mechanism"
+            reason = (execution_failure or revision_failure or
+                      "The current mechanism was rejected or its design is blocked")
+        elif execution_failure:
+            mode = "repair_execution"
+            reason = execution_failure
+        elif revision_failure:
+            mode = ("repair_execution" if "did not execute" in revision_failure
+                    else "rethink_mechanism")
+            reason = revision_failure
+        elif reflection.get("decision") == "revise" and "revised_concept" in entry:
+            mode = "test_revised_mechanism"
+            reason = reflection["reason"]
+        elif "numeric_reference_deviation_unmeasured" in gaps:
+            mode = "identify_reference"
+            reason = "No measured deviation from a defensible recommender target"
+        elif "no_executed_inferential_rival_countertest" in gaps or (
+                "competing_mechanism_not_discriminated" in gaps):
+            mode = "disambiguate"
+            reason = "H1/H2 has not been distinguished by numerical counterevidence"
+        elif "recommendation_consequence_not_identified" in gaps:
+            mode = "measure_consequence"
+            reason = "Need recommender opportunity or utility consequence"
+        else:
+            mode = "investigate"
+            reason = critique.get("reason", "Seek new evidence")
+        item["next_research_decision"] = {
+            "mode": mode,
+            "reason": str(reason)[:300],
+            "next_sql": (reflection.get("next_sql") if mode == "test_revised_mechanism"
+                         else item.get("next_observation", ""))[:380],
+            "reference_status": item.get("scientific_contract", {}).get(
+                "reference_status", "unidentified"),
+            "h1_h2_discriminated": bool(critique.get("rival_discriminated", False)
+                                       and "competing_mechanism_not_discriminated" not in gaps),
+        }
 
     def record_selection_design(self, identifier: str, choice: dict, support: dict):
         item = self.records[identifier]

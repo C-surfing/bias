@@ -40,3 +40,31 @@ H001 compared prior-click group 0 versus 1, outcome current click, on shared exp
 The Critic's structured API still lacks separate machine-verifiable reference-validity, actual consequence and novelty judgments. Scientific-gap audits and the freeze gate partly mitigate this but cannot manufacture identification. KuaiRand random insertions are a restricted exposure-mode diagnostic, not a randomized user-history experiment or normative recommendation target. No independent new Bias claim can be frozen from these episodes. The next substantive research improvement must be an agent-created **item-side allocation vs defensible response/relevance reference**, with a distinct same-estimand H1/H2 prediction and a real independent confirmation, rather than further generic prompt expansion.
 
 Relevant methods: DiscoveryBench, ICLR 2025 (https://github.com/allenai/discoverybench); POPPER, ICML 2025 (https://github.com/snap-stanford/POPPER); KuaiRand, CIKM 2022 (https://doi.org/10.1145/3511808.3557624). We use their scientific principles, not POPPER's formal sequential Type-I guarantee.
+
+
+## Evidence-driven Qwen pilot after removing fixed budgets
+
+Run: runs/kuairand27k-evidence-driven-qwen-20261027 on the same
+isolated 2,608-user development database and local Qwen3-8B.
+The CLI omitted --max-rounds: protocol shows max_rounds=null and
+research_stop_policy=evidence_or_stall. No model_calls/limits.json exists.
+
+Outcome: 17 Scientist actions (rounds 0-16), 20 Journal entries,
+27 initiated model requests, four distinct development SQL results,
+two hypothesis candidates, one valid Workbench user-level estimate,
+zero independently executed rival-discriminating countertests and
+zero credible normative reference deviations. It stopped with
+scientific_stalled because six consecutive actions yielded no
+new observed evidence, test or substantive revision. It was NOT
+terminated by a request, time, token or total-round quota.
+
+Initial exploratory contrast: the user-level difference for previous_click
+groups on current click was +0.160357; bootstrap 95% CI
+[+0.157020, +0.163415] across 2,608 paired users. This is not
+recommendation-induced distortion or a new Bias. Numerous repeated
+SQL/feature errors remained after the initial measurement.
+
+This validates an unlimited-round **execution and stopping mechanism**,
+not better scientific Bias discovery. The prior bounded experiments
+remain an exploratory fixed-cap comparator; there is no claim of
+significant discovery-rate improvement or of independent confirmation.

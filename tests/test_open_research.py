@@ -422,3 +422,124 @@ def test_scientific_gaps_require_a_valid_reference_and_numeric_rival_countertest
     assert "normative_reference_not_identified" in gaps
     assert "no_executed_inferential_rival_countertest" in gaps
     assert "recommendation_consequence_not_identified" in gaps
+
+
+
+def test_unbounded_science_mode_exceeds_old_round_cap_and_stops_on_decision(
+        tmp_path, monkeypatch):
+    source = _raw(tmp_path)
+    dev = tmp_path / "dev.duckdb"
+    o.development_db(str(source), str(dev))
+    state = {"steps": 0, "max_requests": None}
+    hypothesis = {
+        "concept": "conditional recommender allocation mismatch",
+        "mechanism": "a ranking feedback update changes item opportunity",
+        "rival": "latent preference shift",
+        "falsifier": "the item opportunity gap disappears under reference",
+        "measurement": "per-user item opportunity",
+        "suggested_sql": "SELECT uid,COUNT(*) n FROM events GROUP BY 1",
+    }
+
+    class Scientist:
+        def ask(self, prompt, schema, context):
+            if context["stage"] == "concept-formation":
+                return {"concepts": [hypothesis, {**hypothesis,
+                    "concept": "another opportunity test"}]}
+            state["steps"] += 1
+            if state["steps"] == 16:
+                return _act("stop", reason="No additional identifiable contrast")
+            return _act("sql", query=(
+                f"SELECT COUNT(*) AS n, {state['steps']} AS marker FROM events"))
+
+    def model_factory(directory, max_requests, limits, config):
+        state["max_requests"] = max_requests
+        assert limits is None
+        return Scientist()
+
+    monkeypatch.setattr(o, "create_model", model_factory)
+    output = tmp_path / "unbounded"
+    result = o.run_open_discovery(
+        str(source), str(output), {}, development_path=str(dev))
+    assert state["steps"] == 16
+    assert state["max_requests"] == float("inf")
+    assert result["status"] == "scientific_stop"
+    assert result["termination_reason"].startswith("scientist_stop:")
+    assert not (output / "model_calls" / "limits.json").exists()
+    assert len(result["development_queries"]) == 15
+    assert result["independent_confirmation"] is False
+
+
+def test_unbounded_science_mode_stops_when_no_new_evidence(tmp_path, monkeypatch):
+    source = _raw(tmp_path)
+    dev = tmp_path / "dev.duckdb"
+    o.development_db(str(source), str(dev))
+    calls = []
+    class Scientist:
+        def ask(self, prompt, schema, context):
+            calls.append(context["stage"])
+            return _act("sql", query="SELECT nonexistent_column FROM features")
+
+    monkeypatch.setattr(o, "create_model", lambda *args: Scientist())
+    output = tmp_path / "stalled"
+    result = o.run_open_discovery(
+        str(source), str(output), {}, development_path=str(dev))
+    assert result["status"] == "scientific_stalled"
+    assert "no new observation" in result["termination_reason"]
+    assert len(calls) == 6
+    assert result["research_rounds"] == 7  # six attempts + recorded stop
+    assert not (output / "model_calls" / "limits.json").exists()
+
+
+
+def test_reflection_science_state_is_reused_by_next_agent():
+    from rsi_researcher.research.discovery.opportunities import ResearchOpportunityPool
+
+    pool = ResearchOpportunityPool()
+    original = {
+        "concept": "feedback amplification at item opportunity",
+        "mechanism": "ranker reuses old negatives",
+        "rival": "true preferences moved",
+        "falsifier": "reference conditional opportunity remains equal",
+        "measurement": "item allocation difference",
+        "suggested_sql": "SELECT 1",
+        "reference_status": "unidentified",
+    }
+    pool.register("H001", original, [])
+    concept = {"status": "needs_revision", "critique": {
+        "decision": "test", "rival_discriminated": False}}
+    pool.records["H001"]["scientific_evidence_gaps"] = [
+        "numeric_reference_deviation_unmeasured",
+        "competing_mechanism_not_discriminated",
+    ]
+    pool.record_research_decision("H001", concept, {})
+    assert pool.for_agent()["opportunities"][0][
+        "next_research_decision"]["mode"] == "identify_reference"
+    revised = {**original, "concept": "conditional amplification",
+               "mechanism": "ranker ignores decay",
+               "query": "SELECT 2",
+               "reference_status": "unmeasured"}
+    pool.update_claim("H001", revised, "needs_revision")
+    pool.record_research_decision("H001", concept, {
+        "reflection_veto": "No substantive change of mechanism, rival, falsifier or metric"})
+    shared = o.compact_opportunity_pool(pool)["opportunities"][0]
+    assert shared["mechanism"] == "ranker ignores decay"
+    assert shared["scientific_contract"]["reference_status"] == "unmeasured"
+    assert shared["next_research_decision"]["mode"] == "rethink_mechanism"
+
+
+
+def test_unbounded_operator_interrupt_preserves_partial_science(tmp_path, monkeypatch):
+    source = _raw(tmp_path)
+    dev = tmp_path / "dev.duckdb"
+    o.development_db(str(source), str(dev))
+    class Scientist:
+        def ask(self, prompt, schema, context):
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(o, "create_model", lambda *args: Scientist())
+    path = tmp_path / "interrupted"
+    result = o.run_open_discovery(
+        str(source), str(path), {}, development_path=str(dev))
+    assert result["status"] == "interrupted"
+    assert (path / "journal.json").exists()
+    assert result["holdout_consulted"] is False
