@@ -17,8 +17,13 @@ def experiment_intent_schema(tools, selected_contract=None):
     choices = [name for name in records]
     if selected_contract:
         chosen = selected_contract["group_expression"]
-        choices = [chosen] if chosen in records else choices
-    tables = {r["source_table"] for r in records.values()}
+        table = selected_contract["source_table"]
+        actual = {c["column"] for c in tools.schema()[table]}
+        if chosen not in records and chosen not in actual:
+            raise ValueError("Selected contrast uses an unregistered/nonexistent group")
+        choices = [chosen]
+    tables = ({selected_contract["source_table"]} if selected_contract
+              else {r["source_table"] for r in records.values()})
     outcomes = sorted({
         c["column"] for table in tables for c in tools.schema()[table]
         if c["type"].upper().startswith(_NUMERIC)
@@ -26,6 +31,10 @@ def experiment_intent_schema(tools, selected_contract=None):
     values = sorted({str(row[r["name"]]) for r in records.values()
                      for row in r["evidence"]["rows"]
                      if r["name"] in row and row[r["name"]] is not None})
+    if selected_contract:
+        # Observed support was independently checked by Workbench at selection.
+        values = sorted({selected_contract["control_value"],
+                         selected_contract["treatment_value"]})
     props = {
         "question": {"type": "string", "minLength": 8},
         "group_feature": {"type": "string", "enum": choices},
@@ -52,9 +61,20 @@ def compile_experiment_intent(intent, tools, selected_contract=None):
     Draft202012Validator(
         experiment_intent_schema(tools, selected_contract)).validate(intent)
     name = intent["group_feature"]
-    record = tools.feature_records[name]
-    levels = {str(row[name]) for row in record["evidence"]["rows"]
-              if name in row and row[name] is not None}
+    record = tools.feature_records.get(name)
+    if record is None:
+        # Native measured columns do not require inventing derived features.
+        if not selected_contract:
+            raise ValueError("Use a measured registered feature or chosen native contrast")
+        table = selected_contract["source_table"]
+        if name not in {c["column"] for c in tools.schema()[table]}:
+            raise ValueError("Selected comparison column is absent")
+        levels = {selected_contract["control_value"],
+                  selected_contract["treatment_value"]}
+        record = {"source_table": table}
+    else:
+        levels = {str(row[name]) for row in record["evidence"]["rows"]
+                  if name in row and row[name] is not None}
     if intent["control_value"] == intent["treatment_value"]:
         raise ValueError("The two comparison groups must differ")
     if not {intent["control_value"], intent["treatment_value"]} <= levels:
