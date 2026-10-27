@@ -77,12 +77,6 @@ def main(argv=None):
     if requested and requested[0]=="science-tree":
         from rsi_researcher.research.scientific_tree import main as run_scientific_tree
         return run_scientific_tree(requested[1:])
-    if requested and requested[0]=="four-bias-tree":
-        from rsi_researcher.research.four_bias_tree import main as run_four_bias_tree
-        return run_four_bias_tree(requested[1:])
-    if requested and requested[0]=="llmrank-cycle":
-        from rsi_researcher.llmrank.cycle import main as run_llmrank_cycle
-        return run_llmrank_cycle(requested[1:])
     if requested and requested[0]=="science-cycle":
         from rsi_researcher.research.scientific_director import main as run_director
         return run_director(requested[1:])
