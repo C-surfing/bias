@@ -3,6 +3,8 @@
 **打开这个目录即可看最新代码：`/data/cjh/rsi/project`。** 不用再从带日期的 Git 工作树或 `experiments/` 中寻找实现。
 **一张完整文件地图：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**；研究原则：[docs/LLMRANK_RESEARCH_PROGRAM.md](docs/LLMRANK_RESEARCH_PROGRAM.md)。
 
+**按目标 Bias 判定与质量保护：[docs/BIAS_EVALUATION.md](docs/BIAS_EVALUATION.md)**（Popularity/LLM Candidate Position 两种新主线目标，分开评估）。
+
 **最新自主策略程序设计：[docs/OPEN_POLICY_RESEARCH.md](docs/OPEN_POLICY_RESEARCH.md)**。Agent 现在可以构造非线性用户条件与多阶段重排，而不是只枚举系数。
 
 ## 最新主线

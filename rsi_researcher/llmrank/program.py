@@ -52,6 +52,8 @@ def normalize_program(raw):
             acceptable={None,name,"add","replace","top"}
             if name=="protect":
                 acceptable|={"keep_top","lock_top","freeze_top"}
+            if name=="score":
+                acceptable|={"base","rescore"}
             if marker not in acceptable:
                 raise ValueError("ambiguous nested policy instruction")
             out.append({"op":name,**{k:v for k,v in payload.items() if k!="op"}})

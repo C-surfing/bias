@@ -416,3 +416,130 @@ def _safe_literal(value: str) -> str:
     if len(value) > 100 or any(x in value for x in ("'", ";", "\\", "\n")):
         raise ValueError("Group label contains unsafe characters")
     return value
+
+
+
+def randomized_reference_probe(tools, choice: dict) -> dict:
+    """Development-only diagnostic, NOT identification of platform bias.
+
+    Separately estimate the response contrast on randomly inserted exposures
+    and the difference in observed group composition between standard and random logs.
+    Restrict both policies to their observed overlapping calendar days.
+    Unit bootstrap is by user, not by events.  A randomized insertion is
+    not a randomized recommender policy or a normative optimal allocation.
+    """
+    import random
+    from collections import defaultdict
+
+    if choice["contrast_source"] != "events" or choice.get("reference_kind") != "randomized_exposure":
+        raise ValueError("Randomized reference needs events and an explicitly selected randomized-exposure target")
+    group = _expr(choice["contrast_group"])
+    outcome = _expr(choice["contrast_outcome"])
+    where = _expr(choice["contrast_filter"]) if choice["contrast_filter"].strip() else "TRUE"
+    arms = (choice["control_value"], choice["treatment_value"])
+    if arms[0] == arms[1]:
+        raise ValueError("Identical comparison arms")
+    for arm in arms:
+        _safe_literal(arm)
+    days = [row[0] for row in tools.connection.execute(
+        "SELECT event_day FROM events GROUP BY event_day "
+        "HAVING COUNT(*) FILTER (WHERE is_random=1)>0 "
+        "AND COUNT(*) FILTER (WHERE is_random=0)>0 ORDER BY event_day").fetchall()]
+    if not days:
+        raise ValueError("No calendar days with both exposure policies")
+    source = tools.active_table("events")
+    days_sql = ",".join(str(int(d)) for d in days)
+    query = (
+        "SELECT CAST(uid AS VARCHAR) u, CAST(is_random AS INTEGER) exposure_mode,"
+        "CAST((" + group + ") AS VARCHAR) arm,"
+        "COUNT(*) n, SUM(CAST((" + outcome + ") AS DOUBLE)) sy "
+        "FROM " + source + " WHERE event_day IN (" + days_sql + ") "
+        "AND (" + where + ") AND (" + outcome + ") IS NOT NULL "
+        "AND CAST((" + group + ") AS VARCHAR) IN ('" + _safe_literal(arms[0]) + "','" + _safe_literal(arms[1]) + "') "
+        "GROUP BY 1,2,3")
+    rows = tools.connection.execute(query).fetchall()
+    per_user = defaultdict(lambda: {(0, arms[0]): (0, 0.0),
+                                    (0, arms[1]): (0, 0.0),
+                                    (1, arms[0]): (0, 0.0),
+                                    (1, arms[1]): (0, 0.0)})
+    for uid, policy, arm, n, sy in rows:
+        if policy not in (0, 1) or arm not in arms or sy is None:
+            continue
+        per_user[uid][(policy, arm)] = (int(n), float(sy))
+    users = list(per_user)
+    if not users:
+        raise ValueError("No events for the proposed random reference")
+    def calc(cohort):
+        aggregate = {(p,a): [0,0.] for p in (0,1) for a in arms}
+        for uid in cohort:
+            for key, (n,sy) in per_user[uid].items():
+                aggregate[key][0] += n
+                aggregate[key][1] += sy
+        if min(aggregate[(p,a)][0] for p in (0,1) for a in arms) < 20:
+            return None
+        rnd_rates = [aggregate[(1,a)][1] / aggregate[(1,a)][0] for a in arms]
+        std_rates = [aggregate[(0,a)][1] / aggregate[(0,a)][0] for a in arms]
+        rnd_gap = rnd_rates[1] - rnd_rates[0]
+        std_gap = std_rates[1] - std_rates[0]
+        shares = []
+        for policy in (0,1):
+            denom = sum(aggregate[(policy,a)][0] for a in arms)
+            if denom == 0:
+                return None
+            shares.append(aggregate[(policy,arms[1])][0] / denom)
+        return (rnd_gap, shares[0]-shares[1], std_gap, std_gap-rnd_gap,
+                rnd_rates, std_rates, shares, aggregate)
+    point = calc(users)
+    if point is None:
+        raise ValueError("Insufficient randomized observations of both arms")
+    rnd_users_by_arm = {
+        arm: sum(per_user[u][(1,arm)][0]>0 for u in users) for arm in arms}
+    if min(rnd_users_by_arm.values()) < 10:
+        raise ValueError("Too few independent random-reference users per arm: "
+                         + str(rnd_users_by_arm))
+    rng = random.Random(20261026)
+    boot = []
+    for _ in range(240):
+        sample = rng.choices(users, k=len(users))
+        estimate = calc(sample)
+        if estimate is not None:
+            boot.append(estimate[:4])
+    if len(boot) < 190:
+        raise ValueError("Insufficient user-bootstrap reference support")
+    def ci(i):
+        vals = sorted(v[i] for v in boot)
+        return [vals[int(.025*len(vals))], vals[int(.975*len(vals))-1]]
+    response, allocation, standard_response, interaction, rates, standard_rates, shares, counts = point
+    return {
+        "status": "development_randomized_reference_diagnostic",
+        "reference": "randomly inserted item response; not randomized full recommender",
+        "same_calendar_days": days,
+        "source_table": "events",
+        "group_expression": group,
+        "outcome_expression": outcome,
+        "control_value": arms[0], "treatment_value": arms[1],
+        "population_filter": where,
+        "random_response_contrast_treatment_minus_control": response,
+        "random_response_ci95_user_bootstrap": ci(0),
+        "random_response_rates_control_treatment": rates,
+        "standard_response_contrast_treatment_minus_control": standard_response,
+        "standard_response_ci95_user_bootstrap": ci(2),
+        "standard_response_rates_control_treatment": standard_rates,
+        "standard_minus_random_response_contrast": interaction,
+        "policy_response_interaction_ci95_user_bootstrap": ci(3),
+        "standard_minus_random_treatment_group_share": allocation,
+        "group_share_gap_ci95_user_bootstrap": ci(1),
+        "treatment_group_shares_standard_random": shares,
+        "n_independent_users": len(users),
+        "n_random_users_by_arm": rnd_users_by_arm,
+        "counts_by_policy_arm": {
+            ("random" if p else "standard") + "_" + ("control" if a==arms[0] else "treatment"):
+            counts[(p,a)][0] for p in (0,1) for a in arms},
+        "response_vs_composition_sign_disagreement": bool(response*allocation < 0),
+        "discrepancy_is_validated_bias": False,
+        "limitations": (
+            "Group shares can reflect user/history state rather than item allocations; ""even item group shares need an independently justified utility target; "
+            "random insertion does not randomize the learned recommender, "
+            "user state, item mix or policy eligibility. "
+            "This contrast does not establish causal algorithmic harm."),
+    }

@@ -1,0 +1,21 @@
+{
+  "llm": {
+    "provider": "vllm",
+    "base_url": "http://127.0.0.1:18523/v1",
+    "model": "qwen3-8b",
+    "enable_thinking": false,
+    "temperature": 0.45,
+    "top_p": 0.9,
+    "top_k": 20,
+    "max_tokens": 1700,
+    "seed": 20261024,
+    "timeout_seconds": 240
+  },
+  "research": {
+    "protocol": "qwen-open-tool-led-v1"
+  },
+  "discovery": {
+    "observation_cards": false,
+    "compact_experiment": false
+  }
+}

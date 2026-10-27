@@ -126,6 +126,7 @@ def test_real_research_loop_forms_tests_revises_and_checks_literature(tmp_path, 
          "verdict": "possibly_distinct",
          "discriminating_next_test": "replay session state update"},
         _act("freeze", **base),
+        _act("stop", **base),
     ]
     calls = []
     class FakeModel:
@@ -140,8 +141,9 @@ def test_real_research_loop_forms_tests_revises_and_checks_literature(tmp_path, 
         "errors": [], "retrieval_complete": True})
     result = o.run_open_discovery(str(source), str(tmp_path / "run"), {},
                                   max_rounds=9, development_path=str(dev))
-    assert result["status"] == "frozen_unconfirmed"
-    assert result["frozen_id"] == "H001"
+    # A Critic's "ready" alone is not numerical evidence of a Bias reference.
+    assert result["status"] == "development_inconclusive"
+    assert result["frozen_id"] is None
     assert result["concepts"][0]["version"] == 3
     assert len(result["concepts"][0]["tests"]) == 3
     assert result["concepts"][0]["literature"]["assessment"]["verdict"] == "possibly_distinct"
@@ -237,6 +239,13 @@ def test_auto_concept_stage_produces_unpreselected_hypotheses(tmp_path, monkeypa
          "measurement": "tag change x user outcome",
          "suggested_sql": "SELECT topic_changed,COUNT(*) n,AVG(click) rate FROM features GROUP BY 1"},
     ]
+    for claim in claims:
+        claim.update(target_reference="UNIDENTIFIED",
+                     reference_identification="No valid counterfactual in observed data",
+                     distortion_quantity="allocation minus warranted opportunity",
+                     distortion_estimate="unmeasured",
+                     prediction_if_mechanism="allocation changes after state update",
+                     prediction_if_rival="allocation unchanged after conditioning on taste")
     responses = [
         action("sql", query="SELECT after_nonclick,COUNT(*) n,AVG(click) r FROM features GROUP BY 1"),
         action("sql", query="SELECT topic_changed,COUNT(*) n,AVG(click) r FROM features GROUP BY 1"),
@@ -332,12 +341,13 @@ def test_reflection_revises_failed_scientific_mechanism(tmp_path, monkeypatch):
         "retrieval_complete": False})
     result = o.run_open_discovery(str(source), str(tmp_path / "run"), {},
                                   max_rounds=7, development_path=str(dev))
-    assert result["status"] == "frozen_unconfirmed"
+    assert result["status"] == "development_inconclusive"
     assert result["concepts"][0]["version"] == 3
     assert result["concepts"][0]["revisions"][-1]["reason"].startswith("tag effect")
     assert result["concepts"][0]["literature"]["assessment"]["verdict"] == "insufficient_literature"
     journal = json.loads((tmp_path / "run" / "journal.json").read_text())
     assert any("reflection" in step for step in journal)
+    assert journal[-1]["freeze_gate"]["numeric_reference_gap_computed"] is False
 
 
 def test_exact_duplicate_query_rejected(tmp_path):

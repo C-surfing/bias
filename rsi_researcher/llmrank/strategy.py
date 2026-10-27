@@ -13,7 +13,7 @@ import json
 import math
 import random
 
-PARSER_CONTRACT="rank_alias_v2_open_policy_program_v1_synonyms"
+PARSER_CONTRACT="rank_alias_v2_open_policy_program_v1_history_count"
 
 SPEC = {
     "history_n": (3,5,10,20,50),
@@ -221,7 +221,7 @@ def rank(model,case,order,titles,strategy,popularity,seed,tag,
             "novelty":1.-normalized,
             "head":float(item in head_items),
             "rank_norm":1.-original_position[item]/max(1,n-1),
-            "history_len":min(1.,len(case["history"])/50.),
+            "history_len":float(len(case["history"])),
             "pop_percentile":pop_quantile[item]}
         penalty=lam*(features["pop_excess"]
                      if policy=="personalized_gate" else normalized)

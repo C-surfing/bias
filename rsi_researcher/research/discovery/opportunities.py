@@ -6,6 +6,8 @@ types, choose candidate variables, or silently rank by statistical significance.
 """
 from __future__ import annotations
 
+import math
+
 
 class ResearchOpportunityPool:
     def __init__(self):
@@ -21,6 +23,11 @@ class ResearchOpportunityPool:
             "rival": proposed["rival"],
             "falsifier": proposed["falsifier"],
             "measurement": proposed["measurement"],
+            "scientific_contract": {
+                key: proposed.get(key, "") for key in (
+                    "target_reference", "reference_identification",
+                    "distortion_quantity", "distortion_estimate",
+                    "prediction_if_mechanism", "prediction_if_rival")},
             "observed_evidence": [{
                 "sql": record.get("sql", ""),
                 "rows": record.get("rows", [])[:8]} for record in observations[-4:]],
@@ -38,8 +45,10 @@ class ResearchOpportunityPool:
             "evidence_status": "behavioral_pattern",
             "bias_relevance": {
                 "reference_kind": "none",
-                "target_reference": "",
-                "proposed_distortion": "",
+                "target_reference": proposed.get("target_reference", ""),
+                "reference_identification": proposed.get("reference_identification", ""),
+                "distortion_quantity": proposed.get("distortion_quantity", ""),
+                "proposed_distortion": proposed.get("distortion_estimate", ""),
                 "mechanism_entry_point": "",
                 "corrective_intervention": "",
                 "reference_measured": False,
@@ -65,7 +74,7 @@ class ResearchOpportunityPool:
     def choose(self, identifier: str, rationale: str, next_query: str = ""):
         if identifier not in self.records:
             raise ValueError("Select an existing research opportunity")
-        if self.records[identifier]["status"] in ("abandoned", "rejected_development"):
+        if self.records[identifier]["status"] in ("abandoned", "rejected_development", "design_blocked"):
             raise ValueError("This hypothesis has been abandoned after counterevidence; "
                              "select another mechanism or form a new concept")
         self.focus = identifier
@@ -111,7 +120,7 @@ class ResearchOpportunityPool:
         item["rival"] = concept["rival"]
         item["falsifier"] = concept["falsifier"]
         item["measurement"] = concept["measurement"]
-        if status in ("abandoned", "rejected_development"):
+        if status in ("abandoned", "rejected_development", "design_blocked"):
             if self.focus == identifier:
                 self.focus = None
 
@@ -121,6 +130,7 @@ class ResearchOpportunityPool:
         item["bias_relevance"] = {
             "reference_kind": choice.get("reference_kind", "none"),
             "target_reference": choice.get("target_reference", ""),
+            "reference_identification": choice.get("reference_identification", ""),
             "proposed_distortion": choice.get("proposed_distortion", ""),
             "mechanism_entry_point": choice.get("mechanism_entry_point", ""),
             "corrective_intervention": choice.get("corrective_intervention", ""),
@@ -139,6 +149,28 @@ class ResearchOpportunityPool:
             "prediction_if_rival": choice["rival_direction"],
             "development_support": support,
         }
+
+    def record_reference_diagnostic(self, identifier: str, result: dict):
+        item = self.records[identifier]
+        item["bias_relevance"]["randomized_reference_diagnostic"] = result
+        # Programmatically audit the exact contrast. This is a difference
+        # between observed exposure modes, NOT a justified optimal-policy target.
+        shares = result["treatment_group_shares_standard_random"]
+        gap = result["standard_minus_random_treatment_group_share"]
+        ci = result["group_share_gap_ci95_user_bootstrap"]
+        if (len(shares) != 2 or len(ci) != 2
+                or not all(math.isfinite(float(v)) for v in [*shares, gap, *ci])
+                or not math.isclose(shares[0] - shares[1], gap, abs_tol=1e-9)):
+            raise ValueError("Random-reference gap and uncertainty are not numerically consistent")
+        item["bias_relevance"]["numeric_discrepancy"] = {
+            "metric": "treatment_item_group_exposure_share",
+            "observed": shares[0], "reference": shares[1],
+            "estimate": gap, "ci95": ci, "measured": True,
+            "reference_scope": "random-insertion exposure mode only",
+            "normative_target_validated": False}
+        item["bias_relevance"]["randomized_response_observed"] = True
+        item["bias_relevance"]["reference_measured"] = False
+        item["evidence_status"] = "reference_diagnostic_only"
 
     def snapshot(self) -> dict:
         return {"focus": self.focus, "opportunities": list(self.records.values())}

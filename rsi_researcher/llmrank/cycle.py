@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from rsi_researcher.llmrank.science import search, select_case_panels, FORMAT_AUDIT_CONTRACT
 from rsi_researcher.llmrank.evidence import paired_clean_evidence
+from rsi_researcher.llmrank.bias_objectives import (OBJECTIVES, CONTRACT as BIAS_OBJECTIVE_CONTRACT,
+    evaluate_target, bootstrap_target_bias)
 from rsi_researcher.llmrank.strategy import (
     BASELINE, fingerprint, evaluate_strategy, bootstrap_paired,
     PARSER_CONTRACT
@@ -28,15 +30,21 @@ def ensure_frozen(expected, actual):
                 "data_archive_sha256", "candidate_source", "retrieval"):
         if expected[key]!=actual[key]:
             raise ValueError("confirmation cohort changed: "+key)
+    if expected.get("bias_target") != actual.get("bias_target"):
+        raise ValueError("confirmation cohort changed: bias_target")
 
 def independent_confirmation(directory, *, config, data, dataset, retrieval,
-                             users, seeds, frozen_campaign, max_requests):
+                             users, seeds, frozen_campaign, max_requests,
+                             bias_target="popularity"):
     """One-shot confirmation: creates a single immutable held-out report."""
+    if bias_target not in OBJECTIVES:
+        raise ValueError("unsupported LLMRank bias target")
     directory=Path(directory)
     directory.mkdir(parents=True,exist_ok=False)
     atomic_json(directory/"confirmation_protocol.json",{
         "source_campaign":str(frozen_campaign),"holdout_opened_once":True,
         "frozen_selection_only":True,"max_requests":max_requests,
+        "bias_target":bias_target,"bias_objective_contract":BIAS_OBJECTIVE_CONTRACT,
         "interpretation":"sample-based holdout, not causal identification"})
     limits=RunLimits(directory,max_requests=max_requests,
         max_tokens=config["budget"]["max_tokens"],
@@ -51,6 +59,7 @@ def independent_confirmation(directory, *, config, data, dataset, retrieval,
             raise ValueError("candidate has already consumed test labels")
         dev,test,titles,pop,protocol=select_case_panels(
             dataset,data,retrieval,users,seed)
+        protocol["bias_target"]=bias_target
         ensure_frozen(saved["cohort"],protocol)
         rsi=saved["development"]["selected_rsi"]["strategy"]
         fixed=saved["development"]["selected_fixed"]["strategy"]
@@ -65,6 +74,8 @@ def independent_confirmation(directory, *, config, data, dataset, retrieval,
         fixed_arm=eval_one("fixed",fixed)
         rsi_arm=eval_one("rsi",rsi)
         paired=bootstrap_paired(baseline,rsi_arm,pop,titles,seed=seed)
+        target=evaluate_target(baseline["metrics"]["5"],rsi_arm["metrics"]["5"],bias_target)
+        target_ci=bootstrap_target_bias(baseline,rsi_arm,pop,titles,bias_target,seed=seed)
         fixed_paired=bootstrap_paired(baseline,fixed_arm,pop,titles,seed=seed+1)
         against_fixed=bootstrap_paired(fixed_arm,rsi_arm,pop,titles,seed=seed+2)
         row={
@@ -77,6 +88,11 @@ def independent_confirmation(directory, *, config, data, dataset, retrieval,
                 "fixed_vs_baseline":paired_clean_evidence(baseline,fixed_arm,pop,titles)
             },
             "paired_fixed":fixed_paired,"paired_rsi_minus_fixed":against_fixed,
+            "target_bias":target,"target_bias_paired_ci":target_ci,
+            "utility_guard_descriptive":(
+                rsi_arm["metrics"]["5"]["NDCG@5"]>=.95*baseline["metrics"]["5"]["NDCG@5"]
+                and rsi_arm["metrics"]["5"]["HR@5"]>=baseline["metrics"]["5"]["HR@5"]
+                    -max(.03,1/max(1,baseline["metrics"]["5"]["users"]))),
             "source_selection":str(frozen_campaign),
             "independent_causal_discoveries":0,
         }
@@ -93,7 +109,9 @@ def independent_confirmation(directory, *, config, data, dataset, retrieval,
 
 def conduct(directory, *,config,data,dataset,retrieval,users,seeds,
             max_rounds,max_nodes,requests_per_round,max_total_requests,
-            patience):
+            patience,bias_target="popularity"):
+    if bias_target not in OBJECTIVES:
+        raise ValueError("unsupported LLMRank bias target")
     root=Path(directory).resolve()
     if root.exists():
         raise FileExistsError(root)
@@ -109,6 +127,8 @@ def conduct(directory, *,config,data,dataset,retrieval,users,seeds,
         "max_total_model_requests":max_total_requests,
         "ranking_parser_contract":PARSER_CONTRACT,
         "format_audit_contract":FORMAT_AUDIT_CONTRACT,
+        "bias_target":bias_target,"bias_objective_contract":BIAS_OBJECTIVE_CONTRACT,
+        "bias_primary_metric":OBJECTIVES[bias_target]["primary_metric"],
         "patience":patience,"holdout_access":"AFTER stopping only",
         "stopping":"budget OR early scientific candidate OR patience OR maximum rounds",
         "not_until_success_by_repeated_test_peeking":True})
@@ -130,7 +150,8 @@ def conduct(directory, *,config,data,dataset,retrieval,users,seeds,
         destination=root/f"round-{iteration:02d}"
         result=search(destination,config=config,data=data,dataset=dataset,
             retrieval=retrieval,users=users,seeds=seeds,max_nodes=max_nodes,
-            max_requests=budget,prior_campaign=prior,development_only=True)
+            max_requests=budget,prior_campaign=prior,development_only=True,
+            bias_target=bias_target)
         used=result["requests"]
         requests+=used
         summary=read_json(destination/"summary.json")
@@ -176,14 +197,18 @@ def conduct(directory, *,config,data,dataset,retrieval,users,seeds,
                 "rounds":len(history),"requests":requests}
     verified,confirmed_calls=independent_confirmation(root/"confirmation",
         config=config,data=data,dataset=dataset,retrieval=retrieval,
-        users=users,seeds=seeds,frozen_campaign=prior,max_requests=allowed)
+        users=users,seeds=seeds,frozen_campaign=prior,max_requests=allowed,
+        bias_target=bias_target)
     outcome={"status":"completed_development_and_one_holdout",
+        "bias_target":bias_target,"bias_objective_contract":BIAS_OBJECTIVE_CONTRACT,
         "rounds":len(history),"termination":stopped,
         "research_requests":requests,"confirmation_requests":confirmed_calls,
         "combined_requests":requests+confirmed_calls,
         "independent_confirmed_scientific_discoveries":0,
         "selected_from":str(prior),"summary":[{
             "seed":r["seed"],
+            "target_bias":r["target_bias"],
+            "target_bias_paired_ci":r["target_bias_paired_ci"],
             "baseline_NDCG5":r["baseline"]["5"]["NDCG@5"],
             "rsi_NDCG5":r["rsi"]["5"]["NDCG@5"],
             "baseline_ARP5":r["baseline"]["5"]["ARP@5"],
@@ -207,6 +232,7 @@ def main(argv=None):
     p.add_argument("--requests-per-round",type=int,default=220)
     p.add_argument("--max-total-requests",type=int,default=900)
     p.add_argument("--patience",type=int,default=2)
+    p.add_argument("--bias-target",choices=sorted(OBJECTIVES),default="popularity")
     a=p.parse_args(argv)
     config=json.loads(Path(a.config).read_text(encoding="utf-8"))
     if config.get("llm",{}).get("provider")!="vllm":
@@ -216,7 +242,8 @@ def main(argv=None):
         retrieval=a.retrieval,users=a.users,seeds=seeds,
         max_rounds=a.max_rounds,max_nodes=a.max_nodes,
         requests_per_round=a.requests_per_round,
-        max_total_requests=a.max_total_requests,patience=a.patience),
+        max_total_requests=a.max_total_requests,patience=a.patience,
+        bias_target=a.bias_target),
         ensure_ascii=False))
 
 if __name__=="__main__":

@@ -26,24 +26,31 @@ class FormatAwareHarnessTests(TestCase):
         self.candidate=metrics(0.071,15.3)
 
     def test_legacy_metrics_can_appear_positive_but_format_support_blocks(self):
-        self.assertTrue(audit(self.baseline,self.candidate)["eligible_development_only"])
+        self.baseline["5"]["CandidatePositionBias_NDCG@5"]=0.35
+        self.candidate["5"]["CandidatePositionBias_NDCG@5"]=0.10
+        self.assertTrue(audit(self.baseline,self.candidate,
+                              bias_target="candidate_position")["eligible_development_only"])
         left={"random":rows({0}),"first":rows({1})}
         right={"random":rows({2,3,4}),"first":rows({5,6,7})}
         matched=paired_clean_evidence(left,right,self.pop,self.titles)
         self.assertEqual(matched["paired_clean_users"],6)
         self.assertFalse(matched["sufficient_support"])
-        result=audit(self.baseline,self.candidate,clean_evidence=matched)
+        result=audit(self.baseline,self.candidate,clean_evidence=matched,
+                     bias_target="candidate_position")
         self.assertFalse(result["eligible_development_only"])
         self.assertEqual(result["failure_mode"],"inconclusive_due_to_ranking_format")
         self.assertEqual(result["format_assessment"],"insufficient_clean_paired_support")
 
     def test_clean_pair_can_reject_apparent_full_panel_success(self):
+        self.baseline["5"]["CandidatePositionBias_NDCG@5"]=0.35
+        self.candidate["5"]["CandidatePositionBias_NDCG@5"]=0.10
         clean=rows(set())
         matched=paired_clean_evidence(
             {"random":clean,"first":clean},
             {"random":clean,"first":clean},self.pop,self.titles)
         self.assertTrue(matched["sufficient_support"])
-        result=audit(self.baseline,self.candidate,clean_evidence=matched)
+        result=audit(self.baseline,self.candidate,clean_evidence=matched,
+                     bias_target="candidate_position")
         self.assertFalse(result["eligible_development_only"])
         self.assertEqual(result["failure_mode"],"format_sensitive_candidate")
         self.assertEqual(result["format_assessment"],"not_robust_to_format_exclusion")

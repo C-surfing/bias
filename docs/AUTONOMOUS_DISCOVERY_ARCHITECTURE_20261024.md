@@ -40,7 +40,7 @@ PYTHONPATH=. /data/cjh/rsi/discovery_private_20261024/env/bin/python -B \
 | `runs/kuairand27k-*` | Derived DuckDB database, public exploratory cards, evaluator-private holdout file, frozen Qwen claims and reviewer evidence |
 | `/data/cjh/rsi/discovery_private_20261024/suites/<suite>/` | Canonical **new synthetic** mechanism truths, owner-only permissions, distinct from real-data holdout files |
 
-Historical `/data/cjh/rsi/discovery_private_discovery-*` directories are referenced by older experimental logs and retained unchanged. They contain tiny historical synthetic evaluator truths. There is **no migration or deletion**, and new suites do not add top-level clutter. The `discovery_private_20261024` directory also contains an isolated Python environment; do not mix that environment with experiment results.
+Six historical `/data/cjh/rsi/discovery_private_discovery-*` directories (small synthetic evaluator truths) were **moved, not deleted**, on 2026-10-26 to `/data/cjh/rsi/archive/discovery-private-legacy-20261024/` to declutter the root. Original paths, archived paths, and SHA-256 hashes are recorded in its private `relocations.json`; replay older runs by passing the archived truth path with `--private`. The active `discovery_private_20261024` directory (including its isolated Python environment and new private suites) remains in place. Do not mix that environment with experiment results.
 
 The Qwen model is **not granted shell/file tools** by this workflow. The evaluator has access to confirmation data and synthetic secrets but transmits only development cards to the model. This is an LLM interface boundary, **not security-grade Unix-user process isolation** (the execution user owns the files). `holdout_assessment.json` is not part of Qwen's prompt.
 
@@ -65,3 +65,41 @@ A Qwen hypothesis passes stage 1 but does not automatically pass stages 2 or 3. 
 ## Constraints
 
 Only local Qwen3-8B via existing serving stack. Do not use DeepSeek. No unrelated tree/MCTS modules, no destructive code cleanup of concurrently modified research files, and no claim of causal novel Bias unless the numerical evidence and targeted debias truly support it.
+
+## 2026-10-26 decision: discovery-first research and review map
+
+**Single research loop:** Explore -> formulate competing hypotheses -> run a registered falsification experiment -> revise/abandon -> *independent* confirmation. Only independently supported mechanisms proceed to real recommender intervention and debias. These are responsibilities, **not new agents, Directors, trees, or model clients**.
+
+**Current evidence boundary:** `runs/kuairand27k-open-agent-development-20261024.duckdb` has 21,824,051 `events` and 21,682,292 `features` rows covering 2,608 development users (2022-04-08 to 2022-04-30). Qwen sees schemas and bounded query results, never a full CSV in its prompt. `DevelopmentTools.define_feature` already builds ephemeral registered DuckDB views for subsequent exploration/experiments. Do not make another feature-registry layer.
+
+**Canonical owners, in the order reviewers should follow:**
+
+| Read | Question to verify |
+|---|---|
+| `rsi_researcher/research/kuairand_temporal_discovery.py` | How are source events, timestamps, sequence outcomes and disjoint users/time constructed? |
+| `rsi_researcher/research/discovery/open_research.py`: `DevelopmentTools` | Does Qwen see real schema; can it define and then reuse a row-level feature? |
+| `open_research.py`: `ACTION_SCHEMA`, `CONCEPT_PAIR_SCHEMA` | Does the model propose a mechanism, credible rival, falsifier and executable measurement? |
+| `rsi_researcher/research/discovery/workbench.py`: `EXPERIMENT_SCHEMA`, `ExperimentalWorkbench` | Does an experiment retain user units, compare supported groups and return executable SQL, estimate, cluster CI and placebo? |
+| `open_research.py`: experiment -> Critic -> countertest -> Reflection | Did an independent numerical counterexperiment actually run, and did the revised hypothesis materially change? |
+| `research/discovery_cycle.py` and `discovery_lab.py` | Hold fixed and Concept+Test baselines against freshly sealed hidden synthetic tasks; do not tune on revealed tasks. |
+| `runs/*/journal.json`, `model_calls/` | Distinguish development-only evidence, model-proposed tests, critic vetoes and independently confirmed results. |
+
+**Immediate implementation review findings:**
+
+1. In `workbench.py::_summary`, a mandatory minimum paired-user check is applied even when `analysis='cluster_weighted'`. This incorrectly blocks legitimate between-user, mutually exclusive arms. Restrict paired support checks to `paired_user`; assess independent clusters per arm for `cluster_weighted`, and add one regression case.
+2. The full Qwen autonomous acceptance has not yet passed: one real Qwen-defined derived column -> real Experiment Specification -> successful Workbench statistics -> distinct numerical Critic countertest -> substantive hypothesis revision/abandonment, with full provenance.
+3. The `4/6` Concept+Test vs `0/6` Active RSI result is on planted **synthetic** mechanisms. Preserve Concept+Test, improve observation and experiment selection, then compare on entirely new concealed tasks.
+4. Random insertion in KuaiRand supplies partial randomized exposure evidence, **not** control over the historical recommender's internal state. `confirmed causal recommendation bias` requires a controlled real recommender intervention, not merely held-out log correlation.
+5. Same LLM in Scientist and Critic roles is a reasoning separation, **not** independent evidence. The latter requires an executor, disjoint samples or interventions and frozen plans.
+
+**Priority literature and code reading sequence (skim paper + follow actual functions):**
+
+- KuaiRand (CIKM 2022): https://kuairand.com/ ; https://github.com/chongminggao/KuaiRand
+- DiscoveryBench (ICLR 2025): https://github.com/allenai/discoverybench ; `agents/coder_agent.py`, `agents/react_agent.py`, `eval/eval.py`; learn task representation and facet-based evaluation, *not* unrestricted novelty claims.
+- ResearchBench (ACL 2026): https://github.com/ankitala/ResearchBench ; learn inspiration retrieval, composition and order-invariant hypothesis ranking.
+- Biases in the Blind Spot (ICML 2026): https://github.com/FlyingPumba/biases-in-the-blind-spot ; learn free concept proposal, counterfactual variations, multiplicity-aware screening (adapt interventions to an executable recommender).
+- POPPER (ICML 2025): https://github.com/snap-stanford/POPPER ; `popper/popper.py`, `popper/agent.py`, `popper/prompt_utils.py`; learn falsification protocol; **do not claim sequential Type-I control without validating its assumptions**.
+- FIRE-Bench (ICML 2026): https://github.com/maitrix-org/FIRE-Bench ; learn verifiable atomic claims, research-cost accounting and sealed rediscovery.
+- MechHypoBench (October 2026): https://arxiv.org/abs/2610.05197 ; distinguish data regularities from mechanisms by checking consequences under withheld conditions.
+
+**Next vertical slice:** review the above data -> model-action -> executor path; fix the between-user statistical contract; run one Qwen-designed feature + valid Workbench experiment + numerical countertest + meaningful revision. Do not touch independent holdout or start a Debias claim until a candidate survives development audit.

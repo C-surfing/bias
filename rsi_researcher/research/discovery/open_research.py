@@ -53,7 +53,10 @@ CONCEPT_PAIR_SCHEMA = {
     "properties": {"concepts": {"type": "array", "minItems": 2, "maxItems": 3,
         "items": {"type": "object", "properties": {
             "concept": TEXT, "mechanism": TEXT, "rival": TEXT,
-            "falsifier": TEXT, "measurement": TEXT, "suggested_sql": TEXT},
+            "falsifier": TEXT, "measurement": TEXT, "suggested_sql": TEXT,
+            "target_reference": TEXT, "reference_identification": TEXT,
+            "distortion_quantity": TEXT, "distortion_estimate": TEXT,
+            "prediction_if_mechanism": TEXT, "prediction_if_rival": TEXT},
             "required": ["concept", "mechanism", "rival", "falsifier",
                          "measurement", "suggested_sql"],
             "additionalProperties": False}}},
@@ -161,10 +164,17 @@ def development_db(source_db: str, target_db: str) -> dict:
             recent_response_drop,previous_interval_ms,recent_click,older_click
             FROM source_db.anomaly_features
             WHERE user_fold<>0 AND event_day<=20220430""")
+        source_fields = {field[0] for field in con.execute(
+            "DESCRIBE SELECT * FROM source_db.observed_sequences").fetchall()}
+        optional = [field for field in (
+            "author", "tab", "activity", "sequence_index",
+            "previous_long_view", "recent_click", "older_click")
+            if field in source_fields]
+        extras = "".join(",s." + field for field in optional)
         con.execute("""CREATE TABLE events AS SELECT
             uid,vid,event_day,moment_ms,is_random,click,hate,
             long_view,tags,previous_video,previous_click,
-            previous_hate,previous_moment,previous_tags,next_tags
+            previous_hate,previous_moment,previous_tags,next_tags""" + extras + """
             FROM source_db.observed_sequences s
             WHERE s.uid IN (SELECT DISTINCT uid FROM features)
               AND s.event_day<=20220430""")
@@ -241,14 +251,21 @@ class DevelopmentTools:
             raise ValueError("Feature name must be a fresh lowercase SQL identifier")
         if not expression.strip() or len(expression) > 1000 or ";" in expression or FORBIDDEN.search(expression):
             raise ValueError("Feature expression must be an SQL scalar expression")
-        if re.search(r"\b(click|hate|long_view|next_click)\b", expression, re.I):
-            raise ValueError("Do not build a predictor from the CURRENT outcome label; use "
-                             "previous_click/previous_hate, timestamps or other observed "
-                             "pre-event fields, and measure current outcomes separately")
+        if re.search(r"\b(click|hate|long_view|next_click|next_tags)\b", expression, re.I):
+            raise ValueError("No future or current outcome may define a treatment; "
+                             "use pre-event previous_click/previous_hate and "
+                             "measure current or future outcomes separately")
         # Execute the definition on the chosen source before registering a view.
         evidence = self.sql(
             "SELECT (" + expression + ") AS " + name + ",count(*) n FROM " +
             source_table + " GROUP BY 1 ORDER BY n DESC LIMIT 8")
+        levels = self.connection.execute(
+            "SELECT COUNT(*) FROM (SELECT (" + expression + ") AS arm FROM " +
+            self.active_table(source_table) + " GROUP BY 1 LIMIT 9)").fetchone()[0]
+        if not 2 <= levels <= 8:
+            raise ValueError("Experimental derived group requires 2-8 observed levels, "
+                             "found " + str(levels) + "; define an actual binary"
+                             " item/content or pre-event condition")
         self.features[source_table][name] = expression
         projections = ", ".join("(" + value + ") AS " + key
                                 for key, value in self.features[source_table].items())
@@ -290,8 +307,11 @@ class DevelopmentTools:
         fields = [field for field in (
             "tags", "previous_click", "previous_hate", "is_random", "click", "hate")
             if field in available]
-        rows = self.connection.execute(
-            "SELECT " + ",".join(fields) + " FROM events LIMIT 8").fetchall()
+        rows = []
+        for mode in (0, 1):
+            rows.extend(self.connection.execute(
+                "SELECT " + ",".join(fields) + " FROM events WHERE is_random=? "
+                "ORDER BY hash(uid,vid,event_day) LIMIT 8", [mode]).fetchall())
         return [dict(zip(fields, (v if isinstance(v, (str,int,float,bool)) or v is None
                                   else str(v) for v in row))) for row in rows]
 
@@ -484,6 +504,26 @@ def _save(path: Path, value):
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
 
+def research_funnel(concepts: list[dict], pool) -> dict:
+    "Evidence-stage counts, never free-text 'successful discovery' claims."
+    workbench = sum(any("workbench" in trial for trial in c["tests"]) for c in concepts)
+    discriminated = sum(
+        any("workbench" in trial for trial in c["tests"]) and
+        bool((c.get("critique") or {}).get("rival_discriminated"))
+        for c in concepts)
+    measured = sum(bool(c["bias_relevance"].get(
+        "numeric_discrepancy", {}).get("measured"))
+        for c in pool.records.values())
+    return {
+        "candidates_proposed": len(concepts),
+        "candidates_with_executed_workbench": workbench,
+        "candidates_with_rival_discrimination": discriminated,
+        "candidates_with_numeric_reference_diagnostic": measured,
+        "workbench_completion_rate": workbench / len(concepts) if concepts else 0.0,
+        "independently_confirmed": 0,
+    }
+
+
 def run_open_discovery(source_db: str, output: str, model_config: dict,
                        max_rounds: int = 12, min_queries: int = 2,
                        development_path: str | None = None) -> dict:
@@ -498,6 +538,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     tools = DevelopmentTools(dev_path)
     # Development-only grounding, cached once. Tag values are opaque IDs, not words.
     data_examples = tools.grounding_rows()
+    from rsi_researcher.research.discovery.observations import build_observation_cards
+    discovery_options = model_config.get("discovery", {})
+    observation_cards = (build_observation_cards(tools)
+                         if discovery_options.get("observation_cards", True) else [])
+    _save(dest / "observation_cards.json", observation_cards)
+    import hashlib
+    _save(dest / "discovery_protocol.json", {
+        "observation_cards_enabled": discovery_options.get("observation_cards", True),
+        "compact_experiment_enabled": discovery_options.get("compact_experiment", True),
+        "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "model_config": model_config.get("llm", {}),
+        "holdout_exposed": False})
     from rsi_researcher.research.discovery.workbench import (
         ExperimentalWorkbench, EXPERIMENT_SCHEMA)
     workbench = ExperimentalWorkbench(tools)
@@ -514,6 +566,11 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "Our goal is a CORRECTABLE SYSTEMATIC DISTORTION relative to a "
         "credible target reference, not just ordinary behavior correlation. "
         "A behavioral pattern is not automatically a recommender Bias. "
+        "Generic popularity, tag frequency, feedback loop, and historical "
+        "CTR correlations are NOT new Bias discoveries. Start with numbered "
+        "measured observation cards; seek a distinctive CONDITIONAL "
+        "distortion in ITEM allocation against an explicit supported "
+        "reference, not a mere cross-policy CTR contrast. "
         "Choose the next ACTION yourself. Use SQL, inspect an actual trajectory, "
         "define a NEW derived feature, form multiple competing concepts, request "
         "an EXPERIMENT action so a Designer can specify test/control, outcome, "        " user-level inference, placebo and falsifier; revise based on results, "
@@ -550,6 +607,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "artifacts were probed. A test can justify provisional freezing for "
         "independent confirmation, not a causal Bias claim.")
     history, concepts = [], []
+    experiment_failures = {}
     opportunity_pool = ResearchOpportunityPool()
     last = ""
     try:
@@ -557,7 +615,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             if (step >= 3 and tools.history and
                     (not concepts or (
                         max_rounds - step >= 3 and all(
-                            c["status"] == "rejected_development" for c in concepts)))):
+                            c["status"] in ("rejected_development", "design_blocked")
+                            for c in concepts)))):
                 # Return to candidate formation after *all* prior hypotheses
                 # were rejected, instead of repeatedly testing dead ends.
                 # A dedicated concept-formation turn prevents tool-format repairs
@@ -570,7 +629,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "TWO different testable scientific concepts, each with a "
                     "mechanism, substantive competing explanation, falsifying "
                     "prediction, new measurement and executable test SQL. "
-                    "Invent conceptual relationships, not old named Bias cards. "
+                    "Propose conditional, falsifiable relationships based on "
+                    "observation IDs, not names of familiar Biases. State "
+                    "which item allocation, reference and H1/H2 predictions "
+                    "the same numerical test could discriminate. "
                     "For each concept specify an observable prediction if the mechanism "
                     "is true and explain what relevance, logging or feedback reference "
                     "would reveal a SYSTEMATIC DISTORTION. Do not invent target values. "
@@ -580,8 +642,19 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "sizes or sample counts. We want research opportunity selection, "
                     "not generic significant findings. "
                     "Do not claim causality or novelty. Use exact schema columns.")
+                concept_contract = CONCEPT_PAIR_SCHEMA
+                if model_config.get("llm"):
+                    item = CONCEPT_PAIR_SCHEMA["properties"]["concepts"]["items"]
+                    required = list(item["required"]) + [
+                        "target_reference", "reference_identification",
+                        "distortion_quantity", "distortion_estimate",
+                        "prediction_if_mechanism", "prediction_if_rival"]
+                    concept_contract = {**CONCEPT_PAIR_SCHEMA, "properties": {
+                        "concepts": {**CONCEPT_PAIR_SCHEMA["properties"]["concepts"],
+                                     "items": {**item, "required": required}}}}
                 formed = former.act({
                     "observations": [compact_query(x) for x in tools.history[-4:]],
+                    "observation_cards": observation_cards,
                     "tables": tools.schema(),
                     "existing_derived_features": tools.features,
                     "rejected_prior_mechanisms": [
@@ -590,7 +663,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "next_question_instruction": "Propose a mechanism that makes "
                         "a NEW falsifiable prediction instead of renaming a "
                         "previously abandoned hypothesis.",
-                }, "concept-formation-" + str(step), CONCEPT_PAIR_SCHEMA)
+                }, "concept-formation-" + str(step), concept_contract)
                 stage_ids = []
                 for hypothesis in formed["concepts"]:
                     identifier = "H" + str(len(concepts) + 1).zfill(3)
@@ -649,6 +722,11 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                         "SMALLINT", "TINYINT", "HUGEINT",
                                         "DOUBLE", "FLOAT", "REAL", "DECIMAL",
                                         "UBIGINT", "USMALLINT", "UTINYINT")
+                    observed_labels = sorted({
+                        str(row[record["name"]])
+                        for record in available_records
+                        for row in record["evidence"]["rows"]
+                        if record["name"] in row and row[record["name"]] is not None})
                     actual_numeric_columns = sorted({
                         col["column"] for table in allowed_tables
                         for col in tools.schema()[table]
@@ -664,6 +742,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                                    "enum": allowed_groups},
                                 "contrast_outcome": {"type": "string",
                                                      "enum": actual_numeric_columns},
+                                "control_value": {"type": "string", "enum": observed_labels},
+                                "treatment_value": {"type": "string", "enum": observed_labels},
                             }}
                     choice = chooser.act({
                         "available_numeric_outcomes_by_source": {
@@ -674,12 +754,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "opportunities": opportunity_pool.for_agent(),
                         "recent_observations": [compact_query(
                             q) for q in tools.history[-4:]],
+                        "observation_cards": observation_cards,
                         "available_schema": tools.schema(),
                         "budget_left": max_rounds - step,
                     }, "opportunity-choice-" + str(step),
                         constrained_schema)
                     def check_choice(plan):
                         opportunity_pool.check_prediction(plan)
+                        if plan["reference_kind"] == "randomized_exposure":
+                            record = tools.feature_records.get(plan["contrast_group"])
+                            expression = record["expression"] if record else plan["contrast_group"]
+                            if ("tags" not in expression and "vid" not in expression
+                                    and "author" not in expression):
+                                raise ValueError("Randomized exposure reference needs "
+                                                 "an actual ITEM feature, not is_random "
+                                                 "or a historical user-state contrast")
+                            if "is_random" in expression or "click" in expression:
+                                raise ValueError("Cannot use exposure mode or outcome "
+                                                 "to define the item-side treatment")
                         preview = {
                             "question": plan["discriminating_prediction"],
                             "source_table": plan["contrast_source"],
@@ -790,14 +882,15 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             instruction = {
                 "tables": tools.schema(),
                 "development_value_examples": data_examples,
+                "observation_cards": observation_cards,
                 "derived_features": tools.features,
                 "registered_variable_cards": tools.feature_cards(),
                 "concepts": [_concept_summary(c) for c in concepts[-4:]],
                 "research_opportunity_pool": opportunity_pool.for_agent(),
                 "active_concept_ids": [c["id"] for c in concepts
-                    if c["status"] != "rejected_development"],
+                    if c["status"] not in ("rejected_development", "design_blocked")],
                 "abandoned_concept_ids": [c["id"] for c in concepts
-                    if c["status"] == "rejected_development"],
+                    if c["status"] in ("rejected_development", "design_blocked")],
                 "opportunity_selection_principle": (
                     "You own the next research choice: select_opportunity with a "
                     "concept_id and optionally a fresh SQL observation, or choose "
@@ -951,8 +1044,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 elif act == "experiment":
                     if selected is None:
                         raise ValueError("Select an existing concept_id for a statistical experiment")
-                    if selected["status"] == "rejected_development":
-                        raise ValueError("Hypothesis already abandoned by Qwen; "
+                    if selected["status"] in ("rejected_development", "design_blocked"):
+                        raise ValueError("Hypothesis unavailable after rejection or invalid design; "
                                          "explore another mechanism, not the same experiment")
                     designer = ResearchAgent(model)
                     designer.role = "research-designer"
@@ -981,8 +1074,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "workbench" in test for test in selected["tests"])
                     feature_pairs = [(table, name) for table, items in tools.features.items()
                                      for name in items]
-                    design_schema = EXPERIMENT_SCHEMA
-                    if first_workbench and feature_pairs:
+                    choice_contract = opportunity_pool.records.get(
+                        selected["id"], {}).get("selection_contract")
+                    from rsi_researcher.research.discovery.experiment_contract import (
+                        experiment_intent_schema, compile_experiment_intent)
+                    typed_design = bool(model_config.get("llm") and first_workbench
+                                        and feature_pairs and
+                                        discovery_options.get("compact_experiment", True))
+                    design_schema = (experiment_intent_schema(tools, choice_contract)
+                                     if typed_design else EXPERIMENT_SCHEMA)
+                    if typed_design:
+                        designer.instruction = (
+                            "Choose a measured registered group_feature, actual "
+                            "control/treatment values, a numeric per-event outcome, "
+                            "the eligible population and user-level analysis, plus "
+                            "distinct H1/H2 predictions. Python compiles the SQL. "
+                            "Do not hallucinate arm labels; random-vs-standard CTR "
+                            "by itself is not item allocation bias.")
+                    if first_workbench and feature_pairs and not typed_design:
                         design_schema = {**EXPERIMENT_SCHEMA, "properties": {
                             **EXPERIMENT_SCHEMA["properties"],
                             "source_query": {"type": "string", "enum": [""]},
@@ -993,7 +1102,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                              "enum": sorted(set(table for table, _ in feature_pairs))},
                             "group_expression": {"type": "string",
                                                  "enum": [name for _, name in feature_pairs]}}}
-                    experiment_spec = designer.act({
+                    generated_spec = designer.act({
                         "available_event_day_range": list(event_days),
                         "population_filter_syntax": "Boolean SQL condition only, no leading WHERE",
                         "previous_execution_error": history[-1].get("tool_error") if history else None,
@@ -1013,6 +1122,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             compact_step(item)["derived_feature"]
                             for item in history if "derived_feature" in item],
                         "example_data_values": data_examples,
+                        "observation_cards": observation_cards,
                         "critical_design_rule": "A binary group must have observed users in BOTH actual arms; opaque tags are numeric IDs, and click/hate are current outcomes, not tag names.",
                         "prior_experiments": [
                             {"question": t["test_question"],
@@ -1020,6 +1130,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             for t in selected["tests"][-3:]],
                         "scientist_request": decision["reason"],
                     }, "experiment-design-" + str(step), design_schema)
+                    experiment_spec = (compile_experiment_intent(
+                        generated_spec, tools, choice_contract)
+                        if typed_design else generated_spec)
                     # Give the Designer an explicit opportunity to cite its own
                     # measured variable instead of silently repeating the same
                     # CASE expression in each experiment plan.
@@ -1078,7 +1191,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         }
                     import duckdb
                     entry["experiment_specification"] = experiment_spec
-                    required_feature = next(reversed(tools.feature_records), None)
+                    required_feature = (
+                        experiment_spec["group_expression"]
+                        if experiment_spec["group_expression"] in tools.feature_records
+                        else next(reversed(tools.feature_records), None))
                     def validate_selected_contrast(specification):
                         if choice_contract:
                             keys = ("source_table", "group_expression", "outcome_expression",
@@ -1108,6 +1224,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                            "groups and real row-level fields. Change the group "
                                            "or population, not just the hypothesis wording.",
                         }, "experiment-repair-" + str(step), design_schema)
+                        if typed_design:
+                            corrected = compile_experiment_intent(
+                                corrected, tools, choice_contract)
                         if corrected == experiment_spec:
                             raise ValueError("Designer repeated an invalid experiment")
                         entry["experiment_repair"] = {"old": experiment_spec,
@@ -1132,6 +1251,21 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 experiment_spec[key] != choice_contract[key]},
                         }
                     entry["experiment"] = measured_experiment
+                    reference_choice = opportunity_pool.records.get(
+                        selected["id"], {}).get("bias_relevance", {})
+                    selected_choice = next((
+                        old["opportunity_selection"] for old in reversed(history)
+                        if old.get("opportunity_selection", {}).get(
+                            "selected_concept_id") == selected["id"]), None)
+                    if (selected_choice and reference_choice.get("reference_kind")
+                            == "randomized_exposure"):
+                        try:
+                            from rsi_researcher.research.discovery.workbench import randomized_reference_probe
+                            reference = randomized_reference_probe(tools, selected_choice)
+                            entry["randomized_reference_diagnostic"] = reference
+                            opportunity_pool.record_reference_diagnostic(selected["id"], reference)
+                        except Exception as exc:
+                            entry["randomized_reference_probe_error"] = str(exc)[:350]
                     entry["feature_binding"] = {
                         "registered_feature": required_feature,
                         "original_expression": (
@@ -1165,6 +1299,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "research_opportunity": opportunity_pool.records.get(selected["id"]),
                         "experiment_specification": experiment_spec,
                         "observed_statistics": model_statistics(measured_experiment["result"]),
+                        "randomized_reference_diagnostic": entry.get(
+                            "randomized_reference_diagnostic"),
                         "negative_control": (model_statistics(
                             measured_experiment["negative_control"]["result"])
                             if measured_experiment["negative_control"] else None),
@@ -1173,7 +1309,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     entry["critique"] = critique
                     selected["critique"] = critique
                     if critique["decision"] == "test":
-                        followup_spec = designer.act({
+                        followup_generated = designer.act({
                             "concept": _concept_summary(selected),
                             "previous_experiment": experiment_spec,
                             "results": model_statistics(measured_experiment["result"]),
@@ -1183,7 +1319,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "schema": tools.schema(),
                             "available_event_day_range": list(event_days),
                             "instruction": "Propose a different experiment, grouping, control, time window or placebo that distinguishes the rival. Do not repeat the earlier specification.",
-                        }, "experiment-countertest-" + str(step), EXPERIMENT_SCHEMA)
+                        }, "experiment-countertest-" + str(step),
+                            experiment_intent_schema(tools) if typed_design
+                            else EXPERIMENT_SCHEMA)
+                        followup_spec = (compile_experiment_intent(
+                            followup_generated, tools) if typed_design
+                            else followup_generated)
                         # Reformatting the prompt or adding strata alone
                         # does not produce a different primary numeric contrast.
                         material = ("source_query", "population_filter",
@@ -1383,7 +1524,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 elif act == "freeze":
                     if selected is None:
                         raise ValueError("Select an existing concept to freeze")
+                    numeric_ref = opportunity_pool.records.get(
+                        selected["id"], {}).get("bias_relevance", {}).get(
+                            "numeric_discrepancy", {})
+                    ci = numeric_ref.get("ci95") or []
                     audit = {
+                        "reference_gap_ci_excludes_zero": bool(
+                            len(ci) == 2 and (ci[0] > 0 or ci[1] < 0)),
                         "two_exploratory_queries": len(tools.history) >= min_queries,
                         "has_development_test": bool(selected["tests"]),
                         "critic_ready": (selected["critique"] or {}).get("decision") == "ready",
@@ -1391,6 +1538,16 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "rival_tested": bool((selected["critique"] or {}).get("rival_discriminated")),
                         "logging_checked": bool((selected["critique"] or {}).get("logging_artifact_excluded")),
                         "literature_checked": selected["literature"] is not None,
+                        "reference_target_declared": bool(
+                            opportunity_pool.records.get(selected["id"], {}).get(
+                                "bias_relevance", {}).get("target_reference")),
+                        "numeric_reference_gap_computed": bool(
+                            opportunity_pool.records.get(selected["id"], {}).get(
+                                "bias_relevance", {}).get("numeric_discrepancy", {}).get("measured")),
+                        "credible_normative_target_validated": bool(
+                            opportunity_pool.records.get(selected["id"], {}).get(
+                                "bias_relevance", {}).get("numeric_discrepancy", {}).get(
+                                    "normative_target_validated")),
                     }
                     entry["freeze_gate"] = audit
                     if all(audit.values()):
@@ -1404,13 +1561,22 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     break
             except Exception as exc:
                 entry["tool_error"] = str(exc)[:400]
+                if act == "experiment" and selected is not None:
+                    failures = experiment_failures.get(selected["id"], 0) + 1
+                    experiment_failures[selected["id"]] = failures
+                    if failures >= 2:
+                        selected["status"] = "design_blocked"
+                        entry["design_status"] = "failed_two_real_experiment_designs"
+                        entry["next_research_instruction"] = (
+                            "Choose another mechanism or create a new observable "
+                            "item-side feature; do not repeat unsupported arms.")
             if selected is not None and selected["id"] in opportunity_pool.records:
                 if "experiment" in entry and "critique" in entry:
                     opportunity_pool.experiment(
                         selected["id"], entry["experiment"],
                         entry.get("critic_experiment"), entry["critique"])
                 if ("reflection" in entry or "revised_concept" in entry
-                        or selected["status"] == "rejected_development"):
+                        or selected["status"] in ("rejected_development", "design_blocked")):
                     opportunity_pool.update_claim(
                         selected["id"], selected["claim"],
                         ("abandoned" if selected["status"] == "rejected_development"
@@ -1426,10 +1592,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         final = {"status": status, "frozen_id": last or None,
                  "concepts": concepts, "registered_features": tools.features,
                  "development_queries": tools.history,
+                 "observation_cards": observation_cards,
                  "research_opportunities": opportunity_pool.snapshot(),
                  "research_rounds": len(history), "holdout_consulted": False,
                  "independent_confirmation": False,
-                 "causal_bias_established": False, "debias_verified": False}
+                 "causal_bias_established": False, "debias_verified": False,
+                 "research_funnel": research_funnel(concepts, opportunity_pool)}
         _save(dest / "journal.json", history)
         _save(dest / "research_state.json", {
             "concepts": concepts, "rounds_completed": len(history),
@@ -1452,7 +1620,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             "research_opportunities": opportunity_pool.snapshot(),
             "research_rounds": len(history), "holdout_consulted": False,
             "independent_confirmation": False,
-            "causal_bias_established": False, "debias_verified": False}
+            "causal_bias_established": False, "debias_verified": False,
+            "research_funnel": research_funnel(concepts, opportunity_pool)}
         _save(dest / "journal.json", history)
         _save(dest / "research_opportunities.json", opportunity_pool.snapshot())
         _save(dest / "research_state.json", {"concepts": concepts,

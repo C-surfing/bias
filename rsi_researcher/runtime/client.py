@@ -153,7 +153,12 @@ class ModelTransport:
     model_parameters = {}
 
     def __init__(self, directory, max_requests=100, limits=None):
-        self.key = os.environ.get(self.key_env) if self.key_env else None
+        raw_key = os.environ.get(self.key_env) if self.key_env else None
+        # Windows-to-SSH stdin occasionally supplies UTF-8 BOM (U+FEFF).
+        # Normalize before constructing Latin-1 HTTP Authorization headers.
+        self.key = raw_key.lstrip("\ufeff").strip() if raw_key else None
+        if self.key_env and self.key and not self.key.isascii():
+            raise ModelFailure(self.key_env + " contains invalid non-ASCII bytes")
         if self.key_env and not self.key:
             raise ModelFailure(self.key_env + " is missing")
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())

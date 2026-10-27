@@ -36,7 +36,10 @@ class RecursiveResearchTests(TestCase):
             def fake_confirm(directory,**kwargs):
                 seen.append(kwargs["frozen_campaign"])
                 return ([{"seed":1,"baseline":{"5":{"NDCG@5":0.2,"ARP@5":50}},
-                    "rsi":{"5":{"NDCG@5":0.2,"ARP@5":50}}}],10)
+                    "rsi":{"5":{"NDCG@5":0.2,"ARP@5":50}},
+                    "target_bias":{"target":"popularity","supported":False,
+                        "status":"insufficient_target_bias_support"},
+                    "target_bias_paired_ci":{"ci95":None}}],10)
             with patch("rsi_researcher.llmrank.cycle.search",fake_search),\
                  patch("rsi_researcher.llmrank.cycle.independent_confirmation",fake_confirm):
                 result=conduct(root,config={},data="unused",

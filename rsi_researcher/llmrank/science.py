@@ -17,6 +17,7 @@ from rsi_researcher.llmrank.agents import (
     DiagnosisAgent, ReflectionAgent
 )
 from rsi_researcher.llmrank.dataset import load_dataset, cases_for
+from rsi_researcher.llmrank.bias_objectives import OBJECTIVES, CONTRACT as BIAS_OBJECTIVE_CONTRACT, evaluate_target
 from rsi_researcher.llmrank.evidence import paired_clean_evidence
 from rsi_researcher.llmrank.tools import candidate_snapshot,metric_tradeoff
 from rsi_researcher.research.scientific_skills import proposal as record_skill
@@ -79,99 +80,111 @@ def select_case_panels(dataset, data, retrieval, n, seed, fraction=0.6):
           "data_archive_sha256":data_sha256}
     return dev,test,titles,pop,protocol
 
-def audit(baseline,candidate,*, relative_utility_tolerance=0.05,clean_evidence=None):
+def audit(baseline,candidate,*,bias_target="popularity",
+          relative_utility_tolerance=0.05,clean_evidence=None):
+    """Target-specific debias screen; utility, format, and science are distinct.
+
+    A lower ARP or higher APLT alone NEVER validates popularity debias.
+    These objective-screen results are development-only, not causal evidence.
+    """
     b=baseline["5"];c=candidate["5"]
-    # Full-panel metrics are always descriptive, including parser repair.
-    # Format-clean evidence is a matched-user sensitivity analysis, not a
-    # replacement cohort chosen by test-label performance.
-    if clean_evidence and clean_evidence["baseline"] is not None:
-        clean_base,clean_cand=clean_evidence["baseline"],clean_evidence["candidate"]
-    else:
-        clean_base=clean_cand=None
+    target=evaluate_target(b,c,bias_target)
     utility=(c["NDCG@5"] >= (1-relative_utility_tolerance)*b["NDCG@5"]
-         and c["HR@5"] >= b["HR@5"]-max(0.03,1/max(1,b["users"])))
-    validity=(c["invalid_rankings"]<=b["invalid_rankings"] and c["valid_rankings"]>0)
-    changes={
-      "NDCG@5":c["NDCG@5"]-b["NDCG@5"],
-      "HR@5":c["HR@5"]-b["HR@5"],
-      "ARP@5":(c["ARP@5"]-b["ARP@5"] if c["ARP@5"] is not None and b["ARP@5"] is not None else None),
-      "APLT@5":(c["APLT@5"]-b["APLT@5"] if c["APLT@5"] is not None and b["APLT@5"] is not None else None),
-    }
-    pos_b=b.get("CandidatePositionBias_NDCG@5")
-    pos_c=c.get("CandidatePositionBias_NDCG@5")
+             and c["HR@5"] >= b["HR@5"]-max(0.03,1/max(1,b["users"])))
+    validity=(c["invalid_rankings"]<=b["invalid_rankings"] and c["valid_rankings"]>0
+              and not c.get("policy_execution_failures",0))
+    def delta(key):
+        x,y=b.get(key),c.get(key)
+        return y-x if x is not None and y is not None else None
+    changes={key:delta(key) for key in ("NDCG@5","HR@5","ARP@5","APLT@5",
+                                       "PopREO@5","CandidatePositionBias_NDCG@5")}
     improvements={
-      "lower_arp":changes["ARP@5"] is not None and changes["ARP@5"] < -0.02*max(1,b["ARP@5"]),
-      "higher_aplt":changes["APLT@5"] is not None and changes["APLT@5"]>0.02,
-      "less_candidate_position_bias": pos_b is not None and pos_c is not None and abs(pos_c)<abs(pos_b)-0.02,
+        "lower_arp":changes["ARP@5"] is not None
+                    and changes["ARP@5"] < -0.02*max(1,b["ARP@5"]),
+        "higher_aplt":changes["APLT@5"] is not None
+                      and changes["APLT@5"] > 0.02,
+        "less_candidate_position_bias": (
+            b.get("CandidatePositionBias_NDCG@5") is not None
+            and c.get("CandidatePositionBias_NDCG@5") is not None
+            and abs(c["CandidatePositionBias_NDCG@5"]) <
+                abs(b["CandidatePositionBias_NDCG@5"])-0.02),
+        "lower_popreo":changes["PopREO@5"] is not None
+                       and changes["PopREO@5"] < -0.02,
     }
-    descriptive_eligible=utility and validity and any(improvements.values())
+    full_pass=utility and validity and target["improved"]
+    clean_audit=None
     if clean_evidence is None:
-        eligible=descriptive_eligible  # aggregate-only backward-compatible unit contract
-        format_status="legacy_aggregate_only"
-        clean_audit=None
-    elif not clean_evidence["sufficient_support"] or clean_base is None:
+        eligible=full_pass
+        format_status="aggregate_only_not_format_confirmed"
+    elif not clean_evidence["sufficient_support"] or clean_evidence["baseline"] is None:
         eligible=False
         format_status="insufficient_clean_paired_support"
-        clean_audit=None
     else:
-        # Numeric-only recursive call applies the exact same old scientific
-        # thresholds to an identically sized, unrepaired cohort in both arms.
-        clean_audit=audit(clean_base,clean_cand,
+        clean_audit=audit(clean_evidence["baseline"],clean_evidence["candidate"],
+                          bias_target=bias_target,
                           relative_utility_tolerance=relative_utility_tolerance)
-        eligible=descriptive_eligible and clean_audit["eligible_development_only"]
-        format_status=("fails_full_panel" if not descriptive_eligible else
-                       "robust_full_and_clean" if clean_audit["eligible_development_only"]
-                       else "not_robust_to_format_exclusion")
+        eligible=full_pass and clean_audit["eligible_development_only"]
+        format_status=("fails_full_panel" if not full_pass else
+                       "robust_full_and_clean" if eligible else
+                       "not_robust_to_format_exclusion")
 
-    # Development-only merit: a better trade-off without collapsing utility.
-    merit=(
-       0.25*(max(0,-changes["ARP@5"])/max(1,b["ARP@5"]) if changes["ARP@5"] is not None else 0)
-       +0.5*(max(0,changes["APLT@5"]) if changes["APLT@5"] is not None else 0)
-       +(max(0,abs(pos_b)-abs(pos_c)) if pos_b is not None and pos_c is not None else 0)*0.15
-       +changes["NDCG@5"]*0.2
-    ) if eligible else -1
-    # Mechanism-level memory lets later rounds repair the right failure,
-    # instead of blindly increasing or decreasing the same bias penalty.
+    # A candidate's primary bias change, not an unrelated proxy, determines
+    # development merit. Under-supported outcomes remain exploratory only.
+    merit=(max(0.,target["reduction"])*0.8
+           +max(0.,changes["NDCG@5"])*0.2) if eligible else -1.
     if format_status=="insufficient_clean_paired_support":
         failure_mode="inconclusive_due_to_ranking_format"
     elif format_status=="not_robust_to_format_exclusion":
         failure_mode="format_sensitive_candidate"
-    elif c.get("policy_execution_failures",0):
-        failure_mode="invalid_generated_policy"
     elif not validity:
         failure_mode="ranking_format_or_inventory"
+    elif not target["supported"]:
+        failure_mode="insufficient_target_bias_support"
+    elif not utility and target["improved"]:
+        failure_mode="debias_quality_tradeoff"
+    elif not target["improved"]:
+        failure_mode="target_bias_unchanged"
     elif eligible:
         failure_mode="development_candidate_only"
-    elif not utility and any(improvements.values()):
-        failure_mode="debias_quality_tradeoff"
-    elif utility and not any(improvements.values()):
-        failure_mode="no_measured_bias_gain"
     else:
         failure_mode="no_joint_improvement"
-    return {"eligible_development_only":eligible,"utility_guard":utility,
-            "validity_guard":validity,"metric_deltas":changes,
-            "improvements":improvements,"merit":merit,
-            "failure_mode":failure_mode,
-            "format_assessment":format_status,
-            "clean_paired_evidence":clean_evidence,
-            "clean_paired_assessment":({
-                "utility_guard":clean_audit["utility_guard"],
-                "validity_guard":clean_audit["validity_guard"],
-                "improvements":clean_audit["improvements"],
-                "metric_deltas":clean_audit["metric_deltas"]
-            } if clean_audit is not None else None),
-            "not_causal_or_confirmatory":True}
+    return {
+        "bias_objective_contract":BIAS_OBJECTIVE_CONTRACT,
+        "bias_target":bias_target,"target_bias_assessment":target,
+        "eligible_development_only":eligible,
+        "exploratory_proxy_only":(
+            utility and validity and any(improvements[k] for k in
+                ("lower_arp","higher_aplt")) and not target["improved"]),
+        "utility_guard":utility,"validity_guard":validity,
+        "metric_deltas":changes,"improvements":improvements,"merit":merit,
+        "failure_mode":failure_mode,"format_assessment":format_status,
+        "clean_paired_evidence":clean_evidence,
+        "clean_paired_assessment":({
+            "utility_guard":clean_audit["utility_guard"],
+            "validity_guard":clean_audit["validity_guard"],
+            "target_bias_assessment":clean_audit["target_bias_assessment"],
+            "improvements":clean_audit["improvements"],
+            "metric_deltas":clean_audit["metric_deltas"],
+        } if clean_audit is not None else None),
+        "not_causal_or_confirmatory":True,
+    }
 
-def expansion_priority(baseline,current):
-    """Preserve promising bias mechanisms even if utility gate fails."""
+def expansion_priority(baseline,current,bias_target="popularity"):
+    """Explore bias mechanisms even when utility gates fail; never certify them."""
     if not current:
-        return -10.0
+        return -10.
     b,c=baseline["5"],current["5"]
+    objective=evaluate_target(b,c,bias_target)
+    quality_loss=max(0,b["NDCG@5"]-c["NDCG@5"])/max(b["NDCG@5"],0.1)
+    if objective["supported"]:
+        return 0.8*objective["reduction"] - 0.6*quality_loss
+    if bias_target=="candidate_position":
+        return -1. - quality_loss  # do not prefer ARP for position-bias research
     if None in (b["ARP@5"],c["ARP@5"],b["APLT@5"],c["APLT@5"]):
-        return -1.0
+        return -1.
+    # Proxy-only exploration when PopREO groups are sparse, NOT a debias win.
     pop_gain=(b["ARP@5"]-c["ARP@5"])/max(b["ARP@5"],1)
     tail_gain=c["APLT@5"]-b["APLT@5"]
-    quality_loss=max(0,b["NDCG@5"]-c["NDCG@5"])/max(b["NDCG@5"],0.1)
     return 0.4*pop_gain+0.5*tail_gain-0.6*quality_loss
 
 FORMAT_AUDIT_CONTRACT="paired_unrepaired_dev_sensitivity_v1"
@@ -182,12 +195,14 @@ def evidence_priority(baseline,candidate,assessment):
     if evidence is not None:
         if not evidence["sufficient_support"] or evidence["baseline"] is None:
             return -1.
-        return expansion_priority(evidence["baseline"],evidence["candidate"])
-    return expansion_priority(baseline,candidate)
+        return expansion_priority(evidence["baseline"],evidence["candidate"],assessment["bias_target"])
+    return expansion_priority(baseline,candidate,assessment["bias_target"])
 
 def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
            max_requests=800,arm="qwen_audited_history",prior_campaign=None,
-           development_only=False):
+           development_only=False,bias_target="popularity"):
+    if bias_target not in OBJECTIVES:
+        raise ValueError("unsupported LLMRank bias target")
     output=Path(output).resolve()
     if output.exists():
         raise FileExistsError(output)
@@ -214,6 +229,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
             raise ValueError("cannot reuse development evidence from a holdout-opened campaign")
         if program.get("ranking_parser_contract")!=PARSER_CONTRACT:
             raise ValueError("cannot reuse cross-round evidence from another ranking parser protocol")
+        if program.get("bias_objective_contract")!=BIAS_OBJECTIVE_CONTRACT or program.get("bias_target")!=bias_target:
+            raise ValueError("cross-round bias research objective mismatch")
         if program.get("format_audit_contract")!=FORMAT_AUDIT_CONTRACT:
             raise ValueError("cannot reuse cross-round evidence from an incompatible format audit")
         for source in sorted(prior_path.glob("seed-*/result.json")):
@@ -252,6 +269,8 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
        "no_test_labels_in_agent_context":True,
        "ranking_parser_contract":PARSER_CONTRACT,
        "format_audit_contract":FORMAT_AUDIT_CONTRACT,
+       "bias_objective_contract":BIAS_OBJECTIVE_CONTRACT,
+       "bias_target":bias_target,"bias_primary_metric":OBJECTIVES[bias_target]["primary_metric"],
        "prior_development_records":len(prior_development),
        "prior_frozen_rank_cache_files":[str(x) for x in prior_rank_cache_paths],
        "prior_campaign":str(Path(prior_campaign).resolve()) if prior_campaign else None,
@@ -261,10 +280,11 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
         rd=output/f"seed-{seed}"
         rd.mkdir()
         dev,test,titles,pop,protocol=select_case_panels(dataset,data,retrieval,users,seed)
+        protocol["bias_target"]=bias_target
         if seed in inherited_by_seed:
             prev=inherited_by_seed[seed]["cohort"]
             for field in ("seed","dataset","dev_users","holdout_users",
-                          "data_archive_sha256","retrieval","candidate_source"):
+                          "data_archive_sha256","retrieval","candidate_source","bias_target"):
                 if prev.get(field)!=protocol.get(field):
                     raise ValueError("cross-round frozen cohort mismatch: "+field)
         atomic_json(rd/"cohort.json",protocol)
@@ -294,7 +314,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
         def development_audit(measured):
             clean=paired_clean_evidence(baseline,measured,pop,titles)
             return audit(baseline["metrics"],measured["metrics"],
-                         clean_evidence=clean)
+                         clean_evidence=clean,bias_target=bias_target)
         fixed_start=gateway.calls
         fixed=[]
         for name,strategy in list(FIXED.items())[:max_nodes]:
@@ -351,16 +371,19 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                        "CandidatePositionBias_NDCG@5","PopREO@5"],
                 "baseline_metrics":baseline["metrics"],
                 "candidate_distribution_tool_result":tool_evidence,
+                "research_bias_target":bias_target,
+                "primary_bias_metric":OBJECTIVES[bias_target]["primary_metric"],
+                "bias_evidence_rule":OBJECTIVES[bias_target],
                 "prior_verified_numeric_development_memory":prior_development[-4:],
                 "previous_measured_development_experiments":experience[-5:],
                 "recent_critic_and_reflection_feedback":history[-2:],
                 "previously_tested_strategy_fingerprints":sorted(seen),
                 "candidate_parent_strategy":parent["strategy"],
-                "search_guidance":"Invent an executable conditional or multi-stage policy_program "
-                    "rather than relabeling a popularity coefficient. Use numeric user-profile "
-                    "and recent-match evidence to preserve quality, and compare against the "
-                    "parent. If lowering ARP damages NDCG, reduce intervention where recent "
-                    "match is strong or preserve highly ranked relevant items.",
+                "search_guidance":("Investigate the PREDECLARED target bias "
+                    +bias_target+"; ARP/APLT changes cannot substitute for its primary metric. "
+                    "Propose a falsifiable intervention that preserves NDCG/HR. "
+                    "If population/group support is insufficient, identify what evidence is missing "
+                    "rather than claiming debias success."),
                 "available_policy_features":[
                     "base","score","pop","match","recent_match","user_pop",
                     "pop_excess","novelty","head","rank_norm","history_len",
@@ -368,7 +391,7 @@ def search(output,*,config,data,dataset,retrieval,users,seeds,max_nodes=2,
                 "policy_compilation":"conditional mathematical expressions plus at most 5 "
                     "typed stage operators; immutable data and evaluator",
                 "parent_id":parent["id"],
-                "scientific_question":"Find a testable LLM ranking intervention while preserving recommendation utility",
+                "scientific_question":"Reduce the registered "+bias_target+" bias while preserving recommendation utility",
                 "utility_floor":"development NDCG no more than 5% relative loss; HR at most one sampled hit loss",
                 "no_holdout_information":True}
             diag=DiagnosisAgent(model).act({"observations":observation},f"seed{seed}-node{turn}")

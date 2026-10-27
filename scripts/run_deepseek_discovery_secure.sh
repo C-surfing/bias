@@ -2,6 +2,10 @@
 # Run a DeepSeek scientific episode without printing or storing the API key.
 set -euo pipefail
 cd /data/cjh/rsi/project
+SECRET_FILE=/data/cjh/rsi/.secrets/deepseek.key
+if [[ -z "${DEEPSEEK_API_KEY:-}" && -f "$SECRET_FILE" ]]; then
+  DEEPSEEK_API_KEY="$(cat "$SECRET_FILE")"
+fi
 if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
   if [[ -t 0 ]]; then
     read -r -s -p 'DeepSeek API key: ' DEEPSEEK_API_KEY
@@ -11,6 +15,10 @@ if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
     DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY%$'\r'}"
   fi
 fi
+# PowerShell-to-SSH transfers can prefix a Unicode BOM (U+FEFF).
+# Remove it before constructing the Authorization request header.
+DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY#$'\xef\xbb\xbf'}"
+DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY%$'\r'}"
 if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
   echo 'No DeepSeek API key available in this Linux process' >&2
   exit 2

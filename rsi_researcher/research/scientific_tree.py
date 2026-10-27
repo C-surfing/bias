@@ -393,6 +393,8 @@ def main(argv=None):
     parser.add_argument("--dataset",choices=["ml-1m","Games","Beauty","Sports","CDs"],default="ml-1m")
     parser.add_argument("--data",default="/data/cjh/rsi/llmrank-rsi-20261021/external")
     parser.add_argument("--retrieval",choices=["random","sasrec","bm25"],default="random")
+    parser.add_argument("--bias-target",choices=["popularity","candidate_position"],
+                        default="popularity")
     parser.add_argument("--seeds",default=None)
     args=parser.parse_args(argv)
     config=json.loads(Path(args.config).read_text(encoding="utf8"))
@@ -407,7 +409,7 @@ def main(argv=None):
             args.output,config=config,data=args.data,dataset=args.dataset,
             retrieval=args.retrieval,users=args.cohort_size,seeds=seeds,
             max_nodes=args.max_nodes,max_requests=args.max_requests,arm=args.arm,
-            prior_campaign=args.prior_campaign)
+            prior_campaign=args.prior_campaign,bias_target=args.bias_target)
         print(json.dumps(result,ensure_ascii=False))
         return
     # No launching or modifying an existing shared GPU service.

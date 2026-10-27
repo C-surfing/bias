@@ -47,7 +47,14 @@ class LLMRankMainlineTests(unittest.TestCase):
           "CandidatePositionBias_NDCG@5":0.2}}
         better={"5":{**m["5"],"NDCG@5":0.395,"ARP@5":175.0}}
         worse={"5":{**m["5"],"NDCG@5":0.30,"ARP@5":175.0}}
-        self.assertTrue(audit(m,better)["eligible_development_only"])
+        self.assertFalse(audit(m,better)["eligible_development_only"])
+        self.assertEqual(audit(m,better)["failure_mode"],
+                         "insufficient_target_bias_support")
+        registered={**m["5"],"PopREO@5":0.50,
+                    "popreo_group_positive_counts":[10]*5}
+        improved={**registered,"NDCG@5":0.395,"ARP@5":175.0,
+                  "PopREO@5":0.35}
+        self.assertTrue(audit({"5":registered},{"5":improved})["eligible_development_only"])
         self.assertFalse(audit(m,worse)["eligible_development_only"])
     @unittest.skipUnless(SOURCE.joinpath("ml-1m.random").exists(),"official data absent")
     def test_candidate_and_holdout_disjoint(self):

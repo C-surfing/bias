@@ -74,7 +74,7 @@ class VLLMModel(ModelTransport):
         # comparisons; only the scientific DESIGN role explores varied
         # proposals. Stable episode-derived seeds make runs reproducible.
         sampler=self.metadata.get("designer_sampler")
-        if sampler is not None and (self.scope or {}).get("scientific_role")=="design":
+        if sampler is not None and (self.scope or {}).get("scientific_role") in ("design", "research-designer"):
             import hashlib
             episode=(self.scope or {}).get("episode","")
             episode_hash=int.from_bytes(hashlib.sha256(episode.encode()).digest()[:4],"big")
