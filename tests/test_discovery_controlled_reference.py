@@ -63,7 +63,10 @@ def test_controlled_recommender_has_an_actual_paired_model_reference(kuairec_zip
         stats = measured["result"]
         assert stats["n_paired_units"] >= 12
         assert stats["negative_control_passed"]
-        assert stats["negative_control_users_with_old_writes"] > 0
+        assert 0 < stats["negative_control_users_with_old_writes"] <= stats["n_paired_units"]
+        assert measured["estimand"]["outcome"] == "ndcg@10"
+        assert measured["estimand"]["statistical_unit"] == "uid"
+        assert measured["estimand"]["phase"] == "development"
         assert stats["ci95_bootstrap"][0] <= stats["ci95_bootstrap"][1]
         assert stats["mean_treatment"] - stats["mean_control"] == pytest.approx(
             stats["estimate"])
@@ -107,6 +110,11 @@ def test_controlled_state_can_identify_only_the_scoped_model_effect(kuairec_zip)
                                  KuaiRecAdapter.capabilities)
     audit = rival_prediction_audit(
         measured["result"], "increase", "decrease", 0.001)
+    from copy import deepcopy
+    tampered = deepcopy(measured)
+    tampered["estimand"]["outcome"] = "recall@10"
+    with pytest.raises(ValueError, match="estimand differs"):
+        pool.record_controlled_reference("H001", tampered, audit)
     pool.record_controlled_reference("H001", measured, audit)
     record = pool.records["H001"]
     assert record["bias_relevance"]["reference_spec"]["status"] == "identified_model_effect_only"
