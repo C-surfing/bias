@@ -600,6 +600,22 @@ def research_funnel(concepts: list[dict], pool) -> dict:
     }
 
 
+def should_form_concepts(*, open_phenomena: bool,
+                         new_relational_evidence: bool,
+                         legacy_formation: bool,
+                         concepts: list[dict]) -> bool:
+    """Fresh measured relationships can open new branches while old ones live.
+
+    In legacy mode retain the original all-rejected rule. No fresh relationship,
+    no extra candidate generation, regardless of the round number.
+    """
+    if open_phenomena:
+        return new_relational_evidence
+    return (legacy_formation and
+            (not concepts or all(c["status"] in (
+                "rejected_development", "design_blocked") for c in concepts)))
+
+
 def research_evidence_signature(tools, concepts: list[dict], pool) -> tuple:
     """Evidence changes, not elapsed turns or mere renamed hypotheses."""
     return (len(tools.history), len(tools.feature_records),
@@ -772,13 +788,14 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 for p in phenomena)
             evidence_formation = (open_phenomena and relational_phenomena >= 2
                                   and len(phenomena) > last_concept_phenomena)
-            if ((legacy_formation or evidence_formation) and
-                    (not concepts or all(
-                        c["status"] in ("rejected_development", "design_blocked")
-                        for c in concepts))):
+            if should_form_concepts(
+                    open_phenomena=open_phenomena,
+                    new_relational_evidence=evidence_formation,
+                    legacy_formation=legacy_formation,
+                    concepts=concepts):
                 last_concept_phenomena = len(phenomena)
-                # Return to candidate formation after *all* prior hypotheses
-                # were rejected, instead of repeatedly testing dead ends.
+                # A new measured relational phenomenon may open an independent
+                # branch even while another candidate is still investigating.
                 # A dedicated concept-formation turn prevents tool-format repairs
                 # from indefinitely displacing scientific hypothesis creation.
                 # It does not predefine variables, categories or candidate cards.
@@ -839,9 +856,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     "data_profile": compact_profile(data_profile),
                     "tables": tools.schema(),
                     "existing_derived_features": tools.features,
-                    "rejected_prior_mechanisms": [
-                        _concept_summary(c) for c in concepts if
-                        c["status"] == "rejected_development"],
+                    "prior_mechanisms_and_status": [
+                        _concept_summary(c) for c in concepts[-8:]],
                     "next_question_instruction": "Ground each candidate in "
                         "one or more actual phenomenon_ids, and give a fresh "
                         "falsifiable H1/H2 prediction, not a renamed association.",
@@ -859,6 +875,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             set(hypothesis.get("phenomenon_ids", [])) &
                             {p["id"] for p in phenomena}):
                         continue  # ungrounded proposal is not an observed candidate
+                    identity = tuple(" ".join(hypothesis[k].casefold().split())
+                                     for k in ("mechanism", "rival", "measurement"))
+                    if any(tuple(" ".join(c["claim"][k].casefold().split())
+                                 for k in ("mechanism", "rival", "measurement"))
+                           == identity for c in concepts):
+                        continue  # a new label alone is not a new research branch
                     concepts.append({
                         "id": identifier, "version": 1, "status": "investigating",
                         "claim": claim, "tests": [], "revisions": [],
