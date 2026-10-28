@@ -94,6 +94,16 @@ def assess(journal: list[dict], state: dict) -> dict:
                                   "within_model_paired_intervention")
                               and not e["identification"].get(
                                   "platform_policy_identified", False)]
+    verified_controlled_routes = [
+        e for e in journal if "controlled_experiment" in e
+        and e.get("action", {}).get("action") == "controlled_experiment"
+        and "critique" in e and "reflection" in e
+        and "numeric_prediction_audit" in e
+        and e["controlled_experiment"].get("identification", {}).get(
+            "within_model_paired_intervention")
+        and not e["controlled_experiment"]["identification"].get(
+            "platform_policy_identified")
+    ]
     reference_measurements = [
         e for e in journal
         if e.get("action", {}).get("action") == "reference_gap"
@@ -104,6 +114,7 @@ def assess(journal: list[dict], state: dict) -> dict:
         "randomized_reference_diagnostic" in e for e in journal))
     return {
         "full_qwen_workflow_accepted": accepted,
+        "controlled_model_workflow_executed": bool(verified_controlled_routes),
         "checks": checks,
         "counts": {"explicit_opportunity_selections": len(explicit_opportunity_selections),
                    "opportunity_bound_experiments": len(opportunity_bound_tests),
