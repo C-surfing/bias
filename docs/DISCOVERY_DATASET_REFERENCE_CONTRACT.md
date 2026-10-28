@@ -90,6 +90,9 @@ constructed recommender receives only its history and train-user item priors,
 estimand, 95% user-bootstrap CI, user count, ranking changes and a negative
 control that deletes writes outside the active history window. The negative
 control checks the *implementation*, not the rival scientific mechanism.
+When no user's older writes exist outside the active model window, the placebo
+is explicitly reported as *untested*, not as passed. This does not by itself
+invalidate an otherwise supported within-model paired estimate.
 
 The Reference Ledger records `identified_model_effect_only` after checking
 that the actually executed estimand matches the design. This status establishes
