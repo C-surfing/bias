@@ -36,6 +36,13 @@ def main():
                               "omitted means evidence-driven research")
     explore.add_argument("--min-queries", type=int, default=2)
     explore.add_argument("--development-db", help="optional existing isolated dev DB")
+    confirm = commands.add_parser(
+        "confirm-controlled",
+        help="confirm an already frozen owned-model mechanism without model access")
+    confirm.add_argument("--source-zip", required=True, help="official KuaiRec ZIP")
+    confirm.add_argument("--frozen", required=True,
+                         help="frozen_candidate.json from completed open discovery")
+    confirm.add_argument("--output", required=True, help="new confirmation JSON path")
     args = p.parse_args()
     if args.step == "status":
         from rsi_researcher.research.kuairand_temporal_discovery import discover_files
@@ -54,6 +61,21 @@ def main():
         result = qwen_open_discovery(args.output, config)
         print(json.dumps({"hypotheses": len(result["hypotheses"]),
                           "model_requests": result["total_model_requests"]}))
+    elif args.step == "confirm-controlled":
+        from rsi_researcher.research.discovery.controlled_reference import (
+            confirm_frozen_controlled)
+        frozen = json.loads(Path(args.frozen).read_text())
+        confirmation = confirm_frozen_controlled(args.source_zip, frozen)
+        dest = Path(args.output)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # Never silently overwrite confirmation evidence from a previous run.
+        with dest.open("x") as file:
+            json.dump(confirmation, file, indent=2, ensure_ascii=False)
+            file.write("\n")
+        print(json.dumps({
+            "status": confirmation["status"],
+            "frozen_id": confirmation["frozen_id"],
+            "platform_causal_bias_established": False}))
     elif args.step == "explore":
         if args.min_queries < 1 or (args.max_rounds is not None and
                                       (args.max_rounds < 3 or
