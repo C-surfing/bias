@@ -26,9 +26,9 @@ BIAS_RESEARCH_CONTRACT = (
     "A difference in click rates, user preferences, tag frequency or activity "
     "is a behavioral observation, NOT automatically algorithmic distortion. "
     "Name the affected population, distorted quantity, decision stage, "
-    "reference and its identification assumptions. Randomly inserted KuaiRand "
-    "items provide a limited exposure-mode response reference, NOT randomized "
-    "user histories, known utility merit, or a valid policy counterfactual. "
+    "reference and its identification assumptions. Randomized exposure probes "
+    "provide limited evidence only in their declared assignment scope, NOT "
+    "randomized user histories, known item merit, or a general policy counterfactual. "
     "Missing references are UNMEASURED or UNIDENTIFIED research gaps: "
     "investigate support rather than invent targets or abandon promising leads. "
     "Derive competing H1 and H2 predictions on the same population, estimand "
@@ -935,7 +935,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     actual_numeric_columns = sorted({
                         col["column"] for table in allowed_tables
                         for col in tools.schema()[table]
-                        if col["type"].upper().startswith(numeric_prefixes)})
+                        if col["type"].upper().startswith(numeric_prefixes)
+                        and col["column"] not in (
+                            "uid", "vid", "event_day", "moment_ms", "sequence_index")})
                     constrained_schema = OPPORTUNITY_CHOICE_SCHEMA
                     if allowed_groups and actual_numeric_columns:
                         constrained_schema = {
