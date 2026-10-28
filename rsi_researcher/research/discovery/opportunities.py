@@ -195,8 +195,16 @@ class ResearchOpportunityPool:
             "corrective_intervention": choice.get("corrective_intervention", ""),
             "reference_measured": False,
         }
+        # Reference assumptions originate with the Agent's scientific
+        # hypothesis; opportunity selection must not silently erase them.
+        reference_choice = {
+            **choice,
+            "reference_identification": (
+                choice.get("reference_identification") or
+                item["scientific_contract"].get("reference_identification", "")),
+        }
         item["bias_relevance"]["reference_spec"] = ReferenceSpec.from_choice(
-            choice, capabilities or {}).as_record()
+            reference_choice, capabilities or {}).as_record()
         item["evidence_status"] = "behavioral_pattern"
         item["selection_contract"] = {
             "estimand_spec": EstimandSpec.from_choice(choice).as_record(),
