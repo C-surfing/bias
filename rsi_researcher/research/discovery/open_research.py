@@ -402,6 +402,7 @@ def compact_step(entry: dict):
         record = entry["controlled_experiment"]
         result["controlled_experiment"] = {
             "specification": record["specification"],
+            "estimand": record["estimand"],
             "statistics": record["result"],
             "reference_scope": record["evidence_scope"],
             "identification": record["identification"],
@@ -1348,6 +1349,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     critique = critic.act({
                         "hypothesis": selected["claim"],
                         "intervention": specification,
+                        "executed_estimand": measurement["estimand"],
                         "executed_measurement": measurement["result"],
                         "prediction_audit": audit,
                         "identification_scope": measurement["identification"],
