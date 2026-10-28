@@ -15,6 +15,12 @@ This main branch prioritizes discovery and scientific confirmation, not predefin
 
 Detailed current protocol and data setup: docs/AUTONOMOUS_DISCOVERY_ARCHITECTURE_20261024.md.
 
+Cross-dataset, development-only adapter and reference / estimand contract:
+docs/DISCOVERY_DATASET_REFERENCE_CONTRACT.md. Use `explore --dataset` to select
+KuaiRand, KuaiRec, or an explicitly isolated DuckDB event dataset. Reference
+capabilities are evidence limits; they never independently establish a new
+algorithmic Bias.
+
 ## Command
 Run the discovery CLI in the isolated project environment with a local authorized Qwen service:
 PYTHONPATH=. /data/cjh/rsi/discovery_private_20261024/env/bin/python -B -m rsi_researcher.research.discovery explore --source-db /path/to/frozen_source.duckdb --config configs/discovery_qwen_open_phenomena.json --output runs/unique-discovery-development
