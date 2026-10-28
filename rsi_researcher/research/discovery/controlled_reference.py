@@ -109,6 +109,7 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
         values = []
         ranking_ids = []
         placebo_equal = True
+        has_old_writes = False
         for value in (spec["control_value"], spec["treatment_value"]):
             state_events, params = _policy(history, spec, value)
             ranked, positive = rank(candidates, state_events, categories, priors, **params)
@@ -124,12 +125,12 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
             placebo, _ = rank(candidates, shorter, categories, priors, **params)
             placebo_equal &= (tuple(vid for _, vid, _ in placebo) ==
                               ranking_ids[-1])
-            if len(state_events) > keep:
-                tested_placebo_users += 1
+            has_old_writes |= len(state_events) > keep
         if len(values) != 2:
             continue
         if not placebo_equal:
             raise ValueError("Negative-control history outside the model window changed ranking")
+        tested_placebo_users += int(has_old_writes)
         rows.append({"uid": uid, "control": values[0],
                      "treatment": values[1],
                      "difference": values[1] - values[0],
@@ -152,8 +153,23 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
         "negative_control_passed": True,
         "negative_control_users_with_old_writes": tested_placebo_users,
     }
+    estimand = {
+        "population": "development_users_with_sufficient_history_and_fixed_label_panel",
+        "statistical_unit": "uid",
+        "treatment": {
+            "parameter": spec["parameter"],
+            "control": spec["control_value"],
+            "intervention": spec["treatment_value"],
+        },
+        "outcome": spec["outcome"],
+        "quantity": "mean_per_user_treatment_minus_control",
+        "candidate_reference": "same_dev_user_masked_item_evaluation_panel",
+        "relevance_reference": "observed_watch_ratio_ge_one",
+        "phase": "development",
+    }
     return {
         "specification": dict(spec),
+        "estimand": estimand,
         "result": result,
         "evidence_scope": "constructed_recommender_development_only",
         "reference_source": "KuaiRec near-full observed watch_ratio>=1 evaluation panel",
