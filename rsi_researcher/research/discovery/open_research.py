@@ -1294,7 +1294,107 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             act = decision["action"]
             selected = next((c for c in concepts if c["id"] == decision["concept_id"]), None)
             try:
-                if act == "reference_gap":
+                if act == "controlled_experiment":
+                    if selected is None:
+                        raise ValueError("Choose a concept for controlled intervention")
+                    opportunity = opportunity_pool.records.get(selected["id"], {})
+                    if opportunity.get("bias_relevance", {}).get(
+                            "reference_spec", {}).get("kind") != "controlled_model":
+                        raise ValueError("Select a controlled_model reference and "
+                                         "competing mechanism predictions first")
+                    from rsi_researcher.research.discovery.controlled_reference import (
+                        CONTROLLED_EXPERIMENT_SCHEMA, PARAMETER_BOUNDS)
+                    from rsi_researcher.research.discovery.references import (
+                        rival_prediction_audit)
+                    designer = ResearchAgent(model)
+                    designer.role = "controlled-experiment-designer"
+                    designer.instruction = (
+                        "Propose ONE parameter intervention on our executable "
+                        "recommender. Do not select a named Bias category or maximize "
+                        "p-values. Choose the mechanism-relevant parameter and values, "
+                        "the outcome, and contradictory H1/H2 predictions on the "
+                        "SAME evaluation quantity. The tool keeps development users, "
+                        "ranked candidates, and held-out relevance labels fixed. "
+                        "It does not identify a production platform's policy.")
+                    specification = designer.act({
+                        "hypothesis": selected["claim"],
+                        "reference_spec": opportunity["bias_relevance"]["reference_spec"],
+                        "parameter_bounds": PARAMETER_BOUNDS,
+                        "available_outcomes": ["ndcg@10", "recall@10"],
+                        "instruction": "Choose the most rival-discriminating "
+                                       "model intervention, not a presumed bias fix.",
+                    }, "controlled-design-" + str(step), CONTROLLED_EXPERIMENT_SCHEMA)
+                    measurement = workbench.run_controlled_reference(
+                        source_db, specification)
+                    audit = rival_prediction_audit(
+                        measurement["result"],
+                        specification["prediction_if_mechanism"],
+                        specification["prediction_if_rival"],
+                        specification["meaningful_margin"])
+                    opportunity_pool.record_controlled_reference(
+                        selected["id"], measurement, audit)
+                    entry["controlled_experiment"] = measurement
+                    entry["numeric_prediction_audit"] = audit
+                    selected["tests"].append({
+                        "version": selected["version"], "requested_by": "scientist",
+                        "test_question": specification["question"],
+                        "controlled_workbench": True,
+                        "result": {"estimate": measurement["result"]["estimate"],
+                                   "ci95": measurement["result"]["ci95_bootstrap"]}})
+                    critique = critic.act({
+                        "hypothesis": selected["claim"],
+                        "intervention": specification,
+                        "executed_measurement": measurement["result"],
+                        "prediction_audit": audit,
+                        "identification_scope": measurement["identification"],
+                        "instruction": "Assess the scoped model mechanism against "
+                                       "the rival; do not equate directional agreement "
+                                       "with independently verified platform Bias. "
+                                       "State remaining reference/causality gaps.",
+                    }, "controlled-critique-" + str(step), CRITIC_SCHEMA)
+                    entry["critique"] = critique
+                    selected["critique"] = critique
+                    reflector = ResearchAgent(model)
+                    reflector.role = "discovery-reflection"
+                    reflector.instruction = (
+                        "Reflect on the numeric intervention, placebo and Critic. "
+                        "Revise a testable mechanism, abandon it, or request "
+                        "literature; do not claim a production policy result.")
+                    reflection = reflector.act({
+                        "hypothesis": selected["claim"],
+                        "measurement": measurement["result"],
+                        "prediction_audit": audit, "critique": critique,
+                        "reference_scope": measurement["evidence_scope"],
+                    }, "controlled-reflection-" + str(step), REFLECTION_SCHEMA)
+                    entry["reflection"] = reflection
+                    if reflection["decision"] == "abandon":
+                        selected["status"] = "rejected_development"
+                    elif reflection["decision"] == "revise":
+                        changed = any(
+                            reflection[key].strip() != selected["claim"][key].strip()
+                            for key in ("falsifier", "measurement"))
+                        if changed:
+                            selected["revisions"].append({
+                                "previous": selected["claim"],
+                                "reason": reflection["reason"],
+                                "triggering_tests": len(selected["tests"])})
+                            selected["claim"] = {
+                                **selected["claim"],
+                                **{key: reflection[key] for key in (
+                                    "concept", "mechanism", "rival",
+                                    "falsifier", "measurement")},
+                                "query": reflection["next_sql"], "reason": reflection["reason"]}
+                            selected["version"] += 1
+                            selected["critique"] = None
+                            entry["revised_concept"] = _concept_summary(selected)
+                        else:
+                            entry["reflection_veto"] = "Revision did not change the falsifier or measurement"
+                            selected["status"] = "needs_revision"
+                    elif reflection["decision"] == "literature":
+                        selected["literature"] = literature_review(
+                            model, selected["claim"], "controlled-literature-" + str(step))
+                        entry["literature_summary"] = selected["literature"]["assessment"]
+                elif act == "reference_gap":
                     if selected is None:
                         raise ValueError("Select an existing hypothesis for reference measurement")
                     catalog = {card["column"]: {r["value"] for r in card["measured_rows"]}
