@@ -126,6 +126,17 @@ def test_controlled_state_can_identify_only_the_scoped_model_effect(kuairec_zip)
         "recommendation_consequence_not_identified") == 0
 
 
+def test_placebo_is_unavailable_not_passed_when_no_old_history(kuairec_zip):
+    zip_path, _, _ = kuairec_zip
+    measured = evaluate_controlled(str(zip_path),
+                                   spec("history_window", 105, 115))
+    stats = measured["result"]
+    assert stats["n_paired_units"] >= 12
+    assert not stats["negative_control_tested"]
+    assert stats["negative_control_passed"] is None
+    assert stats["negative_control_users_with_old_writes"] == 0
+
+
 def test_invalid_or_non_discriminating_model_design_is_rejected(kuairec_zip):
     zip_path, _, _ = kuairec_zip
     for changed in [
