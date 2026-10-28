@@ -85,6 +85,15 @@ def assess(journal: list[dict], state: dict) -> dict:
             and checks["rival_predictions_disagree_and_support_is_measured"]
             and checks["selected_contrast_reaches_workbench"]
         )
+    controlled_measurements = [
+        event["controlled_experiment"] for event in journal
+        if "controlled_experiment" in event
+    ]
+    scoped_identifications = [e for e in controlled_measurements
+                              if e.get("identification", {}).get(
+                                  "within_model_paired_intervention")
+                              and not e["identification"].get(
+                                  "platform_policy_identified", False)]
     reference_measurements = [
         e for e in journal
         if e.get("action", {}).get("action") == "reference_gap"
@@ -102,6 +111,8 @@ def assess(journal: list[dict], state: dict) -> dict:
                    "successful_workbench_experiments": len(executed),
                    "feature_bound_workbench_experiments": len(referenced),
                    "critic_workbench_tests": len(critic_workbench),
+                   "controlled_model_experiments": len(controlled_measurements),
+                   "scoped_constructed_model_references": len(scoped_identifications),
                    "critic_sql_only_tests": len(critic_sql),
                    "revisions": len(revised),
                    "abandonments": len(abandoned)},
@@ -117,6 +128,8 @@ def assess(journal: list[dict], state: dict) -> dict:
             "randomized_reference_diagnostic_executed": any(
                 "randomized_reference_diagnostic" in e for e in journal),
             "reference_diagnostic_measured": measured_reference,
+            "constructed_model_effect_executed": bool(controlled_measurements),
+            "constructed_model_effect_identified_in_scope": bool(scoped_identifications),
             "bias_reference_discrepancy_verified": False,
             "distortion_mechanism_identified": False,
             "independently_confirmed_recommender_bias": False,
