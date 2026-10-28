@@ -11,6 +11,7 @@ from rsi_researcher.research.discovery.datasets import (
 from rsi_researcher.research.discovery.references import (
     ReferenceSpec, EstimandSpec, rival_prediction_audit,
 )
+from rsi_researcher.research.discovery.opportunities import ResearchOpportunityPool
 from rsi_researcher.research.discovery.real_intervention import (
     bucket, reference_panel,
 )
@@ -39,6 +40,33 @@ def test_reference_capability_and_estimand_alignment():
     assert audit["population_shifted"]
     executed["outcome_expression"] = "long_view"
     assert not estimand.compare_executed(executed)["same_core_contrast"]
+
+
+def test_opportunity_preserves_reference_identification_assumptions():
+    pool = ResearchOpportunityPool()
+    pool.register("H001", {
+        "concept": "candidate bias", "mechanism": "ranking update",
+        "rival": "preferences", "falsifier": "no difference",
+        "measurement": "allocation share", "suggested_sql": "SELECT 1",
+        "reference_identification": "only within matched random item pool",
+    }, [])
+    choice = {
+        "reference_kind": "randomized_exposure",
+        "target_reference": "random insertion response",
+        "proposed_distortion": "allocation shift",
+        "contrast_source": "events", "contrast_group": "tags",
+        "contrast_outcome": "click", "control_value": "a",
+        "treatment_value": "b", "analysis": "paired_user",
+        "contrast_filter": "",
+        "mechanism_direction": "increase", "rival_direction": "decrease",
+    }
+    pool.record_selection_design(
+        "H001", choice, {"valid_support": True},
+        KuaiRandAdapter.capabilities)
+    ref = pool.records["H001"]["bias_relevance"]["reference_spec"]
+    assert ref["identification_assumptions"] == (
+        "only within matched random item pool")
+    assert ref["status"] == "proposed_unidentified"
 
 
 def test_numeric_prediction_requires_positive_evidence_not_pvalue_alone():
