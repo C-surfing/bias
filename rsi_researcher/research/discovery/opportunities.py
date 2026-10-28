@@ -283,10 +283,14 @@ class ResearchOpportunityPool:
                 or not math.isclose(stats["mean_treatment"] - stats["mean_control"],
                                     stats["estimate"], abs_tol=1e-9)
                 or stats["n_paired_units"] < 12
-                or not stats["negative_control_passed"]
+                or stats["negative_control_passed"] is False
+                or (stats["negative_control_tested"] and
+                    stats["negative_control_passed"] is not True)
                 or not design["within_model_paired_intervention"]
+                or not design["same_users"]
                 or not design["same_candidates"]
                 or not design["same_heldout_relevance_labels"]
+                or not design["train_users_separate_from_dev"]
                 or design["confirmation_users_consulted"]
                 or design["platform_policy_identified"]):
             raise ValueError("Controlled reference lacks a valid independent paired comparison")
