@@ -15,6 +15,9 @@ import zipfile
 
 class DatasetAdapter:
     dataset_id = "development_duckdb"
+    outcome_columns = ("click", "hate", "long_view", "next_click",
+                       "next_tags", "watch_ratio", "relevance")
+    item_features = ("vid", "tags", "author")
     capabilities = {
         "observed_responses": True, "randomized_exposure_probe": False,
         "dense_relevance": False, "logging_propensities": False,
@@ -50,6 +53,8 @@ class DatasetAdapter:
     def describe(self) -> dict:
         return {"dataset_id": self.dataset_id,
                 "capabilities": dict(self.capabilities),
+                "outcome_columns": list(self.outcome_columns),
+                "item_features": list(self.item_features),
                 "guidance": self.guidance}
 
 
