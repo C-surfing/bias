@@ -48,7 +48,8 @@ ACTION_SCHEMA = {
     "properties": {
         "action": {"type": "string", "enum": [
             "sql", "inspect_trajectory", "define_feature", "form_concept",
-            "select_opportunity", "reference_gap", "test", "experiment",
+            "select_opportunity", "reference_gap", "controlled_experiment",
+            "test", "experiment",
             "revise", "literature",
             "freeze", "stop"]},
         "reason": TEXT, "query": TEXT, "feature_name": TEXT, "expression": TEXT,
@@ -397,6 +398,17 @@ def compact_step(entry: dict):
             result[k] = compact_query(entry[k])
     if "trajectory" in entry:
         result["trajectory"] = compact_query(entry["trajectory"]["trajectory"])
+    if "controlled_experiment" in entry:
+        record = entry["controlled_experiment"]
+        result["controlled_experiment"] = {
+            "specification": record["specification"],
+            "estimand": record["estimand"],
+            "statistics": record["result"],
+            "reference_scope": record["evidence_scope"],
+            "identification": record["identification"],
+            "prediction_audit": entry.get("numeric_prediction_audit"),
+            "critic": entry.get("critique"),
+        }
     if "experiment" in entry:
         record = entry["experiment"]
         result["experiment"] = {
@@ -525,7 +537,9 @@ def compact_opportunity_pool(pool) -> dict:
             k: v for k, v in item.get("bias_relevance", {}).items()
             if k in ("reference_kind", "target_reference",
                      "reference_identification", "reference_measured",
-                     "numeric_discrepancy", "reference_scope")},
+                     "reference_spec", "numeric_discrepancy", "reference_scope")},
+        "model_consequence": item.get("recommendation_consequence"),
+        "controlled_test_count": len(item.get("controlled_reference_tests", [])),
         "selected_contrast": {
             k: v for k, v in item.get("selection_contract", {}).items()
             if k in ("source_table", "group_expression", "outcome_expression",
@@ -591,6 +605,12 @@ def research_funnel(concepts: list[dict], pool) -> dict:
         "candidates_with_executed_workbench": workbench,
         "candidates_with_rival_discrimination": discriminated,
         "candidates_with_numeric_reference_diagnostic": measured,
+        "candidates_with_identified_constructed_model_effect": sum(
+            bool(r["bias_relevance"].get("numeric_discrepancy", {}).get(
+                "controlled_model_effect_identified")) for r in pool.records.values()),
+        "executed_constructed_model_reference_tests": sum(
+            len(r.get("controlled_reference_tests", []))
+            for r in pool.records.values()),
         "candidates_with_credible_distortion_measurement": sum(
             bool(r["bias_relevance"].get("numeric_discrepancy", {}).get(
                 "normative_target_validated"))
@@ -620,7 +640,8 @@ def research_evidence_signature(tools, concepts: list[dict], pool) -> tuple:
     """Evidence changes, not elapsed turns or mere renamed hypotheses."""
     return (len(tools.history), len(tools.feature_records),
             sum(len(c["tests"]) + len(c["revisions"]) for c in concepts),
-            sum(len(p.get("tests", [])) for p in pool.records.values()),
+            sum(len(p.get("tests", [])) + len(p.get("controlled_reference_tests", []))
+                for p in pool.records.values()),
             sum(bool(p.get("bias_relevance", {}).get("numeric_discrepancy", {}).get(
                 "measured")) for p in pool.records.values()))
 
@@ -993,6 +1014,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "H1/H2, explicit reference eligibility, and actual "
                             "support; otherwise gather evidence."),
                         "opportunities": compact_opportunity_pool(opportunity_pool),
+                        "dataset_reference_capabilities": adapter.describe(),
                         "recent_observations": [
                             {"sql": q["sql"][:160], "rows": q["rows"][:3]}
                             for q in tools.history[-2:]],
@@ -1209,8 +1231,23 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 live_actions = [a for a in live_actions if a != "form_concept"]
             if not live_ids:
                 live_actions = [a for a in live_actions if a not in (
-                    "select_opportunity", "reference_gap", "test", "experiment",
+                    "select_opportunity", "reference_gap", "controlled_experiment",
+            "test", "experiment",
                     "revise", "literature", "freeze")]
+            if (not adapter.capabilities.get("replayable_recommender")
+                    or not any(
+                        opportunity_pool.records.get(ident, {}).get(
+                            "bias_relevance", {}).get("reference_spec", {}).get(
+                                "kind") == "controlled_model"
+                        for ident in live_ids)):
+                live_actions = [a for a in live_actions if a != "controlled_experiment"]
+            else:
+                instruction["next_action_guidance"] += (
+                    " The controlled_experiment action runs a parameter intervention "
+                    "in OUR executable recommender with fixed candidate items and "
+                    "held-out relevance labels. Choose a meaningful H1/H2 "
+                    "disagreement for one outcome; model effects do not identify "
+                    "the unknown production recommender's Bias.")
             model_action_schema = ACTION_SCHEMA
             if model_config.get("llm"):
                 # Repeated identical SQL is a dead-end, not another hypothesis test.
@@ -1261,7 +1298,110 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             act = decision["action"]
             selected = next((c for c in concepts if c["id"] == decision["concept_id"]), None)
             try:
-                if act == "reference_gap":
+                if act == "controlled_experiment":
+                    if selected is None:
+                        raise ValueError("Choose a concept for controlled intervention")
+                    opportunity = opportunity_pool.records.get(selected["id"], {})
+                    if opportunity.get("bias_relevance", {}).get(
+                            "reference_spec", {}).get("kind") != "controlled_model":
+                        raise ValueError("Select a controlled_model reference and "
+                                         "competing mechanism predictions first")
+                    from rsi_researcher.research.discovery.controlled_reference import (
+                        CONTROLLED_EXPERIMENT_SCHEMA, PARAMETER_BOUNDS)
+                    from rsi_researcher.research.discovery.references import (
+                        rival_prediction_audit)
+                    designer = ResearchAgent(model)
+                    designer.role = "controlled-experiment-designer"
+                    designer.instruction = (
+                        "Propose ONE parameter intervention on our executable "
+                        "recommender. Do not select a named Bias category or maximize "
+                        "p-values. Choose the mechanism-relevant parameter and values, "
+                        "the outcome, and contradictory H1/H2 predictions on the "
+                        "SAME evaluation quantity. The tool keeps development users, "
+                        "ranked candidates, and held-out relevance labels fixed. "
+                        "It does not identify a production platform's policy.")
+                    specification = designer.act({
+                        "hypothesis": selected["claim"],
+                        "reference_spec": opportunity["bias_relevance"]["reference_spec"],
+                        "parameter_bounds": PARAMETER_BOUNDS,
+                        "available_outcomes": ["ndcg@10", "recall@10"],
+                        "instruction": "Choose the most rival-discriminating "
+                                       "model intervention, not a presumed bias fix.",
+                    }, "controlled-design-" + str(step), CONTROLLED_EXPERIMENT_SCHEMA)
+                    measurement = workbench.run_controlled_reference(
+                        source_db, specification)
+                    audit = rival_prediction_audit(
+                        measurement["result"],
+                        specification["prediction_if_mechanism"],
+                        specification["prediction_if_rival"],
+                        specification["meaningful_margin"])
+                    opportunity_pool.record_controlled_reference(
+                        selected["id"], measurement, audit,
+                        concept_version=selected["version"])
+                    entry["controlled_experiment"] = measurement
+                    entry["numeric_prediction_audit"] = audit
+                    selected["tests"].append({
+                        "version": selected["version"], "requested_by": "scientist",
+                        "test_question": specification["question"],
+                        "controlled_workbench": True,
+                        "result": {"estimate": measurement["result"]["estimate"],
+                                   "ci95": measurement["result"]["ci95_bootstrap"]}})
+                    critique = critic.act({
+                        "hypothesis": selected["claim"],
+                        "intervention": specification,
+                        "executed_estimand": measurement["estimand"],
+                        "executed_measurement": measurement["result"],
+                        "prediction_audit": audit,
+                        "identification_scope": measurement["identification"],
+                        "instruction": "Assess the scoped model mechanism against "
+                                       "the rival; do not equate directional agreement "
+                                       "with independently verified platform Bias. "
+                                       "State remaining reference/causality gaps.",
+                    }, "controlled-critique-" + str(step), CRITIC_SCHEMA)
+                    entry["critique"] = critique
+                    selected["critique"] = critique
+                    reflector = ResearchAgent(model)
+                    reflector.role = "discovery-reflection"
+                    reflector.instruction = (
+                        "Reflect on the numeric intervention, placebo and Critic. "
+                        "Revise a testable mechanism, abandon it, or request "
+                        "literature; do not claim a production policy result.")
+                    reflection = reflector.act({
+                        "hypothesis": selected["claim"],
+                        "measurement": measurement["result"],
+                        "prediction_audit": audit, "critique": critique,
+                        "reference_scope": measurement["evidence_scope"],
+                    }, "controlled-reflection-" + str(step), REFLECTION_SCHEMA)
+                    entry["reflection"] = reflection
+                    if reflection["decision"] == "abandon":
+                        selected["status"] = "rejected_development"
+                    elif reflection["decision"] == "revise":
+                        changed = any(
+                            reflection[key].strip() != selected["claim"][key].strip()
+                            for key in ("falsifier", "measurement"))
+                        if changed:
+                            selected["revisions"].append({
+                                "previous": selected["claim"],
+                                "reason": reflection["reason"],
+                                "triggering_tests": len(selected["tests"])})
+                            selected["claim"] = {
+                                **selected["claim"],
+                                **{key: reflection[key] for key in (
+                                    "concept", "mechanism", "rival",
+                                    "falsifier", "measurement")},
+                                "query": reflection["next_sql"], "reason": reflection["reason"]}
+                            selected["version"] += 1
+                            selected["critique"] = None
+                            opportunity_pool.invalidate_revised_reference(selected["id"])
+                            entry["revised_concept"] = _concept_summary(selected)
+                        else:
+                            entry["reflection_veto"] = "Revision did not change the falsifier or measurement"
+                            selected["status"] = "needs_revision"
+                    elif reflection["decision"] == "literature":
+                        selected["literature"] = literature_review(
+                            model, selected["claim"], "controlled-literature-" + str(step))
+                        entry["literature_summary"] = selected["literature"]["assessment"]
+                elif act == "reference_gap":
                     if selected is None:
                         raise ValueError("Select an existing hypothesis for reference measurement")
                     catalog = {card["column"]: {r["value"] for r in card["measured_rows"]}
@@ -2156,12 +2296,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "Choose another mechanism or create a new observable "
                             "item-side feature; do not repeat unsupported arms.")
             if selected is not None and selected["id"] in opportunity_pool.records:
-                if selected.get("critique") is not None:
-                    gaps = scientific_evidence_gaps(
-                        selected, opportunity_pool.records[selected["id"]])
-                    entry["scientific_evidence_gaps"] = gaps
-                    opportunity_pool.records[selected["id"]][
-                        "scientific_evidence_gaps"] = gaps
+                # Evidence state belongs to the candidate, not to whether a
+                # Critic text field survived a Reflection revision.
+                gaps = scientific_evidence_gaps(
+                    selected, opportunity_pool.records[selected["id"]])
+                entry["scientific_evidence_gaps"] = gaps
+                opportunity_pool.records[selected["id"]][
+                    "scientific_evidence_gaps"] = gaps
                 if "experiment" in entry and "critique" in entry:
                     opportunity_pool.experiment(
                         selected["id"], entry["experiment"],

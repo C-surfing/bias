@@ -161,6 +161,16 @@ class ExperimentalWorkbench:
     def __init__(self, development_tools):
         self.tools = development_tools
 
+    def run_controlled_reference(self, source: str, specification: dict) -> dict:
+        """Execute an Agent-designed intervention through dataset capabilities.
+
+        The source is accessible only to the evaluator, not the LLM SQL gateway.
+        """
+        adapter = self.tools.adapter
+        if not adapter.capabilities.get("replayable_recommender"):
+            raise ValueError("Dataset does not expose an executable recommender")
+        return adapter.evaluate_controlled_reference(source, specification)
+
     def supported_population_filters(self, spec: dict) -> list[dict]:
         """Observe support, not outcomes, for alternative experiment cohorts."""
         if spec["source_query"].strip():

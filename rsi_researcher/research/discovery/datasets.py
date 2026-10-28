@@ -50,6 +50,9 @@ class DatasetAdapter:
     def install_reference_views(self, connection, enabled: bool) -> list[str]:
         return []
 
+    def evaluate_controlled_reference(self, source: str, specification: dict) -> dict:
+        raise ValueError(f"{self.dataset_id} cannot replay an owned recommender")
+
     def describe(self) -> dict:
         return {"dataset_id": self.dataset_id,
                 "capabilities": dict(self.capabilities),
@@ -147,8 +150,16 @@ class KuaiRandAdapter(DatasetAdapter):
 class KuaiRecAdapter(DatasetAdapter):
     dataset_id = "kuairec"
     capabilities = {
-        **DatasetAdapter.capabilities, "dense_relevance": True,
+        **DatasetAdapter.capabilities,
+        "dense_relevance": True,
+        "replayable_recommender": True,
     }
+
+    def evaluate_controlled_reference(self, source: str, specification: dict) -> dict:
+        from rsi_researcher.research.discovery.controlled_reference import (
+            evaluate_controlled,
+        )
+        return evaluate_controlled(source, specification)
     guidance = (
         "KuaiRec small_matrix gives relatively dense observed user-item feedback. "
         "watch_ratio and relevance are observed responses, NOT known platform "

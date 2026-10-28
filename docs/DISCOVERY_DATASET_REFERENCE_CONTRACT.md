@@ -69,3 +69,47 @@ Next: link controlled recommender experiments to a scoped normative reference,
 let Agent actively select new evidence while retaining multiple hypotheses,
 and run equal-cost local Qwen and stronger-model experiments with independent
 confirmation users protected.
+
+## Executable reference: Agent-controlled model intervention
+
+For `kuairec`, `replayable_recommender=true` means **our owned,
+transparent category-memory re-ranker**, not a reconstructed production
+KuaiRec algorithm. The Agent first proposes a phenomenon and competing H1/H2,
+selects a `controlled_model` reference, then may request
+`controlled_experiment`. A separate Designer chooses one mechanism parameter:
+history window, recent feedback write omission, item-prior weight, user-profile
+weight, positive-feedback weight, or negative-feedback weight. These are model
+operations, **not predefined Bias categories**. The Designer also declares
+one metric (NDCG@10 or Recall@10), two intervention values, distinct directional
+predictions and a meaningful effect margin.
+
+The Workbench executes both settings on the same development users, the
+same candidate lists, and the same held-out user-item evaluation labels. The
+constructed recommender receives only its history and train-user item priors,
+**not** the panel labels. It reports a paired-user treatment-minus-control
+estimand, 95% user-bootstrap CI, user count, ranking changes and a negative
+control that deletes writes outside the active history window. The negative
+control checks the *implementation*, not the rival scientific mechanism.
+When no user's older writes exist outside the active model window, the placebo
+is explicitly reported as *untested*, not as passed. This does not by itself
+invalidate an otherwise supported within-model paired estimate.
+
+The Reference Ledger records `identified_model_effect_only` after checking
+that the actually executed estimand matches the design. This status establishes
+that an effect is **measurable/identifiable within the constructed recommender**;
+it does NOT prove a nonzero effect, its normative desirability, a production
+platform Bias, or novel real-world discovery. The general Bias freeze gate
+remains closed because `normative_target_validated=false`. If Reflection
+changes the falsifier or measured quantity, the old experiment remains
+versioned as evidence but the new version requires a fresh reference test.
+
+Machine evidence is written to `research_opportunities.json`, `journal.json`,
+and the usual research-state outputs. The LLM sees aggregates, not per-user
+masked evaluation labels; the full reproducible record stays with the evaluator.
+
+**Present implementation limit:** the intervention grammar covers six safe
+dimensions of this specific executable model. It does not claim universal
+intervention ability across arbitrary external models. Extending to another
+recommender requires an Adapter exposing a comparable paired intervention and
+an explicit, scoped reference; it must not copy KuaiRec-specific mechanics
+into the shared Workbench.

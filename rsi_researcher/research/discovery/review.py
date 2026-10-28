@@ -85,6 +85,25 @@ def assess(journal: list[dict], state: dict) -> dict:
             and checks["rival_predictions_disagree_and_support_is_measured"]
             and checks["selected_contrast_reaches_workbench"]
         )
+    controlled_measurements = [
+        event["controlled_experiment"] for event in journal
+        if "controlled_experiment" in event
+    ]
+    scoped_identifications = [e for e in controlled_measurements
+                              if e.get("identification", {}).get(
+                                  "within_model_paired_intervention")
+                              and not e["identification"].get(
+                                  "platform_policy_identified", False)]
+    verified_controlled_routes = [
+        e for e in journal if "controlled_experiment" in e
+        and e.get("action", {}).get("action") == "controlled_experiment"
+        and "critique" in e and "reflection" in e
+        and "numeric_prediction_audit" in e
+        and e["controlled_experiment"].get("identification", {}).get(
+            "within_model_paired_intervention")
+        and not e["controlled_experiment"]["identification"].get(
+            "platform_policy_identified")
+    ]
     reference_measurements = [
         e for e in journal
         if e.get("action", {}).get("action") == "reference_gap"
@@ -95,6 +114,7 @@ def assess(journal: list[dict], state: dict) -> dict:
         "randomized_reference_diagnostic" in e for e in journal))
     return {
         "full_qwen_workflow_accepted": accepted,
+        "controlled_model_workflow_executed": bool(verified_controlled_routes),
         "checks": checks,
         "counts": {"explicit_opportunity_selections": len(explicit_opportunity_selections),
                    "opportunity_bound_experiments": len(opportunity_bound_tests),
@@ -102,6 +122,8 @@ def assess(journal: list[dict], state: dict) -> dict:
                    "successful_workbench_experiments": len(executed),
                    "feature_bound_workbench_experiments": len(referenced),
                    "critic_workbench_tests": len(critic_workbench),
+                   "controlled_model_experiments": len(controlled_measurements),
+                   "scoped_constructed_model_references": len(scoped_identifications),
                    "critic_sql_only_tests": len(critic_sql),
                    "revisions": len(revised),
                    "abandonments": len(abandoned)},
@@ -117,6 +139,8 @@ def assess(journal: list[dict], state: dict) -> dict:
             "randomized_reference_diagnostic_executed": any(
                 "randomized_reference_diagnostic" in e for e in journal),
             "reference_diagnostic_measured": measured_reference,
+            "constructed_model_effect_executed": bool(controlled_measurements),
+            "constructed_model_effect_identified_in_scope": bool(scoped_identifications),
             "bias_reference_discrepancy_verified": False,
             "distortion_mechanism_identified": False,
             "independently_confirmed_recommender_bias": False,
