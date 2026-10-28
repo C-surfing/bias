@@ -981,7 +981,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     }, "opportunity-choice-" + str(step),
                         constrained_schema)
                     def check_choice(plan):
+                        from rsi_researcher.research.discovery.references import ReferenceSpec
                         opportunity_pool.check_prediction(plan)
+                        ReferenceSpec.from_choice(plan, adapter.capabilities)
                         group = plan["contrast_group"]
                         if group in native_sources and (
                                 plan["contrast_source"] != native_sources[group]
@@ -1088,7 +1090,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             choice["selected_concept_id"], choice["reason"],
                             choice["next_sql"] if choice["next_action"] == "observe" else "")
                         opportunity_pool.record_selection_design(
-                            choice["selected_concept_id"], choice, support)
+                            choice["selected_concept_id"], choice, support,
+                            adapter.capabilities)
                         chosen_item = opportunity_pool.records[choice["selected_concept_id"]]
                         chosen_item["prediction_if_mechanism"] = choice["prediction_if_mechanism"]
                         chosen_item["prediction_if_rival"] = choice["prediction_if_rival"]
@@ -1680,17 +1683,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     choice_contract = opportunity_pool.records.get(
                         selected["id"], {}).get("selection_contract")
                     if choice_contract:
-                        match_fields = ("source_table", "group_expression",
-                                        "outcome_expression", "control_value",
-                                        "treatment_value", "analysis")
+                        from rsi_researcher.research.discovery.references import EstimandSpec
+                        aligned = EstimandSpec(
+                            **choice_contract["estimand_spec"]).compare_executed(
+                                experiment_spec)
                         entry["selection_contract_audit"] = {
-                            "matches_original_contrast": all(
-                                experiment_spec[k] == choice_contract[k]
-                                for k in match_fields),
-                            "differences": {
-                                k: [choice_contract[k], experiment_spec[k]]
-                                for k in match_fields if
-                                experiment_spec[k] != choice_contract[k]},
+                            "matches_original_contrast": aligned["same_core_contrast"],
+                            **aligned,
                         }
                     import duckdb
                     entry["experiment_specification"] = experiment_spec
@@ -1743,17 +1742,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     # Auditing must use the *executed* repaired spec, not a
                     # superseded first draft that may have been rejected.
                     if choice_contract:
-                        material = ("source_table", "group_expression",
-                                    "outcome_expression", "control_value",
-                                    "treatment_value", "analysis")
+                        from rsi_researcher.research.discovery.references import EstimandSpec
+                        aligned = EstimandSpec(
+                            **choice_contract["estimand_spec"]).compare_executed(
+                                experiment_spec)
                         entry["selection_contract_audit"] = {
-                            "matches_original_contrast": all(
-                                experiment_spec[key] == choice_contract[key]
-                                for key in material),
-                            "differences": {
-                                key: [choice_contract[key], experiment_spec[key]]
-                                for key in material if
-                                experiment_spec[key] != choice_contract[key]},
+                            "matches_original_contrast": aligned["same_core_contrast"],
+                            **aligned,
                         }
                     entry["experiment"] = measured_experiment
                     reference_choice = opportunity_pool.records.get(
@@ -1942,6 +1937,16 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             if "critic_experiment" in entry else
                             {"descriptive_sql_only": True,
                              "observations": compact_query(entry["critic_sql_countertest"])})
+                        # A numerical prediction audit cannot alone identify causality.
+                        from rsi_researcher.research.discovery.references import rival_prediction_audit
+                        initial_predictions = (
+                            rival_prediction_audit(
+                                measured_experiment["result"],
+                                choice_contract["prediction_if_mechanism"],
+                                choice_contract["prediction_if_rival"],
+                                experiment_spec["meaningful_margin"])
+                            if choice_contract else {"supports": "not_preregistered"})
+                        entry["numeric_prediction_audit"] = initial_predictions
                         # Update the scientific verdict AFTER the actual countertest;
                         # the earlier critique only saw the initial measurement.
                         post_counter = critic.act({
@@ -1949,6 +1954,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "initial_specification": experiment_spec,
                             "initial_statistics": model_statistics(measured_experiment["result"]),
                             "countertest": counter_result,
+                            "initial_prediction_audit": initial_predictions,
                             "reference": opportunity_pool.records[selected["id"]].get("bias_relevance", {}),
                             "request": "Reassess H1/H2 after the measured countertest. "
                                        "A different subgroup is not automatically a "
