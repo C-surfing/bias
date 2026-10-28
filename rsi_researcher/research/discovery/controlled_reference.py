@@ -150,7 +150,8 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
         "mean_treatment": mean(x["treatment"] for x in rows),
         "ranking_change_fraction": mean(x["ranking_changed"] for x in rows),
         "outcome": spec["outcome"],
-        "negative_control_passed": True,
+        "negative_control_tested": tested_placebo_users > 0,
+        "negative_control_passed": True if tested_placebo_users > 0 else None,
         "negative_control_users_with_old_writes": tested_placebo_users,
     }
     estimand = {
