@@ -249,7 +249,9 @@ class DevelopmentTools:
             raise ValueError("Feature name must be a fresh lowercase SQL identifier")
         if not expression.strip() or len(expression) > 1000 or ";" in expression or FORBIDDEN.search(expression):
             raise ValueError("Feature expression must be an SQL scalar expression")
-        if re.search(r"\b(click|hate|long_view|next_click|next_tags|watch_ratio|relevance)\b", expression, re.I):
+        forbidden_outcomes = "|".join(re.escape(name)
+                                      for name in self.adapter.outcome_columns)
+        if re.search(r"\b(" + forbidden_outcomes + r")\b", expression, re.I):
             raise ValueError("No future or current outcome may define a treatment; "
                              "use pre-event previous_click/previous_hate and "
                              "measure current or future outcomes separately")
@@ -1003,8 +1005,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         if plan["reference_kind"] == "randomized_exposure":
                             record = tools.feature_records.get(plan["contrast_group"])
                             expression = record["expression"] if record else plan["contrast_group"]
-                            if ("tags" not in expression and "vid" not in expression
-                                    and "author" not in expression):
+                            if not any(re.search(r"\b" + re.escape(field) + r"\b",
+                                                 expression)
+                                       for field in adapter.item_features):
                                 raise ValueError("Randomized exposure reference needs "
                                                  "an actual ITEM feature, not is_random "
                                                  "or a historical user-state contrast")
