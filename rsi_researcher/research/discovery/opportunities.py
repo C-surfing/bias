@@ -251,6 +251,60 @@ class ResearchOpportunityPool:
             bias["reference_spec"]["status"] = "measured_unidentified"
         self.records[identifier]["evidence_status"] = "reference_diagnostic_only"
 
+    def record_controlled_reference(self, identifier: str, evidence: dict,
+                                    prediction_audit: dict):
+        """Promote executed evidence only in its actual, constructed-model scope."""
+        if identifier not in self.records:
+            raise ValueError("Unknown research opportunity")
+        item = self.records[identifier]
+        bias = item["bias_relevance"]
+        if bias.get("reference_spec", {}).get("kind") != "controlled_model":
+            raise ValueError("Intervention was not selected against a controlled-model reference")
+        stats = evidence["result"]
+        design = evidence["identification"]
+        ci = stats["ci95_bootstrap"]
+        values = [stats["estimate"], stats["mean_control"],
+                  stats["mean_treatment"], *ci]
+        if (len(ci) != 2 or not all(math.isfinite(float(v)) for v in values)
+                or not math.isclose(stats["mean_treatment"] - stats["mean_control"],
+                                    stats["estimate"], abs_tol=1e-9)
+                or stats["n_paired_units"] < 12
+                or not stats["negative_control_passed"]
+                or not design["within_model_paired_intervention"]
+                or not design["same_candidates"]
+                or not design["same_heldout_relevance_labels"]
+                or design["confirmation_users_consulted"]
+                or design["platform_policy_identified"]):
+            raise ValueError("Controlled reference lacks a valid independent paired comparison")
+        bias["numeric_discrepancy"] = {
+            "metric": stats["outcome"],
+            "observed": stats["mean_control"],
+            "reference": stats["mean_treatment"],
+            "estimate": stats["estimate"],
+            "ci95": ci,
+            "measured": True,
+            "reference_scope": evidence["evidence_scope"],
+            "normative_target_validated": False,
+            "controlled_model_effect_identified": True,
+        }
+        bias["reference_measured"] = True
+        bias["reference_spec"]["status"] = "identified_model_effect_only"
+        item["recommendation_consequence"] = {
+            "identified": True,
+            "metric": stats["outcome"],
+            "estimate": stats["estimate"],
+            "ci95": ci,
+            "reference_scope": evidence["evidence_scope"],
+            "platform_causal_effect": False,
+        }
+        item.setdefault("controlled_reference_tests", []).append({
+            "specification": evidence["specification"],
+            "statistics": stats,
+            "identification": design,
+            "prediction_audit": prediction_audit,
+        })
+        item["evidence_status"] = "controlled_model_effect_identified"
+
     def record_reference_diagnostic(self, identifier: str, result: dict):
         item = self.records[identifier]
         item["bias_relevance"]["randomized_reference_diagnostic"] = result
@@ -284,6 +338,7 @@ class ResearchOpportunityPool:
             {k: v for k, v in item.items() if k not in
              ("observed_evidence", "tests")} |
             {"observed_evidence": item["observed_evidence"][-2:],
+             "controlled_reference_tests": item.get("controlled_reference_tests", [])[-1:],
              "tests": [{
                  "initial_estimate": t["initial_estimate"],
                  "initial_ci": t["initial_ci"],
