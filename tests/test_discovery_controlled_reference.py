@@ -130,3 +130,131 @@ def test_invalid_or_non_discriminating_model_design_is_rejected(kuairec_zip):
             validate_controlled_spec(changed)
     # A real evaluator must refuse under-supported cohorts; it cannot
     # turn many events from one user into independent research samples.
+
+
+def test_agent_controls_the_experiment_and_evidence_enters_scientific_loop(
+        kuairec_zip, tmp_path, monkeypatch):
+    zip_path, development_users, _ = kuairec_zip
+
+    def action(name, concept_id="", query=""):
+        return {
+            "action": name, "reason": "investigate measured recommender behavior",
+            "query": query, "feature_name": "", "expression": "",
+            "source_table": "events", "concept_id": concept_id,
+            "concept": "", "mechanism": "", "rival": "",
+            "falsifier": "", "measurement": "",
+        }
+
+    initial = {
+        "concept": "unexplained model-response ranking discrepancy",
+        "mechanism": "user-state weighting changes ranking utility",
+        "rival": "item priors alone explain observed quality",
+        "falsifier": "altering the user-state coefficient cannot change ranked quality",
+        "measurement": "paired fixed-candidate ranking utility",
+        "suggested_sql": "SELECT tags,AVG(relevance) FROM events GROUP BY tags",
+        "target_reference": "fixed relevance panel in constructed recommender",
+        "reference_identification": "same users, candidates and relevance labels",
+        "distortion_quantity": "difference in heldout NDCG",
+        "distortion_estimate": "unmeasured",
+        "prediction_if_mechanism": "ranking quality changes after model state intervention",
+        "prediction_if_rival": "ranking quality is unaffected",
+        "affected_population": "development users with enough history",
+        "mechanism_entry_point": "ranking score state coefficient",
+        "reference_status": "unmeasured",
+        "next_information_needed": "paired controlled intervention",
+        "discriminating_experiment": "compare fixed panel scores with changed profile weight",
+    }
+    choice = {
+        "selected_concept_id": "H001", "reason": "test owned model state",
+        "discriminating_prediction": "relevance gap for matched candidate groups",
+        "prediction_if_mechanism": "different response groups",
+        "prediction_if_rival": "same response groups",
+        "why_not_other": "more direct model-control experiment",
+        "next_action": "experiment", "next_sql": "",
+        "experimental_cost": "paired replay",
+        "contrast_source": "events", "contrast_group": "tags",
+        "contrast_outcome": "relevance", "contrast_filter": "",
+        "control_value": "1", "treatment_value": "2",
+        "analysis": "paired_user",
+        "mechanism_direction": "increase", "rival_direction": "no_change",
+        "reference_kind": "controlled_model",
+        "target_reference": "fixed relevance panel",
+        "proposed_distortion": "controlled utility change",
+        "mechanism_entry_point": "score state",
+        "corrective_intervention": "not assumed",
+    }
+
+    stages = []
+    class FakeModel:
+        def __init__(self):
+            self.actions = iter([
+                action("sql", query="SELECT tags,COUNT(*) n FROM events GROUP BY tags"),
+                action("sql", query="SELECT AVG(relevance) p FROM events"),
+                action("sql", query="SELECT uid,COUNT(*) n FROM events GROUP BY uid"),
+                action("controlled_experiment", concept_id="H001"),
+                action("stop"),
+            ])
+
+        def ask(self, prompt, schema, context):
+            stage = context["stage"]
+            stages.append(stage)
+            if stage == "open-discovery-scientist":
+                answer = next(self.actions)
+                assert answer["action"] in schema["properties"]["action"]["enum"]
+                return answer
+            if stage == "concept-formation":
+                return {"concepts": [initial, {
+                    **initial, "concept": "alternative latent mechanism",
+                    "mechanism": "category recall response",
+                    "measurement": "category-specific utility deviation"}]}
+            if stage == "research-opportunity-selector":
+                assert "controlled_model" in schema["properties"]["reference_kind"]["enum"]
+                return choice
+            if stage == "controlled-experiment-designer":
+                return spec()
+            if stage == "discovery-critic":
+                return {
+                    "decision": "revise", "reason": "only owned recommender identified",
+                    "next_sql": "", "observable_valid": True,
+                    "rival_discriminated": False,
+                    "logging_artifact_excluded": False,
+                }
+            if stage == "discovery-reflection":
+                return {
+                    "decision": "revise", "reason": "test a narrower mechanism",
+                    "concept": initial["concept"],
+                    "mechanism": initial["mechanism"],
+                    "rival": initial["rival"],
+                    "falsifier": "replay should change results only for current contexts",
+                    "measurement": "conditional within-model utility contrast",
+                    "next_sql": "SELECT tags,AVG(relevance) FROM events GROUP BY tags",
+                }
+            raise AssertionError(stage)
+
+    monkeypatch.setattr(research, "create_model", lambda *a: FakeModel())
+    output = tmp_path / "agent-controlled"
+    result = research.run_open_discovery(
+        str(zip_path), str(output),
+        {"llm": {"provider": "vllm"}, "discovery": {
+            "dataset": "kuairec", "open_phenomena": False}},
+        max_rounds=5, min_queries=1)
+    journal = json.loads((output / "journal.json").read_text())
+    actual = [x for x in journal if "controlled_experiment" in x]
+    assert len(actual) == 1
+    event = actual[0]
+    assert "controlled-experiment-designer" in stages
+    assert "discovery-critic" in stages
+    assert "discovery-reflection" in stages
+    assert event["controlled_experiment"]["result"]["n_paired_units"] >= 12
+    assert event["numeric_prediction_audit"]["prediction_h1"] == "increase"
+    assert event["reflection"]["decision"] == "revise"
+    assert set(x["uid"] for x in event["controlled_experiment"]["per_user"]) <= development_users
+    pool = result["research_opportunities"]["opportunities"]
+    identified = next(x for x in pool if x["id"] == "H001")
+    assert identified["bias_relevance"]["reference_spec"]["status"] == "identified_model_effect_only"
+    assert identified["recommendation_consequence"]["identified"] is True
+    assert identified["scientific_evidence_gaps"].count(
+        "recommendation_consequence_not_identified") == 0
+    assert result["research_funnel"]["candidates_with_identified_constructed_model_effect"] == 1
+    assert result["holdout_consulted"] is False
+    assert result["frozen_id"] is None
