@@ -1332,7 +1332,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         specification["prediction_if_rival"],
                         specification["meaningful_margin"])
                     opportunity_pool.record_controlled_reference(
-                        selected["id"], measurement, audit)
+                        selected["id"], measurement, audit,
+                        concept_version=selected["version"])
                     entry["controlled_experiment"] = measurement
                     entry["numeric_prediction_audit"] = audit
                     selected["tests"].append({
@@ -1386,6 +1387,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 "query": reflection["next_sql"], "reason": reflection["reason"]}
                             selected["version"] += 1
                             selected["critique"] = None
+                            opportunity_pool.invalidate_revised_reference(selected["id"])
                             entry["revised_concept"] = _concept_summary(selected)
                         else:
                             entry["reflection_veto"] = "Revision did not change the falsifier or measurement"
@@ -2289,12 +2291,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "Choose another mechanism or create a new observable "
                             "item-side feature; do not repeat unsupported arms.")
             if selected is not None and selected["id"] in opportunity_pool.records:
-                if selected.get("critique") is not None:
-                    gaps = scientific_evidence_gaps(
-                        selected, opportunity_pool.records[selected["id"]])
-                    entry["scientific_evidence_gaps"] = gaps
-                    opportunity_pool.records[selected["id"]][
-                        "scientific_evidence_gaps"] = gaps
+                # Evidence state belongs to the candidate, not to whether a
+                # Critic text field survived a Reflection revision.
+                gaps = scientific_evidence_gaps(
+                    selected, opportunity_pool.records[selected["id"]])
+                entry["scientific_evidence_gaps"] = gaps
+                opportunity_pool.records[selected["id"]][
+                    "scientific_evidence_gaps"] = gaps
                 if "experiment" in entry and "critique" in entry:
                     opportunity_pool.experiment(
                         selected["id"], entry["experiment"],
