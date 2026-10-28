@@ -574,8 +574,18 @@ def scientific_evidence_gaps(concept: dict, opportunity: dict) -> list[str]:
         gaps.append("numeric_reference_deviation_unmeasured")
     elif not reference.get("normative_target_validated"):
         gaps.append("normative_reference_not_identified")
-    if not any(t.get("requested_by") == "critic" and "workbench" in t
-               for t in concept.get("tests", [])):
+    if bias.get("reference_spec", {}).get("kind") == "controlled_model":
+        # Controlled H1/H2 are tested on an actual fixed-candidate intervention;
+        # an extra observational SQL subgroup is not the missing falsifier.
+        trials = [t for t in opportunity.get("controlled_reference_tests", [])
+                  if t.get("tested_concept_version") == concept.get("version")]
+        if not any(t.get("prediction_audit", {}).get("supports") == "H1"
+                   and t.get("prediction_audit", {}).get(
+                       "distinguishes_predictions") for t in trials):
+            gaps.append("controlled_mechanism_h1_not_verified")
+        gaps.append("production_platform_reference_not_identified")
+    elif not any(t.get("requested_by") == "critic" and "workbench" in t
+                 for t in concept.get("tests", [])):
         gaps.append("no_executed_inferential_rival_countertest")
     critique = concept.get("critique") or {}
     if critique and not critique.get("observable_valid"):
@@ -616,6 +626,14 @@ def research_funnel(concepts: list[dict], pool) -> dict:
                 "normative_target_validated"))
             for r in pool.records.values()),
         "workbench_completion_rate": workbench / len(concepts) if concepts else 0.0,
+        "controlled_h1_supported_on_development": sum(
+            any(t.get("prediction_audit", {}).get("supports") == "H1"
+                and t.get("prediction_audit", {}).get("distinguishes_predictions")
+                and t.get("tested_concept_version") == c["version"]
+                for t in pool.records.get(c["id"], {}).get(
+                    "controlled_reference_tests", [])) for c in concepts),
+        "frozen_scoped_model_mechanisms": sum(
+            c["status"] == "frozen_scoped_mechanism_unconfirmed" for c in concepts),
         "independently_confirmed": 0,
     }
 
@@ -2242,43 +2260,61 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         model, selected["claim"], "literature-" + str(step))
                     entry["literature_summary"] = selected["literature"]["assessment"]
                 elif act == "freeze":
-                    if selected is None:
-                        raise ValueError("Select an existing concept to freeze")
-                    numeric_ref = opportunity_pool.records.get(
-                        selected["id"], {}).get("bias_relevance", {}).get(
-                            "numeric_discrepancy", {})
-                    ci = numeric_ref.get("ci95") or []
-                    audit = {
-                        "reference_gap_ci_excludes_zero": bool(
-                            len(ci) == 2 and (ci[0] > 0 or ci[1] < 0)),
-                        "two_exploratory_queries": len(tools.history) >= min_queries,
-                        "has_development_test": bool(selected["tests"]),
-                        "critic_ready": (selected["critique"] or {}).get("decision") == "ready",
-                        "executed_rival_countertest": any(
-                            t.get("requested_by") == "critic" and "workbench" in t
-                            for t in selected["tests"]),
-                        "observable_valid": bool((selected["critique"] or {}).get("observable_valid")),
-                        "rival_tested": bool((selected["critique"] or {}).get("rival_discriminated")),
-                        "logging_checked": bool((selected["critique"] or {}).get("logging_artifact_excluded")),
-                        "literature_checked": selected["literature"] is not None,
-                        "reference_target_declared": bool(
-                            opportunity_pool.records.get(selected["id"], {}).get(
-                                "bias_relevance", {}).get("target_reference")),
-                        "numeric_reference_gap_computed": bool(
-                            opportunity_pool.records.get(selected["id"], {}).get(
-                                "bias_relevance", {}).get("numeric_discrepancy", {}).get("measured")),
-                        "credible_normative_target_validated": bool(
-                            opportunity_pool.records.get(selected["id"], {}).get(
-                                "bias_relevance", {}).get("numeric_discrepancy", {}).get(
-                                    "normative_target_validated")),
-                    }
-                    entry["freeze_gate"] = audit
-                    if all(audit.values()):
-                        selected["status"] = "frozen_unconfirmed"
-                        last = selected["id"]
-                        history.append(entry)
-                        break
-                    entry["gate"] = "not ready; choose another research action"
+                    opportunity = opportunity_pool.records.get(selected["id"], {}) if selected else {}
+                    if (opportunity.get("bias_relevance", {}).get(
+                            "reference_spec", {}).get("kind") == "controlled_model"):
+                        # A constructed recommender can support a scoped mechanism
+                        # hypothesis, not a normative or production-platform Bias.
+                        from rsi_researcher.research.discovery.references import (
+                            scoped_model_freeze_gate)
+                        audit = scoped_model_freeze_gate(
+                            selected, opportunity,
+                            enough_exploration=len(tools.history) >= min_queries)
+                        entry["freeze_gate"] = audit
+                        if all(audit.values()):
+                            selected["status"] = "frozen_scoped_mechanism_unconfirmed"
+                            last = selected["id"]
+                            history.append(entry)
+                            break
+                        entry["gate"] = "scoped mechanism lacks verified H1, placebo, critique or literature"
+                    else:
+                        if selected is None:
+                            raise ValueError("Select an existing concept to freeze")
+                        numeric_ref = opportunity_pool.records.get(
+                            selected["id"], {}).get("bias_relevance", {}).get(
+                                "numeric_discrepancy", {})
+                        ci = numeric_ref.get("ci95") or []
+                        audit = {
+                            "reference_gap_ci_excludes_zero": bool(
+                                len(ci) == 2 and (ci[0] > 0 or ci[1] < 0)),
+                            "two_exploratory_queries": len(tools.history) >= min_queries,
+                            "has_development_test": bool(selected["tests"]),
+                            "critic_ready": (selected["critique"] or {}).get("decision") == "ready",
+                            "executed_rival_countertest": any(
+                                t.get("requested_by") == "critic" and "workbench" in t
+                                for t in selected["tests"]),
+                            "observable_valid": bool((selected["critique"] or {}).get("observable_valid")),
+                            "rival_tested": bool((selected["critique"] or {}).get("rival_discriminated")),
+                            "logging_checked": bool((selected["critique"] or {}).get("logging_artifact_excluded")),
+                            "literature_checked": selected["literature"] is not None,
+                            "reference_target_declared": bool(
+                                opportunity_pool.records.get(selected["id"], {}).get(
+                                    "bias_relevance", {}).get("target_reference")),
+                            "numeric_reference_gap_computed": bool(
+                                opportunity_pool.records.get(selected["id"], {}).get(
+                                    "bias_relevance", {}).get("numeric_discrepancy", {}).get("measured")),
+                            "credible_normative_target_validated": bool(
+                                opportunity_pool.records.get(selected["id"], {}).get(
+                                    "bias_relevance", {}).get("numeric_discrepancy", {}).get(
+                                        "normative_target_validated")),
+                        }
+                        entry["freeze_gate"] = audit
+                        if all(audit.values()):
+                            selected["status"] = "frozen_unconfirmed"
+                            last = selected["id"]
+                            history.append(entry)
+                            break
+                        entry["gate"] = "not ready; choose another research action"
                 elif act == "stop":
                     stop_reason = "scientist_stop: " + decision["reason"]
                     entry["termination_reason"] = stop_reason
@@ -2343,7 +2379,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "query": "", "concept": ""},
                     "termination_reason": stop_reason})
                 break
-        status = ("frozen_unconfirmed" if last else
+        status = (next((c["status"] for c in concepts if c["id"] == last),
+                       "frozen_unconfirmed") if last else
                   "development_inconclusive" if max_rounds is not None else
                   "scientific_stalled" if stop_reason.startswith("scientific_stall") else
                   "scientific_stop" if stop_reason else "development_inconclusive")

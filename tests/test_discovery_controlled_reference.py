@@ -21,12 +21,13 @@ def kuairec_zip(tmp_path):
     path = tmp_path / "controlled-kuairec.zip"
     develop = [u for u in range(1, 500) if bucket(u) == "development"][:18]
     train = [u for u in range(1, 500) if bucket(u) == "train"][:12]
-    confirmation = next(u for u in range(1, 500) if bucket(u) == "confirmation")
+    confirmation_users = [u for u in range(1, 500) if bucket(u) == "confirmation"][:18]
+    confirmation = confirmation_users[0]
     assert len(develop) == 18
     cats = "video_id,feat\n" + "\n".join(
         f'{vid},"[{1 if vid%2 else 2}]"' for vid in range(1, 121)) + "\n"
     lines = ["user_id,video_id,watch_ratio,timestamp"]
-    for uid in [*train, *develop, confirmation]:
+    for uid in [*train, *develop, *confirmation_users]:
         for vid in range(1, 121):
             reward = 1.2 if ((uid + vid) % 7 < 3 or (uid%3==0 and vid%2==1)) else 0.2
             lines.append(f"{uid},{vid},{reward},1660000000")
@@ -290,3 +291,99 @@ def test_agent_controls_the_experiment_and_evidence_enters_scientific_loop(
         "constructed_model_effect_identified_in_scope"] is True
     assert review["scientific_quality"][
         "independently_confirmed_recommender_bias"] is False
+
+
+def _scoped_frozen_record():
+    """Pre-registered evidence fixture; actual confirmation is tested separately."""
+    design = spec()
+    trial = {
+        "tested_concept_version": 2,
+        "specification": design,
+        "statistics": {"estimate": 0.07, "ci95_bootstrap": [0.02, 0.1],
+                       "negative_control_tested": True,
+                       "negative_control_passed": True},
+        "prediction_audit": {"supports": "H1", "distinguishes_predictions": True},
+        "identification": {"within_model_paired_intervention": True,
+                           "platform_policy_identified": False,
+                           "confirmation_users_consulted": False},
+    }
+    concept = {
+        "id": "H001", "version": 2,
+        "status": "frozen_scoped_mechanism_unconfirmed",
+        "critique": {"decision": "ready", "observable_valid": True,
+                     "rival_discriminated": True},
+        "literature": {"assessment": {"verdict": "possibly_distinct"}},
+    }
+    opportunity = {
+        "id": "H001", "bias_relevance": {
+            "reference_spec": {"kind": "controlled_model"}},
+        "controlled_reference_tests": [trial],
+    }
+    return {"status": "frozen_scoped_mechanism_unconfirmed",
+            "frozen_id": "H001", "concepts": [concept],
+            "research_opportunities": {"opportunities": [opportunity]}}
+
+
+def test_scoped_model_gate_requires_h1_not_just_an_executed_intervention():
+    from copy import deepcopy
+    from rsi_researcher.research.discovery.references import scoped_model_freeze_gate
+    frozen = _scoped_frozen_record()
+    concept = frozen["concepts"][0]
+    opportunity = frozen["research_opportunities"]["opportunities"][0]
+    assert all(scoped_model_freeze_gate(
+        concept, opportunity, enough_exploration=True).values())
+    wrong_rival = deepcopy(opportunity)
+    wrong_rival["controlled_reference_tests"][0]["prediction_audit"]["supports"] = "H2"
+    assert not scoped_model_freeze_gate(
+        concept, wrong_rival, enough_exploration=True)["executed_h1_rival_discrimination"]
+    stale = deepcopy(concept)
+    stale["version"] = 3
+    assert not scoped_model_freeze_gate(
+        stale, opportunity, enough_exploration=True)["current_concept_version_tested"]
+    no_placebo = deepcopy(opportunity)
+    no_placebo["controlled_reference_tests"][0]["statistics"][
+        "negative_control_tested"] = False
+    assert not scoped_model_freeze_gate(
+        concept, no_placebo, enough_exploration=True)["executed_h1_rival_discrimination"]
+
+
+def test_confirm_frozen_model_is_phase_separated_and_uses_frozen_plan(monkeypatch):
+    from copy import deepcopy
+    from rsi_researcher.research.discovery import controlled_reference as controlled
+    original = _scoped_frozen_record()
+    phases = []
+    def confirmation_only(zip_path, specification, *, phase="development"):
+        phases.append((phase, deepcopy(specification)))
+        return {
+            "result": {"estimate": 0.08, "ci95_bootstrap": [0.01, 0.13],
+                       "negative_control_tested": True,
+                       "negative_control_passed": True},
+            "estimand": {"phase": phase},
+            "identification": {"confirmation_users_consulted": True,
+                               "platform_policy_identified": False},
+            "evidence_scope": "constructed_recommender_confirmation_only",
+        }
+    monkeypatch.setattr(controlled, "evaluate_controlled", confirmation_only)
+    result = controlled.confirm_frozen_controlled("sealed.zip", original)
+    assert phases == [("confirmation", spec())]
+    assert result["independent_confirmation"] is True
+    assert result["status"] == "confirmed_scoped_model_mechanism"
+    assert result["platform_causal_bias_established"] is False
+    assert result["real_world_novelty_established"] is False
+    result2 = deepcopy(original)
+    result2["research_opportunities"]["opportunities"][0][
+        "controlled_reference_tests"][0]["prediction_audit"]["supports"] = "H2"
+    with pytest.raises(ValueError, match="required development evidence"):
+        controlled.confirm_frozen_controlled("sealed.zip", result2)
+
+
+def test_controlled_confirmation_replay_never_uses_development_users(kuairec_zip):
+    zip_path, dev_users, _ = kuairec_zip
+    measured = evaluate_controlled(
+        str(zip_path), spec("recent_write_drop", 0, 8), phase="confirmation")
+    assert measured["estimand"]["phase"] == "confirmation"
+    assert measured["identification"]["confirmation_users_consulted"]
+    assert not measured["identification"]["platform_policy_identified"]
+    assert measured["result"]["n_paired_units"] >= 12
+    assert all(bucket(item["uid"]) == "confirmation"
+               and item["uid"] not in dev_users for item in measured["per_user"])

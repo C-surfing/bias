@@ -92,14 +92,15 @@ def _utility(top, positives, metric):
     return actual / ideal
 
 
-def evaluate_controlled(zip_path: str, spec: dict) -> dict:
-    """One prespecified paired contrast, only on development users.
+def evaluate_controlled(zip_path: str, spec: dict, *,
+                        phase: str = "development") -> dict:
+    """One prespecified paired contrast on development OR sealed confirmation users.
 
     The panel is seen by the evaluator for scoring, never by the policy
     and never copied to the model-facing development database.
     """
     validate_controlled_spec(spec)
-    categories, priors, histories, panels, folds = read_data(zip_path, "development")
+    categories, priors, histories, panels, folds = read_data(zip_path, phase)
     rows = []
     tested_placebo_users = 0
     for uid, candidates in sorted(panels.items()):
@@ -136,7 +137,7 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
                      "difference": values[1] - values[0],
                      "ranking_changed": ranking_ids[0] != ranking_ids[1]})
     if len(rows) < 12:
-        raise ValueError(f"Insufficient independent development users: {len(rows)}")
+        raise ValueError(f"Insufficient independent {phase} users: {len(rows)}")
     differences = [x["difference"] for x in rows]
     rng = Random(20261028)
     boot = sorted(mean(rng.choices(differences, k=len(differences)))
@@ -155,7 +156,7 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
         "negative_control_users_with_old_writes": tested_placebo_users,
     }
     estimand = {
-        "population": "development_users_with_sufficient_history_and_fixed_label_panel",
+        "population": phase + "_users_with_sufficient_history_and_fixed_label_panel",
         "statistical_unit": "uid",
         "treatment": {
             "parameter": spec["parameter"],
@@ -164,15 +165,15 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
         },
         "outcome": spec["outcome"],
         "quantity": "mean_per_user_treatment_minus_control",
-        "candidate_reference": "same_dev_user_masked_item_evaluation_panel",
+        "candidate_reference": "same_" + phase + "_user_masked_item_evaluation_panel",
         "relevance_reference": "observed_watch_ratio_ge_one",
-        "phase": "development",
+        "phase": phase,
     }
     return {
         "specification": dict(spec),
         "estimand": estimand,
         "result": result,
-        "evidence_scope": "constructed_recommender_development_only",
+        "evidence_scope": "constructed_recommender_" + phase + "_only",
         "reference_source": "KuaiRec near-full observed watch_ratio>=1 evaluation panel",
         "identification": {
             "within_model_paired_intervention": True,
@@ -180,7 +181,7 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
             "same_candidates": True,
             "same_heldout_relevance_labels": True,
             "train_users_separate_from_dev": True,
-            "confirmation_users_consulted": False,
+            "confirmation_users_consulted": phase == "confirmation",
             "platform_policy_identified": False,
             "novel_real_world_bias_identified": False,
             "reference_status": "identified_model_effect_only",
@@ -191,4 +192,64 @@ def evaluate_controlled(zip_path: str, spec: dict) -> dict:
         "user_folds": dict(folds),
         # Per-user details stay in the machine journal, never model prompt.
         "per_user": rows,
+    }
+
+def confirm_frozen_controlled(zip_path: str, frozen: dict) -> dict:
+    """Independently replay a PRE-FROZEN model mechanism on sealed users.
+
+    No agent, SQL discovery session or development statistics are consulted
+    while selecting this experiment. A positive result is explicitly limited
+    to the owned recommender; it cannot certify an unseen production policy.
+    """
+    if frozen.get("status") != "frozen_scoped_mechanism_unconfirmed":
+        raise ValueError("Only a frozen scoped model mechanism can be confirmed")
+    identifier = frozen.get("frozen_id")
+    concept = next((c for c in frozen.get("concepts", [])
+                    if c.get("id") == identifier), None)
+    opportunity = next((r for r in frozen.get(
+        "research_opportunities", {}).get("opportunities", [])
+                        if r.get("id") == identifier), None)
+    if concept is None or opportunity is None:
+        raise ValueError("Frozen concept and reference provenance must be present")
+    from rsi_researcher.research.discovery.references import (
+        scoped_model_freeze_gate, rival_prediction_audit)
+    # Recheck the evidence gate from saved development artifacts, instead of
+    # trusting a mutable status string or an agent's narrative.
+    gate = scoped_model_freeze_gate(concept, opportunity, enough_exploration=True)
+    if not all(gate.values()):
+        raise ValueError("Frozen model mechanism lacks required development evidence")
+    trials = [t for t in opportunity.get("controlled_reference_tests", [])
+              if t.get("tested_concept_version") == concept.get("version")
+              and t.get("prediction_audit", {}).get("supports") == "H1"]
+    specification = trials[-1]["specification"]
+    validate_controlled_spec(specification)
+    confirmation = evaluate_controlled(zip_path, specification, phase="confirmation")
+    audit = rival_prediction_audit(
+        confirmation["result"],
+        specification["prediction_if_mechanism"],
+        specification["prediction_if_rival"],
+        specification["meaningful_margin"])
+    ci = confirmation["result"]["ci95_bootstrap"]
+    supported = bool(audit["distinguishes_predictions"]
+                     and audit["supports"] == "H1"
+                     and (ci[0] > 0 or ci[1] < 0)
+                     and confirmation["result"]["negative_control_tested"]
+                     and confirmation["result"]["negative_control_passed"] is True)
+    return {
+        "status": ("confirmed_scoped_model_mechanism" if supported
+                   else "scoped_model_mechanism_not_confirmed"),
+        "frozen_id": identifier,
+        "tested_concept_version": concept["version"],
+        "frozen_specification": specification,
+        "confirmation_measurement": {
+            "estimand": confirmation["estimand"],
+            "result": confirmation["result"],
+            "identification": confirmation["identification"],
+            "evidence_scope": confirmation["evidence_scope"],
+        },
+        "confirmation_prediction_audit": audit,
+        "independent_confirmation": supported,
+        "confirmation_scope": "constructed_recommender_only",
+        "platform_causal_bias_established": False,
+        "real_world_novelty_established": False,
     }
