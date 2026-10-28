@@ -120,3 +120,42 @@ def rival_prediction_audit(statistics: dict, h1: str, h2: str,
                      "H2" if direction == h2 and h1 != h2 else "inconclusive"),
         "note": "Observational prediction agreement does not identify a causal Bias.",
     }
+
+def scoped_model_freeze_gate(concept: dict, opportunity: dict, *,
+                             enough_exploration: bool) -> dict:
+    """Freeze a falsifiable *owned-model* hypothesis, never a platform Bias.
+
+    Unlike a normative platform reference, a controlled replay can identify
+    an effect inside the executable recommender. Freeze only the CURRENT
+    concept version with a measured, rival-discriminating H1 prediction and
+    a genuine pipeline negative control. Confirmation remains sealed.
+    """
+    bias = opportunity.get("bias_relevance", {})
+    tests = [trial for trial in opportunity.get("controlled_reference_tests", [])
+             if trial.get("tested_concept_version") == concept.get("version")]
+    valid = []
+    for trial in tests:
+        result = trial.get("statistics", {})
+        prediction = trial.get("prediction_audit", {})
+        identification = trial.get("identification", {})
+        ci = result.get("ci95_bootstrap", [])
+        valid.append(bool(
+            prediction.get("distinguishes_predictions")
+            and prediction.get("supports") == "H1"
+            and len(ci) == 2 and (ci[0] > 0 or ci[1] < 0)
+            and result.get("negative_control_tested")
+            and result.get("negative_control_passed") is True
+            and identification.get("within_model_paired_intervention")
+            and not identification.get("platform_policy_identified")
+            and not identification.get("confirmation_users_consulted")))
+    critique = concept.get("critique") or {}
+    return {
+        "reference_is_owned_model": bias.get("reference_spec", {}).get("kind") == "controlled_model",
+        "current_concept_version_tested": bool(tests),
+        "executed_h1_rival_discrimination": any(valid),
+        "exploration_completed": enough_exploration,
+        "critic_ready_for_scoped_mechanism": critique.get("decision") == "ready",
+        "critic_observable_valid": bool(critique.get("observable_valid")),
+        "critic_rival_discriminated": bool(critique.get("rival_discriminated")),
+        "literature_checked": concept.get("literature") is not None,
+    }
