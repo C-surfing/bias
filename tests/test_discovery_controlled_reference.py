@@ -251,10 +251,16 @@ def test_agent_controls_the_experiment_and_evidence_enters_scientific_loop(
     assert set(x["uid"] for x in event["controlled_experiment"]["per_user"]) <= development_users
     pool = result["research_opportunities"]["opportunities"]
     identified = next(x for x in pool if x["id"] == "H001")
-    assert identified["bias_relevance"]["reference_spec"]["status"] == "identified_model_effect_only"
-    assert identified["recommendation_consequence"]["identified"] is True
-    assert identified["scientific_evidence_gaps"].count(
-        "recommendation_consequence_not_identified") == 0
-    assert result["research_funnel"]["candidates_with_identified_constructed_model_effect"] == 1
+    # The intervention identified the old model hypothesis, but Reflection
+    # changed the target measurement. Previous evidence is retained by version;
+    # it does not certify the new hypothesis without a new experiment.
+    assert identified["controlled_reference_tests"][0]["tested_concept_version"] == 1
+    assert identified["controlled_reference_tests"][0]["identification"][
+        "within_model_paired_intervention"]
+    assert identified["bias_relevance"]["reference_spec"]["status"] == "revised_requires_retest"
+    assert identified["recommendation_consequence"]["identified"] is False
+    assert "recommendation_consequence_not_identified" in identified["scientific_evidence_gaps"]
+    assert result["research_funnel"]["executed_constructed_model_reference_tests"] == 1
+    assert result["research_funnel"]["candidates_with_identified_constructed_model_effect"] == 0
     assert result["holdout_consulted"] is False
     assert result["frozen_id"] is None
