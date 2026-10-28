@@ -272,3 +272,10 @@ def test_agent_controls_the_experiment_and_evidence_enters_scientific_loop(
     assert result["research_funnel"]["candidates_with_identified_constructed_model_effect"] == 0
     assert result["holdout_consulted"] is False
     assert result["frozen_id"] is None
+    from rsi_researcher.research.discovery.review import assess
+    review = assess(journal, {"concepts": result["concepts"]})
+    assert review["controlled_model_workflow_executed"] is True
+    assert review["scientific_quality"][
+        "constructed_model_effect_identified_in_scope"] is True
+    assert review["scientific_quality"][
+        "independently_confirmed_recommender_bias"] is False
