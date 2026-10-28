@@ -48,7 +48,8 @@ ACTION_SCHEMA = {
     "properties": {
         "action": {"type": "string", "enum": [
             "sql", "inspect_trajectory", "define_feature", "form_concept",
-            "select_opportunity", "test", "experiment", "revise", "literature",
+            "select_opportunity", "reference_gap", "test", "experiment",
+            "revise", "literature",
             "freeze", "stop"]},
         "reason": TEXT, "query": TEXT, "feature_name": TEXT, "expression": TEXT,
         "source_table": {"type": "string", "enum": ["features", "events"]},
@@ -220,7 +221,7 @@ def development_db(source_db: str, target_db: str) -> dict:
 
 class DevelopmentTools:
     """Read-only DuckDB plus ephemeral derived features, never source-file access."""
-    def __init__(self, path: str):
+    def __init__(self, path: str, enable_matched_pool: bool = False):
         import duckdb
         self.connection = duckdb.connect(
             path, read_only=True, config={
@@ -228,9 +229,37 @@ class DevelopmentTools:
         self.history = []
         self.features = {"features": {}, "events": {}}
         self.feature_records = {}
+        # Restrict reference support to randomly inserted video IDs during
+        # the period random insertions actually occurred. No merit assumption.
+        existing = {r[1] for r in self.connection.execute(
+            "PRAGMA table_info('events')").fetchall()}
+        self.reference_views = []
+        if enable_matched_pool and {"uid", "vid", "is_random"}.issubset(existing):
+            fields = [f for f in (
+                "uid", "vid", "event_day", "is_random", "click", "long_view",
+                "hate", "tags", "author", "activity", "tab", "previous_click",
+                "previous_long_view", "previous_hate", "previous_tags")
+                if f in existing]
+            period = ("AND e.event_day >= (SELECT MIN(event_day) "
+                      "FROM main.events WHERE is_random=1)"
+                      if "event_day" in existing else "")
+            if "tab" in existing:
+                dominant = self.connection.execute(
+                    "SELECT tab FROM main.events WHERE is_random=1 "
+                    "GROUP BY tab ORDER BY COUNT(*) DESC LIMIT 1").fetchone()
+                if dominant and dominant[0] is not None:
+                    tab = str(dominant[0]).replace("'", "''")
+                    period += " AND e.tab='" + tab + "'"
+            self.connection.execute(
+                "CREATE TEMP VIEW shared_item_pool_events AS SELECT " +
+                ", ".join("e." + f for f in fields) +
+                " FROM main.events e WHERE e.vid IN "
+                "(SELECT DISTINCT vid FROM main.events WHERE is_random=1) " +
+                period)
+            self.reference_views.append("shared_item_pool_events")
 
     def schema(self):
-        tables = ("features", "events") + tuple(
+        tables = ("features", "events", *self.reference_views) + tuple(
             "research_" + table for table, items in self.features.items() if items)
         return {table: [{"column": r[1], "type": r[2]}
                         for r in self.connection.execute(
@@ -333,14 +362,14 @@ class DevelopmentTools:
     def grounding_rows(self):
         """Neutral reproducible observed examples, no forced exposure-mode strata."""
         rows = []
-        for table in ("events", "features"):
+        for table in ("events", "features", *self.reference_views):
             schema = self.schema()[table]
             fields = [item["column"] for item in schema]
             if len(fields) > 12:
                 ids = [round(i*(len(fields)-1)/11) for i in range(12)]
                 fields = [fields[i] for i in ids]
             query = ("SELECT " + ",".join(fields) + " FROM " + table
-                     + " USING SAMPLE 8 ROWS (reservoir, 29)")
+                     + " USING SAMPLE 3 ROWS (reservoir, 29)")
             for record in self.connection.execute(query).fetchall():
                 rows.append({"source_table": table, **dict(zip(
                     fields, (v if isinstance(v, (str,int,float,bool)) or v is None
@@ -648,7 +677,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     _save(dest / "development_manifest.json", {
         "development": prep, "holdout_exposed": False,
         "source_fingerprint_input": str(Path(source_db).resolve())})
-    tools = DevelopmentTools(dev_path)
+    tools = DevelopmentTools(
+        dev_path, enable_matched_pool=bool(
+            model_config.get("llm") and
+            model_config.get("discovery", {}).get("open_phenomena", True)))
     # Development-only grounding, cached once. Tag values are opaque IDs, not words.
     data_examples = tools.grounding_rows()
     from rsi_researcher.research.discovery.observations import (
@@ -696,6 +728,19 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     scientist.instruction = (
         "You are an autonomous recommender-systems research scientist, not a "
         "candidate classifier. Investigate user and recommendation SEQUENCES. "
+        "shared_item_pool_events restricts to videos present in random "
+        "insertions during the intervention period. It is an eligible "
+        "comparison SUPPORT SET, not a known unbiased utility target. "
+        "Use it when the question requires matched candidate support; "
+        "match time, policy/tab and user context before causal claims. "
+        "SQL can query this development view directly. "
+        "The reference_gap action measures a single category's USER-PAIRED "
+        "standard-minus-random ALLOCATION SHARE within that same pool. "
+        "For reference_gap set feature_name to a categorical column in the "
+        "actual matched-reference evidence, expression to a MEASURED value, "
+        "and concept_id to an active concept. This is not a Bias verdict: "
+        "user preferences and item merit remain unresolved. "
+        "Do not define item treatment with click/long_view outcomes. "
         "Our goal is a CORRECTABLE SYSTEMATIC DISTORTION relative to a "
         "credible target reference, not just ordinary behavior correlation. "
         "A behavioral pattern is not automatically a recommender Bias. "
@@ -795,7 +840,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 and bool(tools.history))
             # Field rarity is only an exploration lead, not a mechanism.
             relational_ids = {c["observation_id"] for c in evidence_cards
-                              if c["operation"] == "generic_conditional_mean"}
+                              if c["operation"] in ("generic_conditional_mean",
+                                                     "matched_item_pool_reference")}
             recent_start = max(0, len(tools.history) - 5)
             for i, query in enumerate(tools.history[-5:], start=recent_start):
                 if len(query["columns"]) >= 2 and len(query["rows"]) >= 2:
@@ -1214,7 +1260,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 live_actions = [a for a in live_actions if a != "form_concept"]
             if not live_ids:
                 live_actions = [a for a in live_actions if a not in (
-                    "select_opportunity", "test", "experiment",
+                    "select_opportunity", "reference_gap", "test", "experiment",
                     "revise", "literature", "freeze")]
             model_action_schema = ACTION_SCHEMA
             if model_config.get("llm"):
@@ -1231,7 +1277,23 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         " The last two identical queries yielded no information. "
                         "Choose a NEW measurable variable, research concept, or "
                         "opportunity; SQL/trajectory repetition is unavailable.")
+                if not any(c["operation"] == "matched_item_pool_reference"
+                           for c in evidence_cards):
+                    live_actions = [a for a in live_actions if a != "reference_gap"]
+                if any(h["action"]["action"] == "reference_gap" and
+                       "experiment" in h for h in history):
+                    live_actions = [a for a in live_actions if a not in (
+                        "reference_gap", "select_opportunity", "sql",
+                        "inspect_trajectory", "define_feature")]
+                    instruction["next_action_guidance"] += (
+                        " The candidate already has a numerical USER-PAIRED "
+                        "random-reference allocation gap. Stop repeating "
+                        "allocation measurement: use EXPERIMENT to test whether user "
+                        "preference, item response or time/context selection "
+                        "explains it. Choose an H1/H2 countertest or abandon.")
                 valid_experiment = bool(tools.feature_records) or any(
+                    any("workbench" in t for t in c["tests"]) for c in concepts
+                    if c["id"] in live_ids) or any(
                     opportunity_pool.records[ident].get("selection_contract")
                     for ident in live_ids if ident in opportunity_pool.records)
                 if not valid_experiment:
@@ -1250,7 +1312,116 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
             act = decision["action"]
             selected = next((c for c in concepts if c["id"] == decision["concept_id"]), None)
             try:
-                if act == "select_opportunity":
+                if act == "reference_gap":
+                    if selected is None:
+                        raise ValueError("Select an existing hypothesis for reference measurement")
+                    catalog = {card["column"]: {r["value"] for r in card["measured_rows"]}
+                               for card in evidence_cards
+                               if card["operation"] == "matched_item_pool_reference"}
+                    field, value = decision["feature_name"], decision["expression"]
+                    if field not in catalog or value not in catalog[field]:
+                        # Qwen may give an aggregate expression in the JSON
+                        # slot yet explicitly select a category in its reason.
+                        # Recover ONLY a unique verbatim, supported selection.
+                        described = decision["reason"].lower()
+                        matches = [(name, val) for name, values in catalog.items()
+                                   for val in values
+                                   if name.lower().rstrip("s") in described
+                                   and ("'" + val.lower() + "'") in described]
+                        if len(matches) == 1:
+                            field, value = matches[0]
+                        else:
+                            # Request a bound scientific choice, not an SQL
+                            # expression or an arbitrary, model-invented level.
+                            options = [
+                                {"code": name + "::" + row["value"],
+                                 "allocation_gap": row["share_gap"],
+                                 "random_click": row["random_click"],
+                                 "support_random": row["random_n"],
+                                 "support_standard": row["standard_n"]}
+                                for card in evidence_cards
+                                if card["operation"] == "matched_item_pool_reference"
+                                for name in [card["column"]]
+                                for row in card["measured_rows"]]
+                            schema = {
+                                "type": "object",
+                                "properties": {
+                                    "selected": {"type": "string",
+                                                 "enum": [r["code"] for r in options]},
+                                    "reason": {"type": "string"}},
+                                "required": ["selected", "reason"],
+                                "additionalProperties": False}
+                            resolver = ResearchAgent(model)
+                            resolver.role = "reference-category-selector"
+                            resolver.instruction = (
+                                "Select ONE actually measured categorical contrast "
+                                "for this agent-generated hypothesis. Use the "
+                                "source's random candidate opportunity and "
+                                "matching standard allocation. Choose the "
+                                "most diagnostic H1-vs-rival category, NOT "
+                                "the largest apparent CTR difference. "
+                                "Never assert causal Bias or novelty.")
+                            chosen = resolver.act({
+                                "concept": _concept_summary(selected),
+                                "scientist_reason": decision["reason"],
+                                "eligible_measured_categories": options,
+                                "earlier_tests": [
+                                    t["test_question"] for t in selected["tests"]]},
+                                "reference-bind-" + str(step), schema)
+                            field, value = chosen["selected"].split("::", 1)
+                            entry["reference_selector"] = chosen
+                        entry["reference_binding_recovered"] = {
+                            "field": field, "value": value,
+                            "model_feature_name": decision["feature_name"],
+                            "model_expression": decision["expression"]}
+                    quote = value.replace("'", "''")
+                    outcome = f"CASE WHEN {field} = '{quote}' THEN 1.0 ELSE 0.0 END"
+                    specification = {
+                        "question": ("Within matched videos/time/UI, estimate the user-"
+                                     "paired standard-minus-random share of " + field
+                                     + "=" + value),
+                        "source_table": "events",
+                        "source_query": "SELECT * FROM shared_item_pool_events",
+                        "population_filter": "", "unit_expression": "uid",
+                        "group_expression": "is_random",
+                        "control_value": "1", "treatment_value": "0",
+                        "outcome_expression": outcome,
+                        "strata_expression": "", "analysis": "paired_user",
+                        "placebo_source_query": "", "placebo_group_expression": "",
+                        "prediction": selected["claim"]["mechanism"],
+                        "falsifier": selected["claim"]["rival"],
+                        "meaningful_margin": 0.005}
+                    if any(t.get("test_question") == specification["question"]
+                           for t in selected["tests"]):
+                        raise ValueError("Repeated reference estimand: choose "
+                                         "another field, value or mechanism")
+                    measurement = workbench.run(specification)
+                    entry["experiment"] = measurement
+                    selected["tests"].append({
+                        "version": selected["version"],
+                        "test_question": specification["question"],
+                        "result": {k: measurement[k] for k in ("sql","columns","rows")},
+                        "workbench": measurement})
+                    critique = critic.act({
+                        "hypothesis": _concept_summary(selected),
+                        "numerical_reference_gap": model_statistics(measurement["result"]),
+                        "estimand": specification,
+                        "instruction": ("The random opportunity difference is "
+                            "descriptive, NOT an independently proven bias. "
+                            "Propose a new user/time/item-matched test that "
+                            "could actually distinguish H1 from preference.")},
+                        "reference-critic-" + str(step), CRITIC_SCHEMA)
+                    critique["rival_discriminated"] = False
+                    critique["logging_artifact_excluded"] = False
+                    if critique["decision"] == "ready":
+                        critique["decision"] = "test"
+                    selected["critique"] = critique
+                    entry["critique"] = critique
+                    entry["scientific_evidence_gaps"] = [
+                        "preference_rival_not_discriminated",
+                        "recommender_mechanism_unconfirmed",
+                        "independent_confirmation_pending"]
+                elif act == "select_opportunity":
                     chosen = opportunity_pool.choose(
                         decision["concept_id"], decision["reason"], decision["query"])
                     entry["opportunity_selection"] = {
@@ -1454,6 +1625,62 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                              "enum": sorted(set(table for table, _ in feature_pairs))},
                             "group_expression": {"type": "string",
                                                  "enum": [name for _, name in feature_pairs]}}}
+                    # After a measured allocation-reference gap, the next
+                    # experiment must investigate a *new* conditioning context
+                    # rather than repeat the identical marginal contrast.
+                    prior_reference = next((
+                        t["workbench"]["specification"] for t in selected["tests"]
+                        if "workbench" in t and t["workbench"]["specification"].get(
+                            "source_query") == "SELECT * FROM shared_item_pool_events"
+                    ), None)
+                    if prior_reference and not typed_design:
+                        cols = tools.schema().get("shared_item_pool_events", [])
+                        target = prior_reference["outcome_expression"]
+                        eligible = []
+                        for column in cols:
+                            field = column["column"]
+                            if (field in ("uid", "vid", "is_random", "click",
+                                         "hate", "long_view", "event_day", "tags",
+                                         "tab", "author", "previous_tags")
+                                    or not re.fullmatch(r"[a-z_]+", field)):
+                                continue
+                            if field in target:
+                                continue
+                            try:
+                                rows = tools.connection.execute(
+                                    "SELECT CAST(" + field + " AS VARCHAR),"
+                                    " COUNT(DISTINCT uid) FILTER(WHERE is_random=1),"
+                                    " COUNT(DISTINCT uid) FILTER(WHERE is_random=0)"
+                                    " FROM shared_item_pool_events GROUP BY 1"
+                                    " ORDER BY COUNT(*) DESC LIMIT 8").fetchall()
+                            except Exception:
+                                continue
+                            for val, random_users, std_users in rows:
+                                if val is not None and min(random_users, std_users) >= 25:
+                                    safe = str(val).replace("'", "''")
+                                    eligible.append(field + " = '" + safe + "'")
+                        eligible = eligible[:18]
+                        if eligible:
+                            fixed = ("source_table", "source_query",
+                                     "group_expression", "control_value",
+                                     "treatment_value", "outcome_expression",
+                                     "analysis", "strata_expression")
+                            properties = dict(EXPERIMENT_SCHEMA["properties"])
+                            for key in fixed:
+                                properties[key] = {"type": "string",
+                                                   "enum": [prior_reference[key]]}
+                            properties["population_filter"] = {
+                                "type": "string", "enum": eligible}
+                            design_schema = {**EXPERIMENT_SCHEMA,
+                                             "properties": properties}
+                            designer.instruction += (
+                                " The last reference effect is development-only, "
+                                "NOT a Bias conclusion. A new experiment MUST "
+                                "condition on one supported pre-outcome user/"
+                                "session context in population_filter. Preserve "
+                                "the original same-pool item allocation estimand "
+                                "and test whether this context weakens the gap; "
+                                "this is a rival sensitivity test, NOT confirmation.")
                     generated_spec = designer.act({
                         "available_event_day_range": list(event_days),
                         "population_filter_syntax": "Boolean SQL condition only, no leading WHERE",

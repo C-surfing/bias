@@ -22,12 +22,13 @@ def compact_profile(profile):
     return {"sampling": profile["sampling"], "fields": [
         {"source": table, "column": c["name"], "type": c["type"],
          "sample_distinct": c["sample_distinct"],
-         "observed_levels": c["observed_levels"][:3]}
+         "observed_levels": (c["observed_levels"][:2]
+                             if c["sample_distinct"] <= 6 else [])}
         for table, section in profile["tables"].items()
         for c in section["columns"]]}
 
 
-def evidence_for_agent(cards, queries, max_fields=12, max_contrasts=12):
+def evidence_for_agent(cards, queries, max_fields=8, max_contrasts=8):
     """Expose diverse actual contrasts, not only marginal frequency snippets."""
     def spread(items, n):
         if len(items) <= n:
@@ -37,13 +38,15 @@ def evidence_for_agent(cards, queries, max_fields=12, max_contrasts=12):
                     max_fields)
     contrasts = spread([c for c in cards if c["operation"]=="generic_conditional_mean"],
                        max_contrasts)
+    references = [c for c in cards
+                  if c["operation"]=="matched_item_pool_reference"][:3]
     out = [{"id": c["observation_id"], "source": c["source_table"],
             "field": c["column"], "operation": c["operation"],
             "outcome": c.get("outcome"),
             "measured_direction": (f"mean({c['outcome']}) BY {c['column']}"
                                    if c.get("outcome") else "marginal distribution"),
             "sample_n": c["sample_n"],
-            "values": c["measured_rows"][:6]} for c in fields + contrasts]
+            "values": c["measured_rows"][:4]} for c in fields + contrasts + references]
     out.extend({"id": "Q"+str(i+1).zfill(3), "query": q["sql"][:280],
                 "rows": q["rows"][:5], "operation": "executed_dev_sql"}
                for i,q in enumerate(queries[-5:], start=max(0,len(queries)-5)))
@@ -85,7 +88,10 @@ def unify_phenomena(prior, proposals, evidence_catalog):
                    r"(?![a-z0-9_])", candidate["conditions"].lower())
                for e in cited):
             continue
-        sources = {e.get("source") for e in cited if e.get("source")}
+        # Matched item pool is an eligible view of the events source, not
+        # a separate table with independent sampling.
+        sources = {("events" if e.get("source") == "shared_item_pool_events"
+                    else e.get("source")) for e in cited if e.get("source")}
         if any(table in statement and table not in sources
                for table in ("events", "features")):
             continue
@@ -93,7 +99,8 @@ def unify_phenomena(prior, proposals, evidence_catalog):
             r"\b(compared|higher|lower|difference|differ|association|"
             r"correlation|versus|between)\b", statement)
         has_joint = any(e.get("operation") in
-                        ("generic_conditional_mean", "executed_dev_sql")
+                        ("generic_conditional_mean", "executed_dev_sql",
+                         "matched_item_pool_reference")
                         for e in cited)
         if relation and not has_joint:
             continue
@@ -102,6 +109,28 @@ def unify_phenomena(prior, proposals, evidence_catalog):
         if len(sources)>1 and not any(
                 e.get("operation")=="executed_dev_sql" for e in cited):
             continue
+        # A Qwen sentence can reverse measured direction. Evidence values,
+        # not verbal interpretations, own the numeric allocation statement.
+        references = [e for e in cited
+                      if e.get("operation") == "matched_item_pool_reference"]
+        if references:
+            ref = references[0]
+            groups = ref.get("values", [])[:2]
+            if groups:
+                units = "; ".join(
+                    f"{x['value']}: random share {x['random_share']}, "
+                    f"standard share {x['standard_share']}, "
+                    f"gap {x['share_gap']}, random click {x['random_click']}, "
+                    f"standard click {x['standard_click']}"
+                    for x in groups)
+                candidate = {
+                    **candidate,
+                    "original_interpretation": candidate["observed_pattern"],
+                    "observed_pattern": units + " (development-only descriptive)",
+                    "description": "Observed matched-pool exposure contrast by "
+                                   + ref["field"],
+                    "conditions": "same video pool, dates and UI; grouping by "
+                                  + ref["field"]}
         k = key(candidate)
         if k in known:
             known[k]["evidence_ids"] = sorted(set(known[k]["evidence_ids"]+ids))
