@@ -71,7 +71,7 @@ def test_controlled_recommender_has_an_actual_paired_model_reference(kuairec_zip
         assert not measured["identification"]["platform_policy_identified"]
         assert {r["uid"] for r in measured["per_user"]} <= develop
         with pytest.raises(ValueError, match="does not expose"):
-            research.DevelopmentTools(str(prepared), adapter=KuaiRandAdapter()).close() if False else _reject(tools, str(zip_path))
+            _reject(tools, str(zip_path))
     finally:
         tools.close()
 
@@ -128,10 +128,5 @@ def test_invalid_or_non_discriminating_model_design_is_rejected(kuairec_zip):
     ]:
         with pytest.raises(ValueError):
             validate_controlled_spec(changed)
-    with pytest.raises(ValueError, match="Insufficient independent development"):
-        tiny = kuairec_zip[0]  # the executor cannot invent independent units
-        evaluate_controlled(str(tiny), spec("recent_write_drop", 0, 40)) if False else _fail_support()
-
-
-def _fail_support():
-    raise ValueError("Insufficient independent development users")
+    # A real evaluator must refuse under-supported cohorts; it cannot
+    # turn many events from one user into independent research samples.
