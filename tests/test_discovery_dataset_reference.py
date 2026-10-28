@@ -98,6 +98,18 @@ def test_kuairec_preparation_keeps_confirmation_and_item_panel_private(tmp_path)
     assert {row[0] for row in db.execute("SHOW TABLES").fetchall()} == {
         "events", "features"}
     db.close()
+    tools = research.DevelopmentTools(str(dest), adapter=KuaiRecAdapter())
+    try:
+        with pytest.raises(ValueError, match="No future or current outcome"):
+            tools.define_feature("leaked_label_group",
+                                 "CASE WHEN relevance=1 THEN 1 ELSE 0 END",
+                                 source_table="events")
+        with pytest.raises(ValueError, match="No future or current outcome"):
+            tools.define_feature("leaked_watch_group",
+                                 "CASE WHEN watch_ratio>=1 THEN 1 ELSE 0 END",
+                                 source_table="features")
+    finally:
+        tools.close()
 
 
 def test_same_discovery_loop_on_kuairec_without_random_exposure(tmp_path, monkeypatch):
