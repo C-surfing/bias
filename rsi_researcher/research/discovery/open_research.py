@@ -574,8 +574,18 @@ def scientific_evidence_gaps(concept: dict, opportunity: dict) -> list[str]:
         gaps.append("numeric_reference_deviation_unmeasured")
     elif not reference.get("normative_target_validated"):
         gaps.append("normative_reference_not_identified")
-    if not any(t.get("requested_by") == "critic" and "workbench" in t
-               for t in concept.get("tests", [])):
+    if bias.get("reference_spec", {}).get("kind") == "controlled_model":
+        # Controlled H1/H2 are tested on an actual fixed-candidate intervention;
+        # an extra observational SQL subgroup is not the missing falsifier.
+        trials = [t for t in opportunity.get("controlled_reference_tests", [])
+                  if t.get("tested_concept_version") == concept.get("version")]
+        if not any(t.get("prediction_audit", {}).get("supports") == "H1"
+                   and t.get("prediction_audit", {}).get(
+                       "distinguishes_predictions") for t in trials):
+            gaps.append("controlled_mechanism_h1_not_verified")
+        gaps.append("production_platform_reference_not_identified")
+    elif not any(t.get("requested_by") == "critic" and "workbench" in t
+                 for t in concept.get("tests", [])):
         gaps.append("no_executed_inferential_rival_countertest")
     critique = concept.get("critique") or {}
     if critique and not critique.get("observable_valid"):
@@ -616,6 +626,12 @@ def research_funnel(concepts: list[dict], pool) -> dict:
                 "normative_target_validated"))
             for r in pool.records.values()),
         "workbench_completion_rate": workbench / len(concepts) if concepts else 0.0,
+        "controlled_h1_supported_on_development": sum(
+            any(t.get("prediction_audit", {}).get("supports") == "H1"
+                and t.get("prediction_audit", {}).get("distinguishes_predictions")
+                and t.get("tested_concept_version") == c["version"]
+                for t in pool.records.get(c["id"], {}).get(
+                    "controlled_reference_tests", [])) for c in concepts),
         "frozen_scoped_model_mechanisms": sum(
             c["status"] == "frozen_scoped_mechanism_unconfirmed" for c in concepts),
         "independently_confirmed": 0,
