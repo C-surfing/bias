@@ -262,6 +262,20 @@ class ResearchOpportunityPool:
             raise ValueError("Intervention was not selected against a controlled-model reference")
         stats = evidence["result"]
         design = evidence["identification"]
+        estimand = evidence["estimand"]
+        specification = evidence["specification"]
+        treatment = estimand["treatment"]
+        if (estimand["statistical_unit"] != "uid"
+                or estimand["phase"] != "development"
+                or estimand["quantity"] != "mean_per_user_treatment_minus_control"
+                or estimand["outcome"] != specification["outcome"]
+                or stats["outcome"] != specification["outcome"]
+                or treatment != {
+                    "parameter": specification["parameter"],
+                    "control": specification["control_value"],
+                    "intervention": specification["treatment_value"],
+                }):
+            raise ValueError("Executed controlled estimand differs from the registered design")
         ci = stats["ci95_bootstrap"]
         values = [stats["estimate"], stats["mean_control"],
                   stats["mean_treatment"], *ci]
@@ -299,7 +313,8 @@ class ResearchOpportunityPool:
         }
         item.setdefault("controlled_reference_tests", []).append({
             "tested_concept_version": concept_version,
-            "specification": evidence["specification"],
+            "estimand": estimand,
+            "specification": specification,
             "statistics": stats,
             "identification": design,
             "prediction_audit": prediction_audit,
