@@ -177,86 +177,26 @@ IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{2,40}$")
 
 
 def development_db(source_db: str, target_db: str) -> dict:
-    """Materialize development-fold rows physically, excluding confirmation users."""
-    import duckdb
-    dst = Path(target_db)
-    if dst.exists():
-        return {"path": str(dst), "reused": True}
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(dst))
-    try:
-        source = str(Path(source_db).resolve()).replace("'", "''")
-        con.execute("ATTACH '" + source + "' AS source_db (READ_ONLY)")
-        con.execute("""CREATE TABLE features AS SELECT
-            uid,vid,event_day,moment_ms,source_file,activity,tags,
-            click,long_view,next_click,after_long_gap,after_nonclick,
-            after_negative_feedback,immediate_repeat,topic_changed,
-            recent_response_drop,previous_interval_ms,recent_click,older_click
-            FROM source_db.anomaly_features
-            WHERE user_fold<>0 AND event_day<=20220430""")
-        source_fields = {field[0] for field in con.execute(
-            "DESCRIBE SELECT * FROM source_db.observed_sequences").fetchall()}
-        optional = [field for field in (
-            "author", "tab", "activity", "sequence_index",
-            "previous_long_view", "recent_click", "older_click")
-            if field in source_fields]
-        extras = "".join(",s." + field for field in optional)
-        con.execute("""CREATE TABLE events AS SELECT
-            uid,vid,event_day,moment_ms,is_random,click,hate,
-            long_view,tags,previous_video,previous_click,
-            previous_hate,previous_moment,previous_tags,next_tags""" + extras + """
-            FROM source_db.observed_sequences s
-            WHERE s.uid IN (SELECT DISTINCT uid FROM features)
-              AND s.event_day<=20220430""")
-        con.execute("DETACH source_db")
-        counts = {name: con.execute("SELECT COUNT(*) FROM " + name).fetchone()[0]
-                  for name in ("features", "events")}
-    except Exception:
-        con.close()
-        dst.unlink(missing_ok=True)
-        raise
-    con.close()
-    return {"path": str(dst), "reused": False, "rows": counts}
+    """Compatibility wrapper: prepare the KuaiRand development user fold."""
+    from rsi_researcher.research.discovery.datasets import KuaiRandAdapter
+    return KuaiRandAdapter().prepare(source_db, target_db)
 
 
 class DevelopmentTools:
     """Read-only DuckDB plus ephemeral derived features, never source-file access."""
-    def __init__(self, path: str, enable_matched_pool: bool = False):
+    def __init__(self, path: str, enable_matched_pool: bool = False,
+                 adapter=None):
         import duckdb
+        from rsi_researcher.research.discovery.datasets import KuaiRandAdapter
+        self.adapter = adapter or KuaiRandAdapter()
         self.connection = duckdb.connect(
             path, read_only=True, config={
                 "enable_external_access": "false", "threads": "2", "memory_limit": "2GB"})
         self.history = []
         self.features = {"features": {}, "events": {}}
         self.feature_records = {}
-        # Restrict reference support to randomly inserted video IDs during
-        # the period random insertions actually occurred. No merit assumption.
-        existing = {r[1] for r in self.connection.execute(
-            "PRAGMA table_info('events')").fetchall()}
-        self.reference_views = []
-        if enable_matched_pool and {"uid", "vid", "is_random"}.issubset(existing):
-            fields = [f for f in (
-                "uid", "vid", "event_day", "is_random", "click", "long_view",
-                "hate", "tags", "author", "activity", "tab", "previous_click",
-                "previous_long_view", "previous_hate", "previous_tags")
-                if f in existing]
-            period = ("AND e.event_day >= (SELECT MIN(event_day) "
-                      "FROM main.events WHERE is_random=1)"
-                      if "event_day" in existing else "")
-            if "tab" in existing:
-                dominant = self.connection.execute(
-                    "SELECT tab FROM main.events WHERE is_random=1 "
-                    "GROUP BY tab ORDER BY COUNT(*) DESC LIMIT 1").fetchone()
-                if dominant and dominant[0] is not None:
-                    tab = str(dominant[0]).replace("'", "''")
-                    period += " AND e.tab='" + tab + "'"
-            self.connection.execute(
-                "CREATE TEMP VIEW shared_item_pool_events AS SELECT " +
-                ", ".join("e." + f for f in fields) +
-                " FROM main.events e WHERE e.vid IN "
-                "(SELECT DISTINCT vid FROM main.events WHERE is_random=1) " +
-                period)
-            self.reference_views.append("shared_item_pool_events")
+        self.reference_views = self.adapter.install_reference_views(
+            self.connection, enable_matched_pool)
 
     def schema(self):
         tables = ("features", "events", *self.reference_views) + tuple(
@@ -309,7 +249,7 @@ class DevelopmentTools:
             raise ValueError("Feature name must be a fresh lowercase SQL identifier")
         if not expression.strip() or len(expression) > 1000 or ";" in expression or FORBIDDEN.search(expression):
             raise ValueError("Feature expression must be an SQL scalar expression")
-        if re.search(r"\b(click|hate|long_view|next_click|next_tags)\b", expression, re.I):
+        if re.search(r"\b(click|hate|long_view|next_click|next_tags|watch_ratio|relevance)\b", expression, re.I):
             raise ValueError("No future or current outcome may define a treatment; "
                              "use pre-event previous_click/previous_hate and "
                              "measure current or future outcomes separately")
@@ -346,18 +286,23 @@ class DevelopmentTools:
                 for item in self.feature_records.values()]
 
     def inspect_trajectory(self, query: str):
-        # Agent may select a development user via a SELECT query, not assume an ID.
         selector = self.sql(query or
             "SELECT uid,COUNT(*) AS n FROM events GROUP BY uid ORDER BY n DESC LIMIT 1")
         if not selector["rows"] or "uid" not in selector["rows"][0]:
             raise ValueError("Trajectory selector must return a column named uid")
         uid = int(selector["rows"][0]["uid"])
-        events = self.sql(
-            "SELECT uid,event_day,moment_ms,vid,tags,is_random,click,hate,long_view,"
-            "previous_click,previous_hate FROM events WHERE uid=" + str(uid) +
-            " ORDER BY event_day,moment_ms,vid LIMIT 20")
+        schema = {item["column"] for item in self.schema()["events"]}
+        requested = ("uid", "event_day", "moment_ms", "vid", "tags",
+                     "is_random", "click", "hate", "long_view", "watch_ratio",
+                     "relevance", "previous_click", "previous_hate")
+        fields = [f for f in requested if f in schema]
+        sort = [f for f in ("event_day", "moment_ms", "vid") if f in schema]
+        sql = ("SELECT " + ",".join(fields) + " FROM events WHERE uid=" + str(uid)
+               + (" ORDER BY " + ",".join(sort) if sort else "") + " LIMIT 20")
         return {"selected_uid": uid, "selection": selector,
-                "trajectory": events, "note": "chronological development events only"}
+                "trajectory": self.sql(sql),
+                "note": "development-only events; sequence is valid only when timestamps are reliable"}
+
 
     def grounding_rows(self):
         """Neutral reproducible observed examples, no forced exposure-mode strata."""
@@ -675,14 +620,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     dest = Path(output)
     dest.mkdir(parents=True, exist_ok=False)
     dev_path = development_path or str(dest / "development_only.duckdb")
-    prep = development_db(source_db, dev_path)
+    from rsi_researcher.research.discovery.datasets import get_dataset_adapter
+    adapter = get_dataset_adapter(
+        model_config.get("discovery", {}).get("dataset", "kuairand27k"))
+    prep = adapter.prepare(source_db, dev_path)
     _save(dest / "development_manifest.json", {
-        "development": prep, "holdout_exposed": False,
+        "development": prep, "dataset": adapter.describe(), "holdout_exposed": False,
         "source_fingerprint_input": str(Path(source_db).resolve())})
     tools = DevelopmentTools(
         dev_path, enable_matched_pool=bool(
             model_config.get("llm") and
-            model_config.get("discovery", {}).get("open_phenomena", True)))
+            model_config.get("discovery", {}).get("open_phenomena", True)),
+        adapter=adapter)
     # Development-only grounding, cached once. Tag values are opaque IDs, not words.
     data_examples = tools.grounding_rows()
     from rsi_researcher.research.discovery.observations import (
@@ -704,6 +653,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
         "observation_protocol": "schema_derived_open_phenomena_v1",
         "open_phenomena": open_phenomena,
         "predefined_observation_cards": False,
+        "dataset_capabilities": adapter.describe(),
         "compact_experiment_enabled": discovery_options.get("compact_experiment", True),
         "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "model_config": model_config.get("llm", {}),
@@ -729,51 +679,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     scientist.role = "open-discovery-scientist"
     scientist.instruction = (
         "You are an autonomous recommender-systems research scientist, not a "
-        "candidate classifier. Investigate user and recommendation SEQUENCES. "
-        "shared_item_pool_events restricts to videos present in random "
-        "insertions during the intervention period. It is an eligible "
-        "comparison SUPPORT SET, not a known unbiased utility target. "
-        "Use it when the question requires matched candidate support; "
-        "match time, policy/tab and user context before causal claims. "
-        "SQL can query this development view directly. "
-        "The reference_gap action measures a single category's USER-PAIRED "
-        "standard-minus-random ALLOCATION SHARE within that same pool. "
-        "For reference_gap set feature_name to a categorical column in the "
-        "actual matched-reference evidence, expression to a MEASURED value, "
-        "and concept_id to an active concept. This is not a Bias verdict: "
-        "user preferences and item merit remain unresolved. "
-        "Do not define item treatment with click/long_view outcomes. "
-        "Our goal is a CORRECTABLE SYSTEMATIC DISTORTION relative to a "
-        "credible target reference, not just ordinary behavior correlation. "
-        "A behavioral pattern is not automatically a recommender Bias. "
-        "Known prior bias categories and simple feedback correlations "
-        "CTR correlations are NOT new Bias discoveries. Start with numbered "
-        "seek a distinctive CONDITIONAL "
-        "distortion in ITEM allocation against an explicit supported "
-        "reference, not a mere cross-policy CTR contrast. "
-        "Choose the next ACTION yourself. Use SQL, inspect an actual trajectory, "
-        "define a NEW derived feature, investigate grounded phenomena, request "
-        "an EXPERIMENT action so a Designer can specify test/control, outcome, "        " user-level inference, placebo and falsifier; revise based on results, "
-        "and consult literature. Existing columns are observational conveniences "
-        "NOT predefined Bias categories. SQL uses exactly the given column names; "
-        "never invent feature1 or generic names. Use CASE WHEN bins rather than "
-        "grouping by unbinned continuous timestamps. Do not join two event-level "
-        "tables on uid alone. If a proposal is contradicted, revise or discard it. "
-        "Tags are OPAQUE numeric ID strings (such as '39,43'), NOT natural-language "
-        "topics. 'hate' is a binary RESPONSE column, not a tag name; do not query "
-        "tags LIKE '%hate%'. Current click/hate/long_view are OUTCOMES and cannot "
-        "be used to define the independent treatment variable. "
-        "When a numerical tool says a comparison arm has zero observations, inspect "
-        "actual values and choose a supported contrast, never submit it unchanged. "
-        "A descriptive difference is NOT evidence of an algorithmically harmful Bias. "
-        "Do not claim independent replication or intervention from this dev dataset. "
-        "For define_feature choose source_table events to access previous_tags or next_tags; "
-        "features has no such columns. Derived features using current click in the "
-        "definition cannot be used as an independent predictor of current click. "
-        "When a concept list is available use EXACT H001/H002 concept_id; never "
-        "invent concept_id strings. Use test then revise if evidence changes the claim. "
-        "For any action, fill the JSON fields; irrelevant strings can be empty. "
-        "A concept is NOT frozen simply because it has an interesting name.")
+        "candidate classifier. Explore the actual schema and measured evidence; "
+        "choose an unexplained systematic deviation of a recommender decision "
+        "relative to a defensible reference. Form competing H1/H2 mechanisms "
+        "and their distinguishable, same-estimand predictions. Query real SQL "
+        "fields, register derived predictors, inspect trajectories only if "
+        "timestamps support them, measure supported contrasts, run countertests, "
+        "and revise or reject contradicted candidates. Do not confuse response "
+        "correlations with algorithmic distortion. Current outcome columns "
+        "cannot define a predictor of the same outcome. Tags are identifiers, "
+        "not assumed semantic topics. Use actual H001/H002 ids and empty strings "
+        "for irrelevant JSON fields. " + adapter.guidance)
+
     critic = ResearchAgent(model)
     critic.role = "discovery-critic"
     critic.instruction = (
@@ -1036,8 +953,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     choice = chooser.act({
                         "available_numeric_outcomes_by_source": {
                             table: [c["column"] for c in tools.schema()[table]
-                                    if c["column"] in ("click", "long_view",
-                                                       "hate", "recent_click")]
+                                    if c["column"] in actual_numeric_columns
+                                    and c["column"] not in ("uid", "vid", "moment_ms", "event_day")]
                             for table in allowed_tables},
                         "already_registered_groups": [
                             r["name"] for r in available_records],
