@@ -74,24 +74,34 @@ def read_data(path: str, phase: str):
     return categories, priors, history, heldout, Counter(cohort.values())
 
 
-def profile(events, categories):
+def profile(events, categories, *, window=WINDOW,
+            positive_feedback_weight=1.0, negative_feedback_weight=1.0):
+    """The executable model's user state, with explicit controllable inputs."""
     counts, sums = Counter(), Counter()
-    for _, vid, feedback in events[-WINDOW:]:
+    for _, vid, feedback in events[-window:]:
         for tag in categories.get(vid, ()):
             counts[tag] += 1
-            sums[tag] += 2 * feedback - 1
+            sums[tag] += (positive_feedback_weight if feedback
+                          else -negative_feedback_weight)
     return {tag: value / (counts[tag] + 6) for tag, value in sums.items()}
 
 
-def rank(candidate_labels, state_events, categories, priors):
-    state = profile(state_events, categories)
+def rank(candidate_labels, state_events, categories, priors, *,
+         history_window=WINDOW, profile_strength=PROFILE_STRENGTH,
+         prior_weight=1.0, positive_feedback_weight=1.0,
+         negative_feedback_weight=1.0):
+    """Rank fixed candidates; policy does not consume evaluation labels."""
+    state = profile(state_events, categories, window=history_window,
+                    positive_feedback_weight=positive_feedback_weight,
+                    negative_feedback_weight=negative_feedback_weight)
     scores = []
     for vid, label in candidate_labels:
         if vid not in priors:
             continue
         tags = categories.get(vid, ())
         user_signal = (sum(state.get(t, 0) for t in tags) / len(tags)) if tags else 0
-        scores.append((priors[vid] + PROFILE_STRENGTH * user_signal, vid, label))
+        scores.append((prior_weight * priors[vid] + profile_strength * user_signal,
+                       vid, label))
     scores.sort(key=lambda record: (-record[0], record[1]))
     return scores[:K], sum(label for _, label in candidate_labels)
 
