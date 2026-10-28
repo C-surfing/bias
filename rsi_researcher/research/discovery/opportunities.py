@@ -156,6 +156,32 @@ class ResearchOpportunityPool:
         elif reflection.get("decision") == "revise" and "revised_concept" in entry:
             mode = "test_revised_mechanism"
             reason = reflection["reason"]
+        elif item.get("bias_relevance", {}).get("reference_spec", {}).get(
+                "kind") == "controlled_model":
+            # An owned-model causal test has a different next action from
+            # diagnosing a production-platform reference. The latter remains
+            # unidentified, but must not trap the scoped mechanism in SQL.
+            trials = [t for t in item.get("controlled_reference_tests", [])
+                      if t.get("tested_concept_version") == concept["version"]]
+            h1 = any(t.get("prediction_audit", {}).get("supports") == "H1"
+                     and t.get("prediction_audit", {}).get(
+                         "distinguishes_predictions") for t in trials)
+            if not trials:
+                mode, reason = ("test_controlled_mechanism",
+                                "Use the executable recommender to test this version")
+            elif not h1:
+                mode, reason = ("falsify_or_revise_mechanism",
+                                "Controlled evidence did not distinguish H1 from the rival")
+            elif concept.get("literature") is None:
+                mode, reason = ("check_literature",
+                                "H1 is supported inside the owned model; assess prior work")
+            elif critique.get("decision") == "ready" and critique.get(
+                    "observable_valid") and critique.get("rival_discriminated"):
+                mode, reason = ("freeze_scoped_mechanism",
+                                "Freeze for sealed confirmation; do not claim a platform Bias")
+            else:
+                mode, reason = ("reassess_controlled_mechanism",
+                                "Resolve the critic's remaining scoped mechanism test")
         elif "numeric_reference_deviation_unmeasured" in gaps:
             mode = "identify_reference"
             reason = "No measured deviation from a defensible recommender target"
