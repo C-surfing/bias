@@ -607,6 +607,9 @@ def research_funnel(concepts: list[dict], pool) -> dict:
         "candidates_with_identified_constructed_model_effect": sum(
             bool(r["bias_relevance"].get("numeric_discrepancy", {}).get(
                 "controlled_model_effect_identified")) for r in pool.records.values()),
+        "executed_constructed_model_reference_tests": sum(
+            len(r.get("controlled_reference_tests", []))
+            for r in pool.records.values()),
         "candidates_with_credible_distortion_measurement": sum(
             bool(r["bias_relevance"].get("numeric_discrepancy", {}).get(
                 "normative_target_validated"))
