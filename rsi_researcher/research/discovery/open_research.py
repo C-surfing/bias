@@ -1727,9 +1727,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                          ("source_query", "population_filter",
                                           "group_expression", "outcome_expression",
                                           "strata_expression"))
-                    if registered and not any(re.search(
-                            r"\b" + re.escape(name) + r"\b", specified)
-                            for name in registered):
+                    if (experiment_spec["group_expression"] in tools.feature_records
+                            and not any(re.search(
+                                r"\b" + re.escape(name) + r"\b", specified)
+                                for name in registered)):
                         referenced = designer.act({
                             "previous": experiment_spec,
                             "registered_features": tools.features,
