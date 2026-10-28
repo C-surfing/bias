@@ -26,7 +26,9 @@ def main():
     review.add_argument("--config", required=True)
     explore = commands.add_parser("explore", help="agent-led open development investigation")
     explore.add_argument("--source-db", required=True,
-                         help="frozen raw trajectory DuckDB (only opened during dev export)")
+                         help="dataset source: KuaiRand DuckDB, KuaiRec ZIP, or isolated development DB")
+    explore.add_argument("--dataset", choices=["kuairand27k", "kuairec", "development_duckdb"],
+                         help="override config discovery.dataset (default: kuairand27k)")
     explore.add_argument("--output", required=True)
     explore.add_argument("--config", required=True)
     explore.add_argument("--max-rounds", type=int, default=None,
@@ -59,8 +61,11 @@ def main():
             p.error("min-queries must be positive; explicit max-rounds "
                     "must exceed min-queries and be >= 3")
         from rsi_researcher.research.discovery.open_research import run_open_discovery
+        config = json.loads(Path(args.config).read_text())
+        if args.dataset:
+            config.setdefault("discovery", {})["dataset"] = args.dataset
         result = run_open_discovery(args.source_db, args.output,
-                                    json.loads(Path(args.config).read_text()),
+                                    config,
                                     args.max_rounds, args.min_queries, args.development_db)
         print(json.dumps({"status": result["status"],
                           "development_queries": len(result["development_queries"]),
