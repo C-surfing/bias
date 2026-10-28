@@ -180,7 +180,10 @@ class ResearchOpportunityPool:
                                        and "competing_mechanism_not_discriminated" not in gaps),
         }
 
-    def record_selection_design(self, identifier: str, choice: dict, support: dict):
+    def record_selection_design(self, identifier: str, choice: dict,
+                                support: dict, capabilities: dict | None = None):
+        from rsi_researcher.research.discovery.references import (
+            ReferenceSpec, EstimandSpec)
         item = self.records[identifier]
         # A model-written reference is a proposal, not empirical confirmation.
         item["bias_relevance"] = {
@@ -192,8 +195,19 @@ class ResearchOpportunityPool:
             "corrective_intervention": choice.get("corrective_intervention", ""),
             "reference_measured": False,
         }
+        # Reference assumptions originate with the Agent's scientific
+        # hypothesis; opportunity selection must not silently erase them.
+        reference_choice = {
+            **choice,
+            "reference_identification": (
+                choice.get("reference_identification") or
+                item["scientific_contract"].get("reference_identification", "")),
+        }
+        item["bias_relevance"]["reference_spec"] = ReferenceSpec.from_choice(
+            reference_choice, capabilities or {}).as_record()
         item["evidence_status"] = "behavioral_pattern"
         item["selection_contract"] = {
+            "estimand_spec": EstimandSpec.from_choice(choice).as_record(),
             "source_table": choice["contrast_source"],
             "group_expression": choice["contrast_group"],
             "outcome_expression": choice["contrast_outcome"],
@@ -233,6 +247,8 @@ class ResearchOpportunityPool:
             "normative_target_validated": False,
         }
         bias["reference_measured"] = True
+        if "reference_spec" in bias:
+            bias["reference_spec"]["status"] = "measured_unidentified"
         self.records[identifier]["evidence_status"] = "reference_diagnostic_only"
 
     def record_reference_diagnostic(self, identifier: str, result: dict):
@@ -255,6 +271,8 @@ class ResearchOpportunityPool:
             "normative_target_validated": False}
         item["bias_relevance"]["randomized_response_observed"] = True
         item["bias_relevance"]["reference_measured"] = True
+        if "reference_spec" in item["bias_relevance"]:
+            item["bias_relevance"]["reference_spec"]["status"] = "measured_unidentified"
         item["evidence_status"] = "reference_diagnostic_only"
 
     def snapshot(self) -> dict:
