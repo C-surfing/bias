@@ -48,7 +48,8 @@ ACTION_SCHEMA = {
     "properties": {
         "action": {"type": "string", "enum": [
             "sql", "inspect_trajectory", "define_feature", "form_concept",
-            "select_opportunity", "reference_gap", "test", "experiment",
+            "select_opportunity", "reference_gap", "controlled_experiment",
+            "test", "experiment",
             "revise", "literature",
             "freeze", "stop"]},
         "reason": TEXT, "query": TEXT, "feature_name": TEXT, "expression": TEXT,
@@ -397,6 +398,16 @@ def compact_step(entry: dict):
             result[k] = compact_query(entry[k])
     if "trajectory" in entry:
         result["trajectory"] = compact_query(entry["trajectory"]["trajectory"])
+    if "controlled_experiment" in entry:
+        record = entry["controlled_experiment"]
+        result["controlled_experiment"] = {
+            "specification": record["specification"],
+            "statistics": record["result"],
+            "reference_scope": record["evidence_scope"],
+            "identification": record["identification"],
+            "prediction_audit": entry.get("numeric_prediction_audit"),
+            "critic": entry.get("critique"),
+        }
     if "experiment" in entry:
         record = entry["experiment"]
         result["experiment"] = {
@@ -525,7 +536,9 @@ def compact_opportunity_pool(pool) -> dict:
             k: v for k, v in item.get("bias_relevance", {}).items()
             if k in ("reference_kind", "target_reference",
                      "reference_identification", "reference_measured",
-                     "numeric_discrepancy", "reference_scope")},
+                     "reference_spec", "numeric_discrepancy", "reference_scope")},
+        "model_consequence": item.get("recommendation_consequence"),
+        "controlled_test_count": len(item.get("controlled_reference_tests", [])),
         "selected_contrast": {
             k: v for k, v in item.get("selection_contract", {}).items()
             if k in ("source_table", "group_expression", "outcome_expression",
@@ -591,6 +604,9 @@ def research_funnel(concepts: list[dict], pool) -> dict:
         "candidates_with_executed_workbench": workbench,
         "candidates_with_rival_discrimination": discriminated,
         "candidates_with_numeric_reference_diagnostic": measured,
+        "candidates_with_identified_constructed_model_effect": sum(
+            bool(r["bias_relevance"].get("numeric_discrepancy", {}).get(
+                "controlled_model_effect_identified")) for r in pool.records.values()),
         "candidates_with_credible_distortion_measurement": sum(
             bool(r["bias_relevance"].get("numeric_discrepancy", {}).get(
                 "normative_target_validated"))
@@ -620,7 +636,8 @@ def research_evidence_signature(tools, concepts: list[dict], pool) -> tuple:
     """Evidence changes, not elapsed turns or mere renamed hypotheses."""
     return (len(tools.history), len(tools.feature_records),
             sum(len(c["tests"]) + len(c["revisions"]) for c in concepts),
-            sum(len(p.get("tests", [])) for p in pool.records.values()),
+            sum(len(p.get("tests", [])) + len(p.get("controlled_reference_tests", []))
+                for p in pool.records.values()),
             sum(bool(p.get("bias_relevance", {}).get("numeric_discrepancy", {}).get(
                 "measured")) for p in pool.records.values()))
 
@@ -993,6 +1010,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "H1/H2, explicit reference eligibility, and actual "
                             "support; otherwise gather evidence."),
                         "opportunities": compact_opportunity_pool(opportunity_pool),
+                        "dataset_reference_capabilities": adapter.describe(),
                         "recent_observations": [
                             {"sql": q["sql"][:160], "rows": q["rows"][:3]}
                             for q in tools.history[-2:]],
@@ -1209,8 +1227,23 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 live_actions = [a for a in live_actions if a != "form_concept"]
             if not live_ids:
                 live_actions = [a for a in live_actions if a not in (
-                    "select_opportunity", "reference_gap", "test", "experiment",
+                    "select_opportunity", "reference_gap", "controlled_experiment",
+            "test", "experiment",
                     "revise", "literature", "freeze")]
+            if (not adapter.capabilities.get("replayable_recommender")
+                    or not any(
+                        opportunity_pool.records.get(ident, {}).get(
+                            "bias_relevance", {}).get("reference_spec", {}).get(
+                                "kind") == "controlled_model"
+                        for ident in live_ids)):
+                live_actions = [a for a in live_actions if a != "controlled_experiment"]
+            else:
+                instruction["next_action_guidance"] += (
+                    " The controlled_experiment action runs a parameter intervention "
+                    "in OUR executable recommender with fixed candidate items and "
+                    "held-out relevance labels. Choose a meaningful H1/H2 "
+                    "disagreement for one outcome; model effects do not identify "
+                    "the unknown production recommender's Bias.")
             model_action_schema = ACTION_SCHEMA
             if model_config.get("llm"):
                 # Repeated identical SQL is a dead-end, not another hypothesis test.
