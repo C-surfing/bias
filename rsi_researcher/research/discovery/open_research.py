@@ -737,7 +737,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     stop_reason = ""
     no_information_actions = 0
     last_phenomenon_query_count = -1
-    last_concept_phenomena = 0
+    last_concept_relational = 0
     try:
         for step in (itertools.count() if max_rounds is None
                      else range(max_rounds)):
@@ -787,13 +787,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 bool(set(p.get("evidence_ids", [])) & relational_ids)
                 for p in phenomena)
             evidence_formation = (open_phenomena and relational_phenomena >= 2
-                                  and len(phenomena) > last_concept_phenomena)
+                                  and relational_phenomena > last_concept_relational)
             if should_form_concepts(
                     open_phenomena=open_phenomena,
                     new_relational_evidence=evidence_formation,
                     legacy_formation=legacy_formation,
                     concepts=concepts):
-                last_concept_phenomena = len(phenomena)
+                last_concept_relational = relational_phenomena
                 # A new measured relational phenomenon may open an independent
                 # branch even while another candidate is still investigating.
                 # A dedicated concept-formation turn prevents tool-format repairs
