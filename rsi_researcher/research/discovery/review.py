@@ -45,7 +45,9 @@ def assess(journal: list[dict], state: dict) -> dict:
     abandoned = [event for event in journal
                  if event.get("reflection", {}).get("decision") == "abandon"]
     explicit_opportunity_selections = [e for e in journal if "opportunity_selection" in e]
-    opportunity_bound_tests = [e for e in executed if e.get("feature_lineage", {}).get("used")]
+    opportunity_bound_tests = [
+        e for e in executed if e.get("selection_contract_audit", {}).get(
+            "matches_original_contrast")]
     checked_selections = [e for e in explicit_opportunity_selections
                           if e.get("selection_feasibility", {}).get("valid_support")
                           and e["opportunity_selection"].get("mechanism_direction") !=
@@ -75,9 +77,22 @@ def assess(journal: list[dict], state: dict) -> dict:
         or checks["agent_abandoned_hypothesis_after_countertest"])
     # Backward-compatible audit for runs before opportunity selection existed.
     if explicit_opportunity_selections:
-        accepted = (accepted and
-                    checks["rival_predictions_disagree_and_support_is_measured"] and
-                    checks["selected_contrast_reaches_workbench"])
+        # Native, measured columns are valid: feature registration is optional.
+        accepted = (
+            bool(executed)
+            and bool(critic_workbench)
+            and bool(revised or abandoned)
+            and checks["rival_predictions_disagree_and_support_is_measured"]
+            and checks["selected_contrast_reaches_workbench"]
+        )
+    reference_measurements = [
+        e for e in journal
+        if e.get("action", {}).get("action") == "reference_gap"
+        and "experiment" in e
+    ]
+    # Preserve the diagnostic evidence without promoting it to validated bias.
+    measured_reference = bool(reference_measurements or any(
+        "randomized_reference_diagnostic" in e for e in journal))
     return {
         "full_qwen_workflow_accepted": accepted,
         "checks": checks,
@@ -101,6 +116,7 @@ def assess(journal: list[dict], state: dict) -> dict:
             "observed_associations_are_not_causal_bias": True,
             "randomized_reference_diagnostic_executed": any(
                 "randomized_reference_diagnostic" in e for e in journal),
+            "reference_diagnostic_measured": measured_reference,
             "bias_reference_discrepancy_verified": False,
             "distortion_mechanism_identified": False,
             "independently_confirmed_recommender_bias": False,

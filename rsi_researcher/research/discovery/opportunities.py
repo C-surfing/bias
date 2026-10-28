@@ -206,6 +206,35 @@ class ResearchOpportunityPool:
             "development_support": support,
         }
 
+    def record_reference_measurement(self, identifier: str, stats: dict, *, scope: str):
+        """Record an executed reference contrast without claiming a normative target.
+
+        A paired-user mean difference need not equal a pooled-share difference.
+        Both values are retained; scientific identification remains separate.
+        """
+        if identifier not in self.records:
+            raise ValueError("Unknown research opportunity")
+        required = ("estimate", "ci95_bootstrap", "mean_control", "mean_treatment")
+        if not all(k in stats for k in required):
+            raise ValueError("Reference measurement needs executed Workbench statistics")
+        ci = stats["ci95_bootstrap"]
+        values = [stats["estimate"], stats["mean_control"], stats["mean_treatment"], *ci]
+        if len(ci) != 2 or not all(math.isfinite(float(v)) for v in values):
+            raise ValueError("Invalid measured reference gap or uncertainty")
+        bias = self.records[identifier]["bias_relevance"]
+        bias["numeric_discrepancy"] = {
+            "metric": "user_paired_group_exposure_share_difference",
+            "observed": stats["mean_treatment"],
+            "reference": stats["mean_control"],
+            "estimate": stats["estimate"],
+            "ci95": ci,
+            "measured": True,
+            "reference_scope": scope,
+            "normative_target_validated": False,
+        }
+        bias["reference_measured"] = True
+        self.records[identifier]["evidence_status"] = "reference_diagnostic_only"
+
     def record_reference_diagnostic(self, identifier: str, result: dict):
         item = self.records[identifier]
         item["bias_relevance"]["randomized_reference_diagnostic"] = result
@@ -225,7 +254,7 @@ class ResearchOpportunityPool:
             "reference_scope": "random-insertion exposure mode only",
             "normative_target_validated": False}
         item["bias_relevance"]["randomized_response_observed"] = True
-        item["bias_relevance"]["reference_measured"] = False
+        item["bias_relevance"]["reference_measured"] = True
         item["evidence_status"] = "reference_diagnostic_only"
 
     def snapshot(self) -> dict:

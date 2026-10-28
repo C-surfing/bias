@@ -621,8 +621,10 @@ def scientific_evidence_gaps(concept: dict, opportunity: dict) -> list[str]:
         gaps.append("experiment_observable_invalid")
     if critique and not critique.get("rival_discriminated"):
         gaps.append("competing_mechanism_not_discriminated")
-    # Consequence cannot be inferred from an exposure-mode share difference.
-    gaps.append("recommendation_consequence_not_identified")
+    # A diagnostic share gap is not a utility consequence. Actual consequence
+    # evidence may be provided by a controlled recommender experiment.
+    if not opportunity.get("recommendation_consequence", {}).get("identified"):
+        gaps.append("recommendation_consequence_not_identified")
     return gaps
 
 
@@ -1397,6 +1399,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                          "another field, value or mechanism")
                     measurement = workbench.run(specification)
                     entry["experiment"] = measurement
+                    opportunity_pool.record_reference_measurement(
+                        selected["id"], measurement["result"],
+                        scope="matched_item_pool_standard_minus_random_diagnostic")
                     selected["tests"].append({
                         "version": selected["version"],
                         "test_question": specification["question"],
@@ -1722,9 +1727,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                          ("source_query", "population_filter",
                                           "group_expression", "outcome_expression",
                                           "strata_expression"))
-                    if registered and not any(re.search(
-                            r"\b" + re.escape(name) + r"\b", specified)
-                            for name in registered):
+                    if (experiment_spec["group_expression"] in tools.feature_records
+                            and not any(re.search(
+                                r"\b" + re.escape(name) + r"\b", specified)
+                                for name in registered)):
                         referenced = designer.act({
                             "previous": experiment_spec,
                             "registered_features": tools.features,
@@ -1771,10 +1777,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         }
                     import duckdb
                     entry["experiment_specification"] = experiment_spec
+                    # A native-column experiment must not be forced to use an
+                    # unrelated feature created in an earlier research step.
                     required_feature = (
                         experiment_spec["group_expression"]
                         if experiment_spec["group_expression"] in tools.feature_records
-                        else next(reversed(tools.feature_records), None))
+                        else None)
                     def validate_selected_contrast(specification):
                         if choice_contract:
                             keys = ("source_table", "group_expression", "outcome_expression",
@@ -2017,6 +2025,25 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             if "critic_experiment" in entry else
                             {"descriptive_sql_only": True,
                              "observations": compact_query(entry["critic_sql_countertest"])})
+                        # Update the scientific verdict AFTER the actual countertest;
+                        # the earlier critique only saw the initial measurement.
+                        post_counter = critic.act({
+                            "hypothesis": selected["claim"],
+                            "initial_specification": experiment_spec,
+                            "initial_statistics": model_statistics(measured_experiment["result"]),
+                            "countertest": counter_result,
+                            "reference": opportunity_pool.records[selected["id"]].get("bias_relevance", {}),
+                            "request": "Reassess H1/H2 after the measured countertest. "
+                                       "A different subgroup is not automatically a "
+                                       "causal discrimination. Keep normative reference "
+                                       "and recommender consequence separate.",
+                        }, "experiment-post-counter-critique-" + str(step), CRITIC_SCHEMA)
+                        selected["critique"] = post_counter
+                        entry["post_counter_critique"] = post_counter
+                        entry["scientific_evidence_gaps"] = scientific_evidence_gaps(
+                            selected, opportunity_pool.records[selected["id"]])
+                        opportunity_pool.records[selected["id"]][
+                            "scientific_evidence_gaps"] = entry["scientific_evidence_gaps"]
                         reflector = ResearchAgent(model)
                         reflector.role = "discovery-reflection"
                         reflector.instruction = (
@@ -2030,7 +2057,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "concept": selected["claim"],
                             "initial_result": model_statistics(measured_experiment["result"]),
                             "countertest_result": counter_result,
-                            "critique": critique,
+                            "critique": post_counter,
                         }
                         reflector.instruction += BIAS_RESEARCH_CONTRACT
                         reflection_input["bias_relevance"] = opportunity_pool.records.get(
@@ -2188,7 +2215,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 if "experiment" in entry and "critique" in entry:
                     opportunity_pool.experiment(
                         selected["id"], entry["experiment"],
-                        entry.get("critic_experiment"), entry["critique"])
+                        entry.get("critic_experiment"),
+                        entry.get("post_counter_critique", entry["critique"]))
                 if ("reflection" in entry or "revised_concept" in entry
                         or selected["status"] in ("rejected_development", "design_blocked")):
                     opportunity_pool.update_claim(
