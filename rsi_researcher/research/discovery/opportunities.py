@@ -252,7 +252,7 @@ class ResearchOpportunityPool:
         self.records[identifier]["evidence_status"] = "reference_diagnostic_only"
 
     def record_controlled_reference(self, identifier: str, evidence: dict,
-                                    prediction_audit: dict):
+                                    prediction_audit: dict, *, concept_version: int = 1):
         """Promote executed evidence only in its actual, constructed-model scope."""
         if identifier not in self.records:
             raise ValueError("Unknown research opportunity")
@@ -298,12 +298,26 @@ class ResearchOpportunityPool:
             "platform_causal_effect": False,
         }
         item.setdefault("controlled_reference_tests", []).append({
+            "tested_concept_version": concept_version,
             "specification": evidence["specification"],
             "statistics": stats,
             "identification": design,
             "prediction_audit": prediction_audit,
         })
         item["evidence_status"] = "controlled_model_effect_identified"
+
+    def invalidate_revised_reference(self, identifier: str):
+        """Old model effects stay recorded, but cannot validate a changed estimand."""
+        item = self.records[identifier]
+        bias = item["bias_relevance"]
+        if not item.get("controlled_reference_tests"):
+            return
+        bias.pop("numeric_discrepancy", None)
+        bias["reference_measured"] = False
+        if "reference_spec" in bias:
+            bias["reference_spec"]["status"] = "revised_requires_retest"
+        item["recommendation_consequence"] = {"identified": False}
+        item["evidence_status"] = "revised_hypothesis_needs_retest"
 
     def record_reference_diagnostic(self, identifier: str, result: dict):
         item = self.records[identifier]
