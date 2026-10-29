@@ -302,26 +302,55 @@ def test_agent_controls_the_experiment_and_evidence_enters_scientific_loop(
 
 
 def _scoped_frozen_record():
-    """Pre-registered evidence fixture; actual confirmation is tested separately."""
+    """Realistic saved estimands, numeric predictions and frozen trial identity."""
     design = spec()
+    observed_estimand = {
+        "source_table": "events", "unit_expression": "uid",
+        "population_filter": "", "group_expression": "tags",
+        "control_value": "1", "treatment_value": "2",
+        "outcome_expression": "relevance", "analysis": "paired_user"}
+    observed_stats = {
+        "estimate": 0.06, "ci95_bootstrap": [0.02, 0.11],
+        "mean_control": 0.40, "mean_treatment": 0.46}
+    model_stats = {
+        "estimate": 0.07, "ci95_bootstrap": [0.02, 0.10],
+        "mean_control": 0.40, "mean_treatment": 0.47,
+        "n_paired_units": 18, "outcome": "ndcg@10",
+        "negative_control_tested": True, "negative_control_passed": True}
     trial = {
-        "tested_concept_version": 2,
-        "specification": design,
-        "statistics": {"estimate": 0.07, "ci95_bootstrap": [0.02, 0.1],
-                       "negative_control_tested": True,
-                       "negative_control_passed": True},
-        "prediction_audit": {"supports": "H1", "distinguishes_predictions": True},
+        "tested_concept_version": 2, "specification": design,
+        "statistics": model_stats,
+        "estimand": {
+            "phase": "development", "outcome": "ndcg@10",
+            "treatment": {"parameter": design["parameter"],
+                          "control": design["control_value"],
+                          "intervention": design["treatment_value"]}},
+        "prediction_audit": rival_prediction_audit(
+            model_stats, "increase", "decrease", 0.001),
         "observational_anchor": {
             "source_observed": True, "same_selected_estimand": True,
+            "observed_estimand": observed_estimand,
+            "observed_statistics": observed_stats,
+            "observed_prediction_audit": rival_prediction_audit(
+                observed_stats, "increase", "no_change", 0.01),
+            "observed_executed_sql": "SELECT uid,tags,relevance FROM events",
+            "source_evidence_scope": "development_observed_responses_only",
+            "agent_selected_model_parameter": design["parameter"],
+            "agent_proposed_mechanism_link": design["mechanism_link"],
             "mechanism_link_declared": True,
             "observed_h1_supported": True,
+            "user_preference_rival_ruled_out": False,
             "cross_environment_causal_transfer_identified": False},
         "identification": {"within_model_paired_intervention": True,
+                           "same_users": True, "same_candidates": True,
+                           "same_heldout_relevance_labels": True,
+                           "train_users_separate_from_dev": True,
                            "platform_policy_identified": False,
                            "confirmation_users_consulted": False},
     }
     concept = {
         "id": "H001", "version": 2,
+        "frozen_trial_index": 0,
         "status": "frozen_scoped_mechanism_unconfirmed",
         "critique": {"decision": "ready", "observable_valid": True,
                      "rival_discriminated": True},
@@ -330,10 +359,15 @@ def _scoped_frozen_record():
     opportunity = {
         "id": "H001", "bias_relevance": {
             "reference_spec": {"kind": "controlled_model"}},
+        "selection_contract": {
+            "estimand_spec": observed_estimand,
+            "prediction_if_mechanism": "increase",
+            "prediction_if_rival": "no_change"},
         "controlled_reference_tests": [trial],
     }
     return {"status": "frozen_scoped_mechanism_unconfirmed",
-            "frozen_id": "H001", "concepts": [concept],
+            "frozen_id": "H001", "frozen_trial_index": 0,
+            "concepts": [concept],
             "research_opportunities": {"opportunities": [opportunity]}}
 
 
@@ -343,8 +377,10 @@ def test_scoped_model_gate_requires_h1_not_just_an_executed_intervention():
     frozen = _scoped_frozen_record()
     concept = frozen["concepts"][0]
     opportunity = frozen["research_opportunities"]["opportunities"][0]
+    from rsi_researcher.research.discovery.references import scoped_trial_evidence_audit
     assert all(scoped_model_freeze_gate(
-        concept, opportunity, enough_exploration=True).values())
+        concept, opportunity, enough_exploration=True).values()), scoped_trial_evidence_audit(
+            opportunity["controlled_reference_tests"][0], opportunity)
     wrong_rival = deepcopy(opportunity)
     wrong_rival["controlled_reference_tests"][0]["prediction_audit"]["supports"] = "H2"
     assert not scoped_model_freeze_gate(
@@ -406,3 +442,64 @@ def test_controlled_confirmation_replay_never_uses_development_users(kuairec_zip
     assert measured["result"]["n_paired_units"] >= 12
     assert all(bucket(item["uid"]) == "confirmation"
                and item["uid"] not in dev_users for item in measured["per_user"])
+
+def test_scoped_freeze_cannot_mix_source_and_model_evidence_across_trials():
+    from copy import deepcopy
+    from rsi_researcher.research.discovery.references import (
+        latest_scoped_trial_index, scoped_model_freeze_gate)
+    frozen = _scoped_frozen_record()
+    concept = frozen["concepts"][0]
+    opportunity = deepcopy(frozen["research_opportunities"]["opportunities"][0])
+    # Trial one has good source and model evidence. Trial two has a strong
+    # model contrast but its source is not bound: no cherry-picking trial one.
+    invalid = deepcopy(opportunity["controlled_reference_tests"][0])
+    invalid["observational_anchor"]["observed_h1_supported"] = False
+    opportunity["controlled_reference_tests"].append(invalid)
+    assert latest_scoped_trial_index(concept, opportunity) is None
+    assert not scoped_model_freeze_gate(
+        concept, opportunity, enough_exploration=True)[
+            "executed_h1_rival_discrimination"]
+    # Conversely, a valid source in the latest trial cannot borrow an older
+    # model result with contradictory interval or mismatched recorded audit.
+    invalid = deepcopy(opportunity["controlled_reference_tests"][0])
+    invalid["statistics"]["ci95_bootstrap"] = [-0.08, -0.02]
+    opportunity["controlled_reference_tests"][1] = invalid
+    assert latest_scoped_trial_index(concept, opportunity) is None
+
+
+def test_scoped_freeze_rejects_manually_relabelled_h1_audit_and_source_stats():
+    from copy import deepcopy
+    from rsi_researcher.research.discovery.references import scoped_model_freeze_gate
+    frozen = _scoped_frozen_record()
+    concept = frozen["concepts"][0]
+    original = frozen["research_opportunities"]["opportunities"][0]
+    altered = deepcopy(original)
+    altered["controlled_reference_tests"][0]["statistics"]["ci95_bootstrap"] = [-0.10, -0.02]
+    assert not scoped_model_freeze_gate(
+        concept, altered, enough_exploration=True)["executed_h1_rival_discrimination"]
+    altered = deepcopy(original)
+    altered["controlled_reference_tests"][0]["observational_anchor"][
+        "observed_statistics"]["ci95_bootstrap"] = [-0.08, -0.02]
+    assert not scoped_model_freeze_gate(
+        concept, altered, enough_exploration=True)[
+            "agent_mechanism_linked_to_observed_estimand"]
+
+
+def test_confirmation_rejects_different_trial_even_if_h1_was_supported():
+    from copy import deepcopy
+    from rsi_researcher.research.discovery.controlled_reference import (
+        confirm_frozen_controlled)
+    frozen = _scoped_frozen_record()
+    tampered = deepcopy(frozen)
+    tampered["frozen_trial_index"] = 1
+    with pytest.raises(ValueError, match="trial identity"):
+        confirm_frozen_controlled("sealed.zip", tampered)
+    tampered = deepcopy(frozen)
+    # A newer failed trial invalidates the old frozen selection entirely.
+    new = deepcopy(tampered["research_opportunities"]["opportunities"][0][
+        "controlled_reference_tests"][0])
+    new["observational_anchor"]["source_observed"] = False
+    tampered["research_opportunities"]["opportunities"][0][
+        "controlled_reference_tests"].append(new)
+    with pytest.raises(ValueError, match="required development evidence"):
+        confirm_frozen_controlled("sealed.zip", tampered)

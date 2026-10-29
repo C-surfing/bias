@@ -6,7 +6,7 @@ This module validates provenance and alignment; it does not select Bias classes.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from math import isfinite
+from math import isfinite, isclose
 
 
 @dataclass(frozen=True)
@@ -162,46 +162,140 @@ def audit_reference_probe(choice: dict, probe: dict) -> dict:
     }
 
 
+def scoped_trial_evidence_audit(trial: dict, opportunity: dict) -> dict:
+    """Recompute scientific support from ONE trial, not trusted LLM status flags.
+
+    The observed-log estimand and the model intervention are DIFFERENT
+    quantities. A linked source signal is a prerequisite to testing a
+    constructed-model analog, never proof of causal transfer to a platform.
+    """
+    spec = trial.get("specification", {})
+    stats = trial.get("statistics", {})
+    ident = trial.get("identification", {})
+    anchor = trial.get("observational_anchor", {})
+    selection = opportunity.get("selection_contract", {})
+    chosen_estimand = selection.get("estimand_spec", {})
+    observed_estimand = anchor.get("observed_estimand", {})
+    model_ci = stats.get("ci95_bootstrap") or []
+    model_numbers = [stats.get(k) for k in
+                     ("estimate", "mean_control", "mean_treatment")]
+    model_n = stats.get("n_paired_units", 0)
+    valid_model_numbers = bool(
+        len(model_ci) == 2
+        and all(isinstance(x, (int, float)) and isfinite(x)
+                for x in [*model_numbers, *model_ci])
+        and model_ci[0] <= model_ci[1]
+        and isinstance(model_n, int) and model_n >= 12
+        and isclose(model_numbers[2] - model_numbers[1],
+                    model_numbers[0], abs_tol=1e-9))
+    try:
+        prediction = rival_prediction_audit(
+            stats, spec["prediction_if_mechanism"],
+            spec["prediction_if_rival"], spec["meaningful_margin"])
+    except (KeyError, TypeError, ValueError):
+        prediction = {"supports": "inconclusive", "distinguishes_predictions": False}
+    stored_prediction = trial.get("prediction_audit", {})
+    model_supported = bool(
+        valid_model_numbers and prediction.get("supports") == "H1"
+        and prediction.get("distinguishes_predictions")
+        and prediction.get("observed_direction") in ("increase", "decrease")
+        and all(stored_prediction.get(k) == prediction.get(k)
+                for k in ("supports", "observed_direction",
+                          "distinguishes_predictions", "prediction_h1",
+                          "prediction_h2")))
+
+    source_stats = anchor.get("observed_statistics") or {}
+    source_ci = source_stats.get("ci95_bootstrap") or []
+    source_numbers = [source_stats.get(k) for k in
+                      ("estimate", "mean_control", "mean_treatment")]
+    valid_source_numbers = bool(
+        len(source_ci) == 2
+        and all(isinstance(x, (int, float)) and isfinite(x)
+                for x in [*source_numbers, *source_ci])
+        and source_ci[0] <= source_ci[1])
+    # Paired-user mean differences need not equal pooled-group mean differences.
+    # Workbench's per-user estimator and pooled means weight users differently.
+    try:
+        observed_prediction = rival_prediction_audit(
+            source_stats, selection["prediction_if_mechanism"],
+            selection["prediction_if_rival"], 0.01)
+    except (KeyError, TypeError, ValueError):
+        observed_prediction = {"supports": "inconclusive",
+                               "distinguishes_predictions": False}
+    stored_source = anchor.get("observed_prediction_audit", {})
+    source_supported = bool(
+        valid_source_numbers and observed_prediction.get("supports") == "H1"
+        and observed_prediction.get("observed_direction") in ("increase", "decrease")
+        and observed_prediction.get("distinguishes_predictions")
+        and all(stored_source.get(k) == observed_prediction.get(k)
+                for k in ("supports", "observed_direction",
+                          "distinguishes_predictions", "prediction_h1",
+                          "prediction_h2"))
+        and anchor.get("observed_h1_supported") is True)
+
+    same_source = bool(
+        chosen_estimand and observed_estimand == chosen_estimand
+        and anchor.get("same_selected_estimand")
+        and anchor.get("source_observed")
+        and anchor.get("source_evidence_scope") == "development_observed_responses_only"
+        and anchor.get("observed_executed_sql"))
+    link = bool(
+        same_source
+        and anchor.get("mechanism_link_declared")
+        and spec.get("observed_group_feature") == chosen_estimand.get("group_expression")
+        and anchor.get("agent_selected_model_parameter") == spec.get("parameter")
+        and isinstance(anchor.get("agent_proposed_mechanism_link"), str)
+        and len(anchor["agent_proposed_mechanism_link"].strip()) >= 20
+        and not anchor.get("cross_environment_causal_transfer_identified")
+        and not anchor.get("user_preference_rival_ruled_out"))
+    model_scope = bool(
+        ident.get("within_model_paired_intervention")
+        and ident.get("same_users") and ident.get("same_candidates")
+        and ident.get("same_heldout_relevance_labels")
+        and ident.get("train_users_separate_from_dev")
+        and not ident.get("confirmation_users_consulted")
+        and not ident.get("platform_policy_identified")
+        and trial.get("estimand", {}).get("phase") == "development"
+        and trial.get("estimand", {}).get("outcome") == spec.get("outcome")
+        and stats.get("outcome") == spec.get("outcome")
+        and trial.get("estimand", {}).get("treatment") == {
+            "parameter": spec.get("parameter"),
+            "control": spec.get("control_value"),
+            "intervention": spec.get("treatment_value")})
+    return {
+        "executed_h1_rival_discrimination": model_supported and model_scope,
+        "agent_mechanism_linked_to_observed_estimand": source_supported and link,
+        # Only a state-window *pipeline invariant*, NOT a rival-mechanism test.
+        "pipeline_invariant_checked": bool(
+            stats.get("negative_control_tested")
+            and stats.get("negative_control_passed") is True),
+    }
+
+
+def latest_scoped_trial_index(concept: dict, opportunity: dict) -> int | None:
+    """Use the latest trial for this hypothesis version; never cherry-pick."""
+    indexed = [
+        i for i, trial in enumerate(opportunity.get("controlled_reference_tests", []))
+        if trial.get("tested_concept_version") == concept.get("version")]
+    if not indexed:
+        return None
+    trial = opportunity["controlled_reference_tests"][indexed[-1]]
+    return indexed[-1] if all(scoped_trial_evidence_audit(trial, opportunity).values()) else None
+
+
 def scoped_model_freeze_gate(concept: dict, opportunity: dict, *,
                              enough_exploration: bool) -> dict:
-    """Freeze a falsifiable *owned-model* hypothesis, never a platform Bias.
-
-    Unlike a normative platform reference, a controlled replay can identify
-    an effect inside the executable recommender. Freeze only the CURRENT
-    concept version with a measured, rival-discriminating H1 prediction and
-    a genuine pipeline negative control. Confirmation remains sealed.
-    """
+    """Freeze a single independently auditable owned-model trial, not platform Bias."""
     bias = opportunity.get("bias_relevance", {})
-    tests = [trial for trial in opportunity.get("controlled_reference_tests", [])
-             if trial.get("tested_concept_version") == concept.get("version")]
-    valid = []
-    for trial in tests:
-        result = trial.get("statistics", {})
-        prediction = trial.get("prediction_audit", {})
-        identification = trial.get("identification", {})
-        ci = result.get("ci95_bootstrap", [])
-        valid.append(bool(
-            prediction.get("distinguishes_predictions")
-            and prediction.get("supports") == "H1"
-            and len(ci) == 2 and (ci[0] > 0 or ci[1] < 0)
-            and result.get("negative_control_tested")
-            and result.get("negative_control_passed") is True
-            and identification.get("within_model_paired_intervention")
-            and not identification.get("platform_policy_identified")
-            and not identification.get("confirmation_users_consulted")))
+    valid_trial = latest_scoped_trial_index(concept, opportunity)
     critique = concept.get("critique") or {}
-    bridged = any(t.get("observational_anchor", {}).get("source_observed")
-                  and t.get("observational_anchor", {}).get("same_selected_estimand")
-                  and t.get("observational_anchor", {}).get("mechanism_link_declared")
-                  and t.get("observational_anchor", {}).get("observed_h1_supported")
-                  and not t.get("observational_anchor", {}).get(
-                      "cross_environment_causal_transfer_identified")
-                  for t in tests)
     return {
         "reference_is_owned_model": bias.get("reference_spec", {}).get("kind") == "controlled_model",
-        "current_concept_version_tested": bool(tests),
-        "executed_h1_rival_discrimination": any(valid),
-        "agent_mechanism_linked_to_observed_estimand": bridged,
+        "current_concept_version_tested": any(
+            t.get("tested_concept_version") == concept.get("version")
+            for t in opportunity.get("controlled_reference_tests", [])),
+        "executed_h1_rival_discrimination": valid_trial is not None,
+        "agent_mechanism_linked_to_observed_estimand": valid_trial is not None,
         "exploration_completed": enough_exploration,
         "critic_ready_for_scoped_mechanism": critique.get("decision") == "ready",
         "critic_observable_valid": bool(critique.get("observable_valid")),
