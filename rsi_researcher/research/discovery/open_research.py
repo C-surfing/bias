@@ -1327,7 +1327,47 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     from rsi_researcher.research.discovery.controlled_reference import (
                         CONTROLLED_EXPERIMENT_SCHEMA, PARAMETER_BOUNDS)
                     from rsi_researcher.research.discovery.references import (
-                        rival_prediction_audit)
+                        EstimandSpec, rival_prediction_audit)
+                    selected_contract = opportunity.get("selection_contract")
+                    if not selected_contract:
+                        raise ValueError("Controlled mechanism needs an Agent-registered observed estimand")
+                    declared = EstimandSpec(**selected_contract["estimand_spec"])
+                    # The source observation is measured on real development-log
+                    # rows BEFORE the parameter intervention is designed.
+                    observed_spec = {
+                        "question": "Observed mechanism signal: " + selected["claim"]["measurement"],
+                        "source_table": declared.source_table,
+                        "source_query": "",
+                        "population_filter": declared.population_filter,
+                        "unit_expression": declared.unit_expression,
+                        "group_expression": declared.group_expression,
+                        "control_value": declared.control_value,
+                        "treatment_value": declared.treatment_value,
+                        "outcome_expression": declared.outcome_expression,
+                        "strata_expression": "",
+                        "analysis": declared.analysis,
+                        "placebo_source_query": "",
+                        "placebo_group_expression": "",
+                        "prediction": selected_contract["prediction_if_mechanism"],
+                        "falsifier": selected_contract["prediction_if_rival"],
+                        "meaningful_margin": 0.01,
+                    }
+                    observed = workbench.run(observed_spec)
+                    observed_alignment = declared.compare_executed(
+                        observed["specification"])
+                    if not observed_alignment["same_estimand"]:
+                        raise ValueError("Observed experiment differs from the selected estimand")
+                    source_anchor = {
+                        "source_observed": True,
+                        "same_selected_estimand": True,
+                        "observed_estimand": declared.as_record(),
+                        "observed_statistics": observed["result"],
+                        "observed_executed_sql": observed["executed_sql"],
+                        "source_evidence_scope": "development_observed_responses_only",
+                        "cross_environment_causal_transfer_identified": False,
+                        "user_preference_rival_ruled_out": False,
+                    }
+                    entry["observational_anchor"] = source_anchor
                     designer = ResearchAgent(model)
                     designer.role = "controlled-experiment-designer"
                     designer.instruction = (
@@ -1338,14 +1378,35 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "SAME evaluation quantity. The tool keeps development users, "
                         "ranked candidates, and held-out relevance labels fixed. "
                         "It does not identify a production platform's policy.")
+                    bound_schema = {
+                        **CONTROLLED_EXPERIMENT_SCHEMA,
+                        "properties": {
+                            **CONTROLLED_EXPERIMENT_SCHEMA["properties"],
+                            "observed_group_feature": {"type": "string",
+                                                       "enum": [declared.group_expression]},
+                        },
+                        "required": [*CONTROLLED_EXPERIMENT_SCHEMA["required"],
+                                     "observed_group_feature", "mechanism_link"],
+                    }
                     specification = designer.act({
                         "hypothesis": selected["claim"],
+                        "observed_estimand": declared.as_record(),
+                        "executed_observed_statistics": model_statistics(observed["result"]),
+                        "observed_source_scope": source_anchor["source_evidence_scope"],
                         "reference_spec": opportunity["bias_relevance"]["reference_spec"],
                         "parameter_bounds": PARAMETER_BOUNDS,
                         "available_outcomes": ["ndcg@10", "recall@10"],
                         "instruction": "Choose the most rival-discriminating "
                                        "model intervention, not a presumed bias fix.",
-                    }, "controlled-design-" + str(step), CONTROLLED_EXPERIMENT_SCHEMA)
+                    }, "controlled-design-" + str(step), bound_schema)
+                    if (specification.get("observed_group_feature") !=
+                            declared.group_expression or
+                            len(specification.get("mechanism_link", "").strip()) < 20):
+                        raise ValueError("Controlled intervention must explicitly map "
+                                         "the registered observed estimand to one mechanism")
+                    source_anchor["agent_selected_model_parameter"] = specification["parameter"]
+                    source_anchor["agent_proposed_mechanism_link"] = specification["mechanism_link"]
+                    source_anchor["mechanism_link_declared"] = True
                     measurement = workbench.run_controlled_reference(
                         source_db, specification)
                     audit = rival_prediction_audit(
@@ -1355,7 +1416,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         specification["meaningful_margin"])
                     opportunity_pool.record_controlled_reference(
                         selected["id"], measurement, audit,
-                        concept_version=selected["version"])
+                        concept_version=selected["version"],
+                        observational_anchor=source_anchor)
                     entry["controlled_experiment"] = measurement
                     entry["numeric_prediction_audit"] = audit
                     selected["tests"].append({
@@ -1368,6 +1430,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "hypothesis": selected["claim"],
                         "intervention": specification,
                         "executed_estimand": measurement["estimand"],
+                        "executed_observation": source_anchor,
                         "executed_measurement": measurement["result"],
                         "prediction_audit": audit,
                         "identification_scope": measurement["identification"],
