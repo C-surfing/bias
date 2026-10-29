@@ -4,6 +4,7 @@ import unittest
 from rsi_researcher.research.discovery.experiment_contract import compile_experiment_intent
 from rsi_researcher.research.discovery.references import EstimandSpec
 from rsi_researcher.research.discovery.research_handoff import (
+    audit_design_role,
     pending_primary_contract, previously_measured, primary_experiment_intent,
 )
 
@@ -66,3 +67,27 @@ class ResearchHandoffTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_registered_primary_vs_distinct_rival_estimand_roles():
+    import pytest
+    original = {
+        "source_table": "events", "unit_expression": "uid",
+        "population_filter": "", "group_expression": "previous_click",
+        "outcome_expression": "click", "control_value": "0",
+        "treatment_value": "1", "analysis": "paired_user",
+    }
+    contract = {"estimand_spec": original}
+    assert audit_design_role(original, contract, primary=True)[
+        "purpose"] == "preregistered_primary"
+    changed = {**original, "population_filter": "previous_hate = 0"}
+    with pytest.raises(ValueError, match="Primary experiment changed"):
+        audit_design_role(changed, contract, primary=True)
+    counter = audit_design_role(changed, contract, primary=False)
+    assert counter["purpose"] == "distinct_countertest"
+    assert counter["countertest_not_primary_substitute"] is True
+    assert counter["same_estimand"] is False
+    with pytest.raises(ValueError, match="Repeated primary estimand"):
+        audit_design_role(original, contract, primary=False)
+    assert audit_design_role(changed, None, primary=False)[
+        "purpose"] == "exploratory"
