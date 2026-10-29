@@ -520,8 +520,30 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
         vals = sorted(v[i] for v in boot)
         return [vals[int(.025*len(vals))], vals[int(.975*len(vals))-1]]
     response, allocation, standard_response, interaction, rates, standard_rates, shares, counts = point
+    # A within-user policy-by-item-group interaction is a stronger sensitivity
+    # analysis than the pooled comparison. User matching alone does NOT control
+    # item-level selection, exposure propensities or time-varying preferences.
+    matched = []
+    for values in per_user.values():
+        cells = [values[(policy, arm)] for policy in (0, 1) for arm in arms]
+        if all(n > 0 for n, _ in cells):
+            rates_by_cell = [sy / n for n, sy in cells]
+            matched.append((rates_by_cell[1] - rates_by_cell[0]) -
+                           (rates_by_cell[3] - rates_by_cell[2]))
+    matched_ci = None
+    matched_effect = None
+    if len(matched) >= 10:
+        matched_effect = mean(matched)
+        matched_rng = random.Random(20261027)
+        estimates = sorted(mean(matched_rng.choices(matched, k=len(matched)))
+                           for _ in range(240))
+        matched_ci = [estimates[6], estimates[233]]
     return {
         "status": "development_randomized_reference_diagnostic",
+        "user_matched_policy_response_interaction": matched_effect,
+        "user_matched_interaction_ci95": matched_ci,
+        "n_user_matched_four_cell_units": len(matched),
+        "user_matched_interaction_supported": len(matched) >= 10,
         "reference": "randomly inserted item response; not randomized full recommender",
         "same_calendar_days": days,
         "source_table": "events",
