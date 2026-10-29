@@ -748,8 +748,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     native_dimensions = supported_native_levels(data_profile)
     import hashlib
     from rsi_researcher.research.discovery.active_experiments import (
-        CANDIDATE_SCHEMA, available_capabilities, assess_candidates,
-        choose_feasible, execute_observation,
+        available_capabilities, design_and_select, execute_observation,
     )
     active_experiment_planning = bool(
         open_phenomena and discovery_options.get(
@@ -1014,8 +1013,14 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "declare that needed capability rather than inventing "
                         "a controlled parameter or asserting causality. "
                         "Avoid repeated SQL and p-value fishing. "
+                        "Report decision_target (actual ranking/allocation/learning "
+                        "decision, or behavior_only), reference_kind, and where "
+                        "possible predictor_column/outcome_column so temporal "
+                        "construct overlap can be audited. Do not reinterpret "
+                        "previous_click->recent_click as a novel Bias: the former "
+                        "is a component of the latter. "
                         + BIAS_RESEARCH_CONTRACT)
-                    proposals = planner.act({
+                    design_context = {
                         "new_concepts": [
                             _concept_summary(c) for c in concepts
                             if c["id"] in stage_ids],
@@ -1027,15 +1032,16 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             available_capabilities(adapter),
                         "candidate_count": "2 or 3, including unsupported "
                                            "experiments when scientifically needed",
-                        "evaluation_rule": "Preflight executability BEFORE "
-                                           "execution. H1/H2 prediction difference "
-                                           "does not by itself identify a mechanism.",
-                    }, "active-experiment-design-" + str(step), CANDIDATE_SCHEMA)
-                    checked = assess_candidates(
-                        tools,
+                        "feature_lineage": dict(adapter.feature_lineage),
+                        "evaluation_rule": "Reject overlapping history constructs "
+                                           "and unsupported interventions. Prefer "
+                                           "a decision target and a justified reference "
+                                           "over behavioral prediction differences.",
+                    }
+                    chosen, checked, design_attempts = design_and_select(
+                        planner, design_context, tools,
                         [c for c in concepts if c["id"] in stage_ids],
-                        proposals["candidates"])
-                    chosen = choose_feasible(checked)
+                        "active-experiment-design-" + str(step))
                     active_entry = {
                         "round": step,
                         "action": {
@@ -1046,13 +1052,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 if chosen else ""),
                             "concept": "", "query": ""},
                         "candidate_experiment_audit": checked,
+                        "design_attempts": design_attempts,
                         "selection_rule": (
-                            "maximize declared H1/H2 directional disagreement "
-                            "among feasible non-duplicate SQL; no outcomes used"),
+                            "prefer supported recommender decision/reference target, "
+                            "then declared H1/H2 disagreement; no outcomes used"),
                         "selected_candidate": (
                             chosen["candidate"] if chosen else None),
                     }
-                    for item in checked:
+                    for attempt in design_attempts:
+                        for item in attempt:
+                            cid = item["candidate"]["concept_id"]
+                            if cid in opportunity_pool.records:
+                                opportunity_pool.records[cid].setdefault(
+                                    "experiment_capability_audit", []).append({
+                                        "question": item["candidate"]["question"],
+                                        "required_capability": item["candidate"]["required_capability"],
+                                        "status": item["status"],
+                                        "reason": item["reason"]})
+                    for item in []:
                         cid = item["candidate"]["concept_id"]
                         if cid in opportunity_pool.records:
                             opportunity_pool.records[cid].setdefault(
@@ -1198,6 +1215,21 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         constrained_schema)
                     def check_choice(plan):
                         from rsi_researcher.research.discovery.references import ReferenceSpec
+                        from rsi_researcher.research.discovery.variable_lineage import (
+                            audit_construct_overlap,
+                        )
+                        if plan["selected_concept_id"] not in {
+                                c["id"] for c in concepts if c["status"] not in (
+                                    "design_blocked", "rejected_development")}:
+                            raise ValueError("Select an existing active research opportunity")
+                        group_lineage = audit_construct_overlap(
+                            tools, plan["contrast_group"], plan["contrast_outcome"])
+                        if group_lineage["status"] == "overlapping_constructs":
+                            raise ValueError(
+                                "overlapping_constructs: group and outcome "
+                                "reuse historical signals; choose a non-overlapping "
+                                "target or a different temporal window. "
+                                + str(group_lineage["shared"]))
                         opportunity_pool.check_prediction(plan)
                         ReferenceSpec.from_choice(plan, adapter.capabilities)
                         group = plan["contrast_group"]
