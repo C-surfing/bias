@@ -314,6 +314,7 @@ def _scoped_frozen_record():
         "observational_anchor": {
             "source_observed": True, "same_selected_estimand": True,
             "mechanism_link_declared": True,
+            "observed_h1_supported": True,
             "cross_environment_causal_transfer_identified": False},
         "identification": {"within_model_paired_intervention": True,
                            "platform_policy_identified": False,
@@ -352,6 +353,12 @@ def test_scoped_model_gate_requires_h1_not_just_an_executed_intervention():
     stale["version"] = 3
     assert not scoped_model_freeze_gate(
         stale, opportunity, enough_exploration=True)["current_concept_version_tested"]
+    no_source_signal = deepcopy(opportunity)
+    no_source_signal["controlled_reference_tests"][0]["observational_anchor"][
+        "observed_h1_supported"] = False
+    assert not scoped_model_freeze_gate(
+        concept, no_source_signal,
+        enough_exploration=True)["agent_mechanism_linked_to_observed_estimand"]
     no_placebo = deepcopy(opportunity)
     no_placebo["controlled_reference_tests"][0]["statistics"][
         "negative_control_tested"] = False
