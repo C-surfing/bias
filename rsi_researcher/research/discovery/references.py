@@ -193,6 +193,7 @@ def scoped_model_freeze_gate(concept: dict, opportunity: dict, *,
     bridged = any(t.get("observational_anchor", {}).get("source_observed")
                   and t.get("observational_anchor", {}).get("same_selected_estimand")
                   and t.get("observational_anchor", {}).get("mechanism_link_declared")
+                  and t.get("observational_anchor", {}).get("observed_h1_supported")
                   and not t.get("observational_anchor", {}).get(
                       "cross_environment_causal_transfer_identified")
                   for t in tests)
