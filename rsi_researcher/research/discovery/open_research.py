@@ -1936,7 +1936,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             **choice_contract["estimand_spec"]).compare_executed(
                                 experiment_spec)
                         entry["selection_contract_audit"] = {
-                            "matches_original_contrast": aligned["same_core_contrast"],
+                            "matches_original_contrast": aligned["same_estimand"],
                             **aligned,
                         }
                     import duckdb
@@ -1949,8 +1949,14 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         else None)
                     def validate_selected_contrast(specification):
                         if choice_contract:
-                            keys = ("source_table", "group_expression", "outcome_expression",
-                                    "control_value", "treatment_value", "analysis")
+                            # A primary experiment must execute EXACTLY the
+                            # preregistered observable. Population-shifted
+                            # sensitivity analyses belong to a labeled
+                            # countertest, never the original H1/H2 audit.
+                            keys = ("source_table", "unit_expression",
+                                    "population_filter", "group_expression",
+                                    "outcome_expression", "control_value",
+                                    "treatment_value", "analysis")
                             changed = [k for k in keys if
                                        specification[k] != choice_contract[k]]
                             if changed:
@@ -1995,10 +2001,23 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             **choice_contract["estimand_spec"]).compare_executed(
                                 experiment_spec)
                         entry["selection_contract_audit"] = {
-                            "matches_original_contrast": aligned["same_core_contrast"],
+                            "matches_original_contrast": aligned["same_estimand"],
                             **aligned,
                         }
                     entry["experiment"] = measured_experiment
+                    if choice_contract:
+                        from rsi_researcher.research.discovery.references import (
+                            rival_prediction_audit)
+                        entry["observational_prediction_audit"] = {
+                            **rival_prediction_audit(
+                                measured_experiment["result"],
+                                choice_contract["prediction_if_mechanism"],
+                                choice_contract["prediction_if_rival"],
+                                experiment_spec["meaningful_margin"]),
+                            "estimand": choice_contract["estimand_spec"],
+                            "causal_recommender_mechanism_identified": False,
+                            "source_scope": "development_conditional_association",
+                        }
                     reference_choice = opportunity_pool.records.get(
                         selected["id"], {}).get("bias_relevance", {})
                     selected_choice = next((
@@ -2010,8 +2029,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         try:
                             from rsi_researcher.research.discovery.workbench import randomized_reference_probe
                             reference = randomized_reference_probe(tools, selected_choice)
+                            from rsi_researcher.research.discovery.references import (
+                                audit_reference_probe)
+                            reference_audit = audit_reference_probe(selected_choice, reference)
                             entry["randomized_reference_diagnostic"] = reference
-                            opportunity_pool.record_reference_diagnostic(selected["id"], reference)
+                            entry["randomized_reference_prediction_audit"] = reference_audit
+                            opportunity_pool.record_reference_diagnostic(
+                                selected["id"], reference, reference_audit)
                         except Exception as exc:
                             entry["randomized_reference_probe_error"] = str(exc)[:350]
                     entry["feature_binding"] = {
