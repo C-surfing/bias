@@ -457,15 +457,6 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
     # can masquerade as a systematic recommender distortion.
     if "shared_item_pool_events" not in tools.reference_views:
         raise ValueError("Randomized reference requires an enabled matched item pool")
-    matched_strata_sql = (
-        "SELECT vid, event_day FROM shared_item_pool_events "
-        "WHERE is_random IN (0,1) GROUP BY vid,event_day "
-        "HAVING COUNT(*) FILTER (WHERE is_random=0)>0 "
-        "AND COUNT(*) FILTER (WHERE is_random=1)>0")
-    matched_n = tools.connection.execute(
-        "SELECT COUNT(*) FROM (" + matched_strata_sql + ")").fetchone()[0]
-    if matched_n < 1:
-        raise ValueError("No shared item/day strata with both exposure modes")
     # The matched view exposes all development event columns, allowing
     # row-level features invented by the Agent to be evaluated on EXACTLY
     # the eligible reference rows without a lossy join on user or item.
@@ -475,6 +466,17 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
         named = ", ".join("(" + expression + ") AS " + name
                           for name, expression in projection.items())
         source = "(SELECT *, " + named + " FROM shared_item_pool_events)"
+    # Check positivity inside the *selected subgroup*, not globally;
+    # otherwise an Agent-defined filter can remove one exposure mode.
+    matched_strata_sql = (
+        "SELECT vid, event_day FROM " + source + " AS eligible_events "
+        "WHERE is_random IN (0,1) AND (" + where + ") GROUP BY vid,event_day "
+        "HAVING COUNT(*) FILTER (WHERE is_random=0)>0 "
+        "AND COUNT(*) FILTER (WHERE is_random=1)>0")
+    matched_n = tools.connection.execute(
+        "SELECT COUNT(*) FROM (" + matched_strata_sql + ")").fetchone()[0]
+    if matched_n < 1:
+        raise ValueError("No shared item/day strata with both exposure modes in selected population")
     query = (
         "SELECT CAST(uid AS VARCHAR) u, CAST(is_random AS INTEGER) exposure_mode,"
         "CAST((" + group + ") AS VARCHAR) arm,"
