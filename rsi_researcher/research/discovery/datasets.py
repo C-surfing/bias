@@ -124,11 +124,6 @@ class KuaiRandAdapter(DatasetAdapter):
             "PRAGMA table_info('events')").fetchall()}
         if not {"uid", "vid", "is_random"} <= existing:
             return []
-        fields = [f for f in (
-            "uid", "vid", "event_day", "is_random", "click", "long_view",
-            "hate", "tags", "author", "activity", "tab", "previous_click",
-            "previous_long_view", "previous_hate", "previous_tags")
-            if f in existing]
         period = ("AND e.event_day >= (SELECT MIN(event_day) "
                   "FROM main.events WHERE is_random=1)"
                   if "event_day" in existing else "")
@@ -140,8 +135,10 @@ class KuaiRandAdapter(DatasetAdapter):
                 tab = str(dominant[0]).replace("'", "''")
                 period += " AND e.tab='" + tab + "'"
         connection.execute(
-            "CREATE TEMP VIEW shared_item_pool_events AS SELECT " +
-            ", ".join("e." + f for f in fields) +
+            # Keep every development-only event field. The Agent may register
+            # novel, pre-outcome item features which a fixed projection would
+            # otherwise silently make unavailable to the reference executor.
+            "CREATE TEMP VIEW shared_item_pool_events AS SELECT e.*"
             " FROM main.events e WHERE e.vid IN "
             "(SELECT DISTINCT vid FROM main.events WHERE is_random=1) " + period)
         return ["shared_item_pool_events"]
