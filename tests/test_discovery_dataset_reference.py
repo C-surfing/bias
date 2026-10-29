@@ -169,3 +169,61 @@ def test_same_discovery_loop_on_kuairec_without_random_exposure(tmp_path, monkey
     assert manifest["dataset"]["dataset_id"] == "kuairec"
     assert manifest["dataset"]["capabilities"]["dense_relevance"] is True
     assert manifest["dataset"]["capabilities"]["randomized_exposure_probe"] is False
+
+
+def test_random_insertion_reference_is_executed_and_estimand_bound(tmp_path):
+    """Observed policy interaction is testable; it is NOT normative platform Bias."""
+    from rsi_researcher.research.discovery.references import audit_reference_probe
+    from rsi_researcher.research.discovery.workbench import randomized_reference_probe
+    path = str(tmp_path / "random-mode.duckdb")
+    con = duckdb.connect(path)
+    con.execute("CREATE TABLE events(uid INTEGER, vid INTEGER, event_day INTEGER, "
+                "is_random INTEGER, item_group VARCHAR, click INTEGER)")
+    rows = []
+    for uid in range(1, 25):
+        for mode in (0, 1):
+            for group in ("0", "1"):
+                rows.append((uid, uid*10+mode, 20220423, mode, group,
+                             int(mode == 0 and group == "1")))
+    con.executemany("INSERT INTO events VALUES (?,?,?,?,?,?)", rows)
+    con.execute("CREATE TABLE features AS SELECT * FROM events")
+    con.close()
+    tools = research.DevelopmentTools(path, adapter=KuaiRandAdapter())
+    try:
+        choice = {
+            "reference_kind": "randomized_exposure",
+            "contrast_source": "events", "contrast_group": "item_group",
+            "contrast_outcome": "click", "contrast_filter": "",
+            "control_value": "0", "treatment_value": "1",
+            "mechanism_direction": "increase", "rival_direction": "decrease",
+            "meaningful_margin": .01}
+        probe = randomized_reference_probe(tools, choice)
+        audit = audit_reference_probe(choice, probe)
+        assert probe["n_user_matched_four_cell_units"] == 24
+        assert probe["user_matched_interaction_supported"]
+        assert probe["user_matched_policy_response_interaction"] == pytest.approx(1.)
+        assert probe["user_matched_interaction_ci95"][0] > 0
+        assert audit["matches_selected_observable"]
+        assert audit["prediction_audit"]["supports"] == "H1"
+        assert not audit["reference_identifies_production_bias"]
+        pool = ResearchOpportunityPool()
+        pool.register("H001", {
+            "concept": "item opportunity discrepancy",
+            "mechanism": "policy changes allocation",
+            "rival": "content preferences", "falsifier": "no interaction",
+            "measurement": "policy by item-group response",
+            "suggested_sql": "SELECT 1"}, [])
+        pool.record_selection_design("H001", {
+            **choice, "target_reference": "restricted insertion panel",
+            "proposed_distortion": "mode response interaction",
+            "analysis": "paired_user"}, {"valid_support": True},
+            KuaiRandAdapter.capabilities)
+        pool.record_reference_diagnostic("H001", probe, audit)
+        record = pool.records["H001"]["bias_relevance"]
+        assert record["reference_spec"]["status"] == "measured_restricted_reference_only"
+        assert not record["numeric_discrepancy"]["normative_target_validated"]
+        wrong = audit_reference_probe({**choice, "contrast_outcome": "hate"}, probe)
+        assert not wrong["matches_selected_observable"]
+        assert wrong["prediction_audit"]["supports"] == "inconclusive"
+    finally:
+        tools.close()
