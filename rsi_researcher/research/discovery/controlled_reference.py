@@ -216,16 +216,17 @@ def confirm_frozen_controlled(zip_path: str, frozen: dict) -> dict:
     if concept is None or opportunity is None:
         raise ValueError("Frozen concept and reference provenance must be present")
     from rsi_researcher.research.discovery.references import (
-        scoped_model_freeze_gate, rival_prediction_audit)
+        scoped_model_freeze_gate, eligible_scoped_model_trials, rival_prediction_audit)
     # Recheck the evidence gate from saved development artifacts, instead of
     # trusting a mutable status string or an agent's narrative.
     gate = scoped_model_freeze_gate(concept, opportunity, enough_exploration=True)
     if not all(gate.values()):
         raise ValueError("Frozen model mechanism lacks required development evidence")
-    trials = [t for t in opportunity.get("controlled_reference_tests", [])
-              if t.get("tested_concept_version") == concept.get("version")
-              and t.get("prediction_audit", {}).get("supports") == "H1"]
-    specification = trials[-1]["specification"]
+    # The sealed replay must use the SAME fully qualified trial that passed
+    # development review, not merely the last trial labeled H1.
+    trials = eligible_scoped_model_trials(concept, opportunity)
+    frozen_trial = trials[-1]
+    specification = frozen_trial["specification"]
     validate_controlled_spec(specification)
     confirmation = evaluate_controlled(zip_path, specification, phase="confirmation")
     audit = rival_prediction_audit(
@@ -245,6 +246,10 @@ def confirm_frozen_controlled(zip_path: str, frozen: dict) -> dict:
         "frozen_id": identifier,
         "tested_concept_version": concept["version"],
         "frozen_specification": specification,
+        "frozen_observational_estimand": frozen_trial.get(
+            "observational_anchor", {}).get("observed_estimand"),
+        "frozen_source_evidence_scope": frozen_trial.get(
+            "observational_anchor", {}).get("source_evidence_scope"),
         "confirmation_measurement": {
             "estimand": confirmation["estimand"],
             "result": confirmation["result"],
