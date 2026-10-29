@@ -40,6 +40,10 @@ CONTROLLED_EXPERIMENT_SCHEMA = {
             "increase", "decrease", "no_change"]},
         "meaningful_margin": {"type": "number", "minimum": 0, "maximum": 1},
         "reference_justification": {"type": "string", "minLength": 12},
+        # These are required when the model experiment is linked to a
+        # real development-log observation through Open Discovery.
+        "observed_group_feature": {"type": "string", "minLength": 1},
+        "mechanism_link": {"type": "string", "minLength": 20},
     },
     "required": ["question", "parameter", "control_value", "treatment_value",
                  "outcome", "prediction_if_mechanism", "prediction_if_rival",

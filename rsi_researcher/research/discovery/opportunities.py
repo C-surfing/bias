@@ -246,7 +246,9 @@ class ResearchOpportunityPool:
             "development_support": support,
         }
 
-    def record_reference_measurement(self, identifier: str, stats: dict, *, scope: str):
+    def record_reference_measurement(self, identifier: str, stats: dict, *, scope: str,
+                                     executed_specification: dict | None = None,
+                                     target_identity: dict | None = None):
         """Record an executed reference contrast without claiming a normative target.
 
         A paired-user mean difference need not equal a pooled-share difference.
@@ -270,6 +272,8 @@ class ResearchOpportunityPool:
             "ci95": ci,
             "measured": True,
             "reference_scope": scope,
+            "executed_specification": executed_specification,
+            "agent_selected_target_identity": target_identity,
             "normative_target_validated": False,
         }
         bias["reference_measured"] = True
@@ -278,7 +282,8 @@ class ResearchOpportunityPool:
         self.records[identifier]["evidence_status"] = "reference_diagnostic_only"
 
     def record_controlled_reference(self, identifier: str, evidence: dict,
-                                    prediction_audit: dict, *, concept_version: int = 1):
+                                    prediction_audit: dict, *, concept_version: int = 1,
+                                    observational_anchor: dict | None = None):
         """Promote executed evidence only in its actual, constructed-model scope."""
         if identifier not in self.records:
             raise ValueError("Unknown research opportunity")
@@ -348,6 +353,7 @@ class ResearchOpportunityPool:
             "statistics": stats,
             "identification": design,
             "prediction_audit": prediction_audit,
+            "observational_anchor": observational_anchor or {},
         })
         item["evidence_status"] = "controlled_model_effect_identified"
 
@@ -364,9 +370,12 @@ class ResearchOpportunityPool:
         item["recommendation_consequence"] = {"identified": False}
         item["evidence_status"] = "revised_hypothesis_needs_retest"
 
-    def record_reference_diagnostic(self, identifier: str, result: dict):
+    def record_reference_diagnostic(self, identifier: str, result: dict,
+                                    executed_audit: dict | None = None):
         item = self.records[identifier]
         item["bias_relevance"]["randomized_reference_diagnostic"] = result
+        if executed_audit is not None:
+            item["bias_relevance"]["randomized_reference_audit"] = executed_audit
         # Programmatically audit the exact contrast. This is a difference
         # between observed exposure modes, NOT a justified optimal-policy target.
         shares = result["treatment_group_shares_standard_random"]
@@ -385,7 +394,10 @@ class ResearchOpportunityPool:
         item["bias_relevance"]["randomized_response_observed"] = True
         item["bias_relevance"]["reference_measured"] = True
         if "reference_spec" in item["bias_relevance"]:
-            item["bias_relevance"]["reference_spec"]["status"] = "measured_unidentified"
+            item["bias_relevance"]["reference_spec"]["status"] = (
+                "measured_restricted_reference_only"
+                if executed_audit and executed_audit.get("matches_selected_observable")
+                else "measured_unidentified")
         item["evidence_status"] = "reference_diagnostic_only"
 
     def snapshot(self) -> dict:

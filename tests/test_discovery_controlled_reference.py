@@ -44,6 +44,10 @@ def spec(parameter="profile_strength", a=0, b=1.2):
         "outcome": "ndcg@10", "prediction_if_mechanism": "increase",
         "prediction_if_rival": "decrease", "meaningful_margin": 0.001,
         "reference_justification": "Same users and hidden fixed relevance panel",
+        "observed_group_feature": "tags",
+        "mechanism_link": ("The observed category-response signal suggests testing "
+                           "whether changing the recommender's user-state coefficient "
+                           "changes fixed-candidate ranking utility"),
     }
 
 
@@ -266,6 +270,10 @@ def test_agent_controls_the_experiment_and_evidence_enters_scientific_loop(
     assert "discovery-critic" in stages
     assert "discovery-reflection" in stages
     assert event["controlled_experiment"]["result"]["n_paired_units"] >= 12
+    assert event["observational_anchor"]["source_observed"]
+    assert event["observational_anchor"]["same_selected_estimand"]
+    assert not event["observational_anchor"]["cross_environment_causal_transfer_identified"]
+    assert event["controlled_experiment"]["specification"]["observed_group_feature"] == "tags"
     assert event["numeric_prediction_audit"]["prediction_h1"] == "increase"
     assert event["reflection"]["decision"] == "revise"
     assert set(x["uid"] for x in event["controlled_experiment"]["per_user"]) <= development_users
@@ -303,6 +311,11 @@ def _scoped_frozen_record():
                        "negative_control_tested": True,
                        "negative_control_passed": True},
         "prediction_audit": {"supports": "H1", "distinguishes_predictions": True},
+        "observational_anchor": {
+            "source_observed": True, "same_selected_estimand": True,
+            "mechanism_link_declared": True,
+            "observed_h1_supported": True,
+            "cross_environment_causal_transfer_identified": False},
         "identification": {"within_model_paired_intervention": True,
                            "platform_policy_identified": False,
                            "confirmation_users_consulted": False},
@@ -340,6 +353,12 @@ def test_scoped_model_gate_requires_h1_not_just_an_executed_intervention():
     stale["version"] = 3
     assert not scoped_model_freeze_gate(
         stale, opportunity, enough_exploration=True)["current_concept_version_tested"]
+    no_source_signal = deepcopy(opportunity)
+    no_source_signal["controlled_reference_tests"][0]["observational_anchor"][
+        "observed_h1_supported"] = False
+    assert not scoped_model_freeze_gate(
+        concept, no_source_signal,
+        enough_exploration=True)["agent_mechanism_linked_to_observed_estimand"]
     no_placebo = deepcopy(opportunity)
     no_placebo["controlled_reference_tests"][0]["statistics"][
         "negative_control_tested"] = False

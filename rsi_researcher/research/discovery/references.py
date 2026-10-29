@@ -121,6 +121,47 @@ def rival_prediction_audit(statistics: dict, h1: str, h2: str,
         "note": "Observational prediction agreement does not identify a causal Bias.",
     }
 
+
+def audit_reference_probe(choice: dict, probe: dict) -> dict:
+    """Bind an executed randomized-mode diagnostic to the chosen observable.
+
+    The target is the *response-gap interaction* between standard and random
+    insertion within a shared item pool, not the observational arm gap. Even a
+    decisive prediction does NOT identify an optimal allocation policy.
+    """
+    expected = {
+        "source_table": choice["contrast_source"],
+        "group_expression": choice["contrast_group"],
+        "outcome_expression": choice["contrast_outcome"],
+        "control_value": choice["control_value"],
+        "treatment_value": choice["treatment_value"],
+        "population_filter": choice.get("contrast_filter", "") or "TRUE",
+    }
+    differences = {key: (value, probe.get(key)) for key, value in expected.items()
+                   if str(value).strip() != str(probe.get(key, "")).strip()}
+    ci = probe.get("policy_response_interaction_ci95_user_bootstrap", [])
+    measured = {
+        "estimate": probe.get("standard_minus_random_response_contrast"),
+        "ci95_bootstrap": ci,
+    }
+    predictions = rival_prediction_audit(
+        measured, choice["mechanism_direction"], choice["rival_direction"],
+        choice.get("meaningful_margin", 0.01))
+    return {
+        "estimand": "standard_minus_random_item_group_response_interaction",
+        "scope": "observed_standard_vs_random_insertion_modes",
+        "matches_selected_observable": not differences,
+        "differences": differences,
+        "prediction_audit": predictions if not differences else {
+            **predictions, "supports": "inconclusive", "distinguishes_predictions": False},
+        "reference_identifies_production_bias": False,
+        "status": ("measured_restricted_reference_only" if not differences
+                   else "estimand_mismatch"),
+        "reason": ("Mode-conditioned response comparison does not randomize the "
+                   "production recommender or user preferences."),
+    }
+
+
 def scoped_model_freeze_gate(concept: dict, opportunity: dict, *,
                              enough_exploration: bool) -> dict:
     """Freeze a falsifiable *owned-model* hypothesis, never a platform Bias.
@@ -149,10 +190,18 @@ def scoped_model_freeze_gate(concept: dict, opportunity: dict, *,
             and not identification.get("platform_policy_identified")
             and not identification.get("confirmation_users_consulted")))
     critique = concept.get("critique") or {}
+    bridged = any(t.get("observational_anchor", {}).get("source_observed")
+                  and t.get("observational_anchor", {}).get("same_selected_estimand")
+                  and t.get("observational_anchor", {}).get("mechanism_link_declared")
+                  and t.get("observational_anchor", {}).get("observed_h1_supported")
+                  and not t.get("observational_anchor", {}).get(
+                      "cross_environment_causal_transfer_identified")
+                  for t in tests)
     return {
         "reference_is_owned_model": bias.get("reference_spec", {}).get("kind") == "controlled_model",
         "current_concept_version_tested": bool(tests),
         "executed_h1_rival_discrimination": any(valid),
+        "agent_mechanism_linked_to_observed_estimand": bridged,
         "exploration_completed": enough_exploration,
         "critic_ready_for_scoped_mechanism": critique.get("decision") == "ready",
         "critic_observable_valid": bool(critique.get("observable_valid")),
