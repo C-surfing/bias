@@ -728,8 +728,17 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     _save(dest / "phenomena.json", phenomena)
     native_dimensions = supported_native_levels(data_profile)
     import hashlib
+    from rsi_researcher.research.discovery.active_experiments import (
+        CANDIDATE_SCHEMA, available_capabilities, assess_candidates,
+        choose_feasible, execute_observation,
+    )
+    active_experiment_planning = bool(
+        open_phenomena and discovery_options.get(
+            "active_experiment_planning", True))
     _save(dest / "discovery_protocol.json", {
         "observation_protocol": "schema_derived_open_phenomena_v1",
+        "active_experiment_planning": active_experiment_planning,
+        "experiment_capabilities": available_capabilities(adapter),
         "open_phenomena": open_phenomena,
         "predefined_observation_cards": False,
         "dataset_capabilities": adapter.describe(),
@@ -748,7 +757,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     # Live science mode has no model-request, token or wall-clock research quota.
     # Each HTTP call still has its ordinary timeout and retry policy. Bounded
     # quotas remain for controlled comparisons when --max-rounds is explicit.
-    limits = (RunLimits(model_dir, max_requests=5 * max_rounds + 4,
+    limits = (RunLimits(model_dir, max_requests=(
+                            (6 if active_experiment_planning else 5)
+                            * max_rounds + 4),
                         max_tokens=250000, max_seconds=2400)
               if max_rounds is not None else None)
     model = create_model(model_dir,
@@ -953,6 +964,98 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 history.append({"round": step, "action": stage_action,
                                 "concept_formation": stage_ids})
                 _save(dest / "concept_formation.json", formed)
+                # Unlike the binary group Workbench contract, this Designer
+                # may propose a time-ordered or cross-unit SQL observation for
+                # a mechanism that the six-parameter model cannot express.
+                # Screening uses declared prediction disagreement and SQL
+                # feasibility only; exploratory rows never confirm causal Bias.
+                if stage_ids and active_experiment_planning:
+                    planner = ResearchAgent(model)
+                    planner.role = "research-designer"
+                    planner.instruction = (
+                        "Design TWO or THREE distinct experiments for these "
+                        "agent-generated scientific mechanisms. Choose whichever "
+                        "fields, cross-user time-ordering, conditioning and "
+                        "statistical unit are scientifically relevant; do not "
+                        "force every phenomenon into a pre-existing binary "
+                        "group or our six-parameter recommender. Each candidate "
+                        "MUST state opposing H1/H2 predictions about the SAME "
+                        "observable target quantity and explicitly identify "
+                        "the experiment capability it requires. "
+                        "For sql_observation, provide ONE valid, bounded SELECT "
+                        "or WITH statement over development tables, returning "
+                        "actual aggregates with counts and study units. "
+                        "For time-dependent or cross-user ideas, distinguish "
+                        "other users from the target user and order predictors "
+                        "strictly before measured outcomes. Never use a "
+                        "current/future outcome as its own predictor. "
+                        "Observational SQL is descriptive only, not an "
+                        "identified platform intervention. If a mechanism "
+                        "requires policy comparison or sequential intervention, "
+                        "declare that needed capability rather than inventing "
+                        "a controlled parameter or asserting causality. "
+                        "Avoid repeated SQL and p-value fishing. "
+                        + BIAS_RESEARCH_CONTRACT)
+                    proposals = planner.act({
+                        "new_concepts": [
+                            _concept_summary(c) for c in concepts
+                            if c["id"] in stage_ids],
+                        "development_schema": tools.schema(),
+                        "registered_features": tools.feature_cards(),
+                        "observed_data_evidence": evidence_for_agent(
+                            evidence_cards, tools.history),
+                        "available_experiment_capabilities":
+                            available_capabilities(adapter),
+                        "candidate_count": "2 or 3, including unsupported "
+                                           "experiments when scientifically needed",
+                        "evaluation_rule": "Preflight executability BEFORE "
+                                           "execution. H1/H2 prediction difference "
+                                           "does not by itself identify a mechanism.",
+                    }, "active-experiment-design-" + str(step), CANDIDATE_SCHEMA)
+                    checked = assess_candidates(
+                        tools,
+                        [c for c in concepts if c["id"] in stage_ids],
+                        proposals["candidates"])
+                    chosen = choose_feasible(checked)
+                    active_entry = {
+                        "round": step,
+                        "action": {
+                            "action": "active_experiment_selection",
+                            "reason": "Agent-proposed capability-aware designs",
+                            "concept_id": (
+                                chosen["candidate"]["concept_id"]
+                                if chosen else ""),
+                            "concept": "", "query": ""},
+                        "candidate_experiment_audit": checked,
+                        "selection_rule": (
+                            "maximize declared H1/H2 directional disagreement "
+                            "among feasible non-duplicate SQL; no outcomes used"),
+                        "selected_candidate": (
+                            chosen["candidate"] if chosen else None),
+                    }
+                    for item in checked:
+                        cid = item["candidate"]["concept_id"]
+                        if cid in opportunity_pool.records:
+                            opportunity_pool.records[cid].setdefault(
+                                "experiment_capability_audit", []).append({
+                                    "question": item["candidate"]["question"],
+                                    "required_capability": item["candidate"][
+                                        "required_capability"],
+                                    "status": item["status"],
+                                    "reason": item["reason"]})
+                    if chosen:
+                        try:
+                            observation = execute_observation(tools, chosen)
+                            active_entry["active_experiment"] = observation
+                            opportunity_pool.observation(
+                                observation["concept_id"],
+                                observation["executed_evidence"]["sql"],
+                                observation["executed_evidence"]["rows"])
+                        except Exception as exc:
+                            active_entry["tool_error"] = str(exc)[:350]
+                    history.append(active_entry)
+                    _save(dest / ("active_experiments_" + str(step) +
+                                   ".json"), active_entry)
                 # The autonomous choice runs INSIDE the same research cycle and
                 # shares the same logged Qwen/tool calls. Fixtures without an
                 # actual configured LLM still exercise the normal action route.
