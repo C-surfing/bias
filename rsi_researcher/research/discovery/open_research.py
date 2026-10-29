@@ -1966,7 +1966,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                     "outcome_expression", "control_value",
                                     "treatment_value", "analysis")
                             changed = [k for k in keys if
-                                       specification[k] != choice_contract[k]]
+                                       specification[k] !=
+                                       choice_contract["estimand_spec"][k]]
                             if changed:
                                 raise ValueError("Experiment silently changed the selected "
                                                  "rival-discriminating comparison: " +
