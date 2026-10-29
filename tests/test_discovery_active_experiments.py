@@ -191,7 +191,9 @@ def test_full_agent_route_active_probe_then_primary_and_countertest(tmp_path, mo
 
     class ScriptedModel:
         def ask(self, prompt, schema, context):
-            stage = context["stage"]
+            # ResearchAgent puts the role in context, the specific call
+            # episode in model.scope; use the latter to distinguish Designer tasks.
+            stage = self.scope["episode"]
             stages.append(stage)
             if stage.startswith("phenomenon-extraction-"):
                 return {"phenomena": [
