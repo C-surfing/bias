@@ -503,3 +503,21 @@ def test_confirmation_rejects_different_trial_even_if_h1_was_supported():
         "controlled_reference_tests"].append(new)
     with pytest.raises(ValueError, match="required development evidence"):
         confirm_frozen_controlled("sealed.zip", tampered)
+
+
+def test_numeric_counterevidence_vetoes_premature_critic_ready():
+    from rsi_researcher.research.discovery.references import (
+        constrain_controlled_critique)
+    ready = {"decision": "ready", "reason": "looks plausible",
+             "observable_valid": True, "rival_discriminated": True}
+    source = {"observed_h1_supported": True}
+    assert constrain_controlled_critique(ready, {"supports": "H1"}, source) is ready
+    contrary = constrain_controlled_critique(ready, {"supports": "H2"}, source)
+    assert contrary["decision"] == "revise"
+    assert contrary["numeric_ready_veto"]
+    uncertain = constrain_controlled_critique(
+        ready, {"supports": "inconclusive"}, source)
+    assert uncertain["decision"] == "test"
+    absent = constrain_controlled_critique(
+        ready, {"supports": "H1"}, {"observed_h1_supported": False})
+    assert absent["decision"] == "test"
