@@ -168,6 +168,31 @@ def audit_reference_probe(choice: dict, probe: dict) -> dict:
     }
 
 
+def constrain_controlled_critique(critique: dict, model_audit: dict,
+                                  source_anchor: dict) -> dict:
+    """A language-only 'ready' must not overrule executed rival predictions.
+
+    A numerical contradiction can still distinguish rivals scientifically,
+    but it does not justify freezing H1. Preserve the Critic's other fields;
+    the deterministic override applies only to a premature ready verdict.
+    """
+    model_support = model_audit.get("supports")
+    source_supported = source_anchor.get("observed_h1_supported") is True
+    if critique.get("decision") != "ready" or (
+            model_support == "H1" and source_supported):
+        return critique
+    decision = "revise" if model_support == "H2" else "test"
+    return {
+        **critique,
+        "decision": decision,
+        "reason": (critique.get("reason", "") +
+                   " [NUMERICAL VETO: model supports " +
+                   str(model_support) + "; observed source supports H1=" +
+                   str(source_supported) + ". Freeze cannot proceed.]"),
+        "numeric_ready_veto": True,
+    }
+
+
 def eligible_scoped_model_trials(concept: dict, opportunity: dict) -> list[dict]:
     """One trial must satisfy BOTH the controlled result and the source bridge.
 
