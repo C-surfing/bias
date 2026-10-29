@@ -210,12 +210,31 @@ class DevelopmentTools:
                             "PRAGMA table_info('" + table + "')").fetchall()]
                 for table in tables}
 
-    def sql(self, query: str):
-        clean = query.strip().rstrip(";")
+    def _validated_sql(self, query: str) -> str:
+        clean = query.strip().rstrip(";").strip()
         if (not clean or ";" in clean or len(clean) > 4000
                 or not re.match(r"^(select|with)\b", clean, re.I)
                 or FORBIDDEN.search(clean)):
             raise ValueError("Only one bounded SELECT/WITH on development data is supported")
+        return clean
+
+    def preflight_sql(self, query: str) -> dict:
+        """Compile proposed SQL WITHOUT reading outcomes or mutating history.
+
+        This is a syntax/schema and read-only gateway check, not a test of
+        sufficient users, overlap, temporal identification or causal validity.
+        """
+        clean = self._validated_sql(query)
+        if any(item["sql"] == clean for item in self.history):
+            raise ValueError("Already measured on development data")
+        executed = self.rewrite_sources(clean)
+        self.connection.execute(
+            "EXPLAIN SELECT * FROM (" + executed +
+            ") AS research_result LIMIT 30").fetchall()
+        return {"executable": True, "scope": "development_descriptive_only"}
+
+    def sql(self, query: str):
+        clean = self._validated_sql(query)
         if any(item["sql"] == clean for item in self.history):
             raise ValueError("This exact development query already ran; change the measurement or research direction")
         executed = self.rewrite_sources(clean)
