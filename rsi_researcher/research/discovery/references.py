@@ -186,7 +186,7 @@ def scoped_trial_evidence_audit(trial: dict, opportunity: dict) -> dict:
                 for x in [*model_numbers, *model_ci])
         and model_ci[0] <= model_ci[1]
         and isinstance(model_n, int) and model_n >= 12
-        and isclose(model_numbers[1] - model_numbers[0],
+        and isclose(model_numbers[2] - model_numbers[1],
                     model_numbers[0], abs_tol=1e-9))
     try:
         prediction = rival_prediction_audit(
