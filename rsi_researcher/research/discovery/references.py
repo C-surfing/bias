@@ -147,15 +147,21 @@ def audit_reference_probe(choice: dict, probe: dict) -> dict:
     predictions = rival_prediction_audit(
         measured, choice["mechanism_direction"], choice["rival_direction"],
         choice.get("meaningful_margin", 0.01))
+    pool_valid = (probe.get("matched_item_day_support") is True
+                  and probe.get("matched_item_day_strata", 0) > 0
+                  and probe.get("reference_pool_scope") ==
+                      "shared_item_pool_same_video_same_day_same_ui_scope")
+    aligned = not differences and pool_valid
     return {
         "estimand": "standard_minus_random_item_group_response_interaction",
         "scope": "observed_standard_vs_random_insertion_modes",
-        "matches_selected_observable": not differences,
+        "matches_selected_observable": aligned,
+        "matched_item_day_reference_valid": pool_valid,
         "differences": differences,
-        "prediction_audit": predictions if not differences else {
+        "prediction_audit": predictions if aligned else {
             **predictions, "supports": "inconclusive", "distinguishes_predictions": False},
         "reference_identifies_production_bias": False,
-        "status": ("measured_restricted_reference_only" if not differences
+        "status": ("measured_restricted_reference_only" if aligned
                    else "estimand_mismatch"),
         "reason": ("Mode-conditioned response comparison does not randomize the "
                    "production recommender or user preferences."),
