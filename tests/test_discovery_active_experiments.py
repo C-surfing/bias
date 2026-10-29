@@ -252,6 +252,14 @@ def test_full_agent_route_active_probe_then_primary_and_countertest(tmp_path, mo
                     "falsifier": base["falsifier"],
                     "measurement": base["measurement"], "next_sql": "",
                 }
+            if stage.startswith("open-"):
+                return {
+                    "action": "stop", "reason": "Fixture completed its rival test",
+                    "query": "", "feature_name": "", "expression": "",
+                    "source_table": "events", "concept_id": "",
+                    "concept": "", "mechanism": "", "rival": "",
+                    "falsifier": "", "measurement": "",
+                }
             raise AssertionError("unexpected model call: " + stage)
 
     monkeypatch.setattr(research, "create_model",
@@ -262,7 +270,7 @@ def test_full_agent_route_active_probe_then_primary_and_countertest(tmp_path, mo
         {"llm": {"provider": "vllm"},
          "discovery": {"open_phenomena": True,
                        "active_experiment_planning": True}},
-        max_rounds=1, development_path=path)
+        max_rounds=3, min_queries=0, development_path=path)
     journal = json.loads((output / "journal.json").read_text())
     active = [item for item in journal if "active_experiment" in item]
     assert active, "A chosen unsupported-parameter-free SQL should execute"
