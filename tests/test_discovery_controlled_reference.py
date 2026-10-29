@@ -366,6 +366,56 @@ def test_scoped_model_gate_requires_h1_not_just_an_executed_intervention():
         concept, no_placebo, enough_exploration=True)["executed_h1_rival_discrimination"]
 
 
+def test_scoped_freeze_never_combines_two_incomplete_trials():
+    from copy import deepcopy
+    from rsi_researcher.research.discovery.references import (
+        scoped_model_freeze_gate, eligible_scoped_model_trials)
+    frozen = _scoped_frozen_record()
+    concept = frozen["concepts"][0]
+    opportunity = frozen["research_opportunities"]["opportunities"][0]
+    first = opportunity["controlled_reference_tests"][0]
+    second = deepcopy(first)
+    first["observational_anchor"]["observed_h1_supported"] = False
+    second["statistics"]["negative_control_tested"] = False
+    opportunity["controlled_reference_tests"].append(second)
+    # The original gate independently checked any(valid model result)
+    # and any(valid source anchor), accidentally joining unrelated trials.
+    audit = scoped_model_freeze_gate(
+        concept, opportunity, enough_exploration=True)
+    assert not audit["same_trial_has_complete_evidence"]
+    assert not eligible_scoped_model_trials(concept, opportunity)
+
+
+def test_confirmation_replays_last_fully_qualified_trial_not_last_h1(monkeypatch):
+    from copy import deepcopy
+    from rsi_researcher.research.discovery import controlled_reference as controlled
+    frozen = _scoped_frozen_record()
+    complete = frozen["research_opportunities"]["opportunities"][0][
+        "controlled_reference_tests"][0]
+    incomplete = deepcopy(complete)
+    incomplete["specification"] = spec("history_window", 15, 70)
+    incomplete["statistics"]["negative_control_tested"] = False
+    frozen["research_opportunities"]["opportunities"][0][
+        "controlled_reference_tests"].append(incomplete)
+    seen = []
+    def eval_confirmation(_, design, *, phase):
+        seen.append((design, phase))
+        return {
+            "result": {"ci95_bootstrap": [0.02, 0.09],
+                       "negative_control_tested": True,
+                       "negative_control_passed": True},
+            "estimand": {"phase": phase},
+            "identification": {"confirmation_users_consulted": True},
+            "evidence_scope": "constructed_recommender_confirmation_only",
+        }
+    monkeypatch.setattr(controlled, "evaluate_controlled", eval_confirmation)
+    # Numeric audit uses CI; the independent run cannot choose a spec after
+    # examining the confirmation outcomes.
+    result = controlled.confirm_frozen_controlled("private.zip", frozen)
+    assert seen == [(spec(), "confirmation")]
+    assert result["frozen_specification"] == spec()
+
+
 def test_confirm_frozen_model_is_phase_separated_and_uses_frozen_plan(monkeypatch):
     from copy import deepcopy
     from rsi_researcher.research.discovery import controlled_reference as controlled
