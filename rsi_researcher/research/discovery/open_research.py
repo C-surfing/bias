@@ -431,6 +431,21 @@ def compact_step(entry: dict):
             "prediction_audit": entry.get("numeric_prediction_audit"),
             "critic": entry.get("critique"),
         }
+    if "active_experiment" in entry:
+        trial = entry["active_experiment"]
+        result["active_experiment"] = {
+            "scientific_status": trial["scientific_status"],
+            "concept_id": trial["concept_id"],
+            "target_quantity": trial["target_quantity"],
+            "h1_prediction": trial["h1_prediction"],
+            "h2_prediction": trial["h2_prediction"],
+            "observation": compact_query(trial["executed_evidence"])}
+    if "candidate_experiment_audit" in entry:
+        result["candidate_experiment_audit"] = [{
+            "concept_id": x["candidate"]["concept_id"],
+            "capability": x["candidate"]["required_capability"],
+            "status": x["status"], "reason": x["reason"]}
+            for x in entry["candidate_experiment_audit"]]
     if "experiment" in entry:
         record = entry["experiment"]
         result["experiment"] = {
@@ -567,6 +582,10 @@ def compact_opportunity_pool(pool) -> dict:
             if k in ("source_table", "group_expression", "outcome_expression",
                      "control_value", "treatment_value", "analysis",
                      "prediction_if_mechanism", "prediction_if_rival")},
+        "latest_experiment_capabilities": [
+            {"required_capability": e["required_capability"],
+             "status": e["status"], "reason": e["reason"][:150]}
+            for e in item.get("experiment_capability_audit", [])[-3:]],
         "latest_observation": [{
             "sql": e.get("sql", "")[:130],
             "rows": e.get("rows", [])[:2]}
