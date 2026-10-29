@@ -964,6 +964,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         BIAS_RESEARCH_CONTRACT
                         + " Prefer the next observation that resolves the "
                         "reference identification gap or separates H1/H2. "
+                        "For randomized_exposure, the H1/H2 DIRECTION predicts "
+                        "(standard treatment-minus-control item response) MINUS "
+                        "(random-insertion treatment-minus-control item response) "
+                        "on matching calendar days, NOT the raw group CTR gap. "
+                        "That interaction remains a diagnostic, not a randomized "
+                        "whole-platform policy intervention. "
                         "Never mistake a statistical treatment/control group "
                         "for an actual intervention on the recommender."
                     )
@@ -1405,7 +1411,11 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "parameter_bounds": PARAMETER_BOUNDS,
                         "available_outcomes": ["ndcg@10", "recall@10"],
                         "instruction": "Choose the most rival-discriminating "
-                                       "model intervention, not a presumed bias fix.",
+                                       "model intervention, not a presumed bias fix. "
+                                       "Explain how the measured observed_group_feature "
+                                       "motivates THIS parameter, and why this is a "
+                                       "testable analog of the candidate mechanism, "
+                                       "not an identified production-policy effect.",
                     }, "controlled-design-" + str(step), bound_schema)
                     if (specification.get("observed_group_feature") !=
                             declared.group_expression or
