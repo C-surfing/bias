@@ -216,16 +216,18 @@ def confirm_frozen_controlled(zip_path: str, frozen: dict) -> dict:
     if concept is None or opportunity is None:
         raise ValueError("Frozen concept and reference provenance must be present")
     from rsi_researcher.research.discovery.references import (
-        scoped_model_freeze_gate, rival_prediction_audit)
-    # Recheck the evidence gate from saved development artifacts, instead of
-    # trusting a mutable status string or an agent's narrative.
+        latest_scoped_trial_index, rival_prediction_audit, scoped_model_freeze_gate)
     gate = scoped_model_freeze_gate(concept, opportunity, enough_exploration=True)
     if not all(gate.values()):
         raise ValueError("Frozen model mechanism lacks required development evidence")
-    trials = [t for t in opportunity.get("controlled_reference_tests", [])
-              if t.get("tested_concept_version") == concept.get("version")
-              and t.get("prediction_audit", {}).get("supports") == "H1"]
-    specification = trials[-1]["specification"]
+    frozen_index = frozen.get("frozen_trial_index")
+    eligible_index = latest_scoped_trial_index(concept, opportunity)
+    if (not isinstance(frozen_index, int) or isinstance(frozen_index, bool)
+            or frozen_index != eligible_index
+            or concept.get("frozen_trial_index") != frozen_index):
+        raise ValueError("Frozen trial identity is missing or differs from the development gate")
+    trial = opportunity["controlled_reference_tests"][frozen_index]
+    specification = trial["specification"]
     validate_controlled_spec(specification)
     confirmation = evaluate_controlled(zip_path, specification, phase="confirmation")
     audit = rival_prediction_audit(
@@ -233,17 +235,19 @@ def confirm_frozen_controlled(zip_path: str, frozen: dict) -> dict:
         specification["prediction_if_mechanism"],
         specification["prediction_if_rival"],
         specification["meaningful_margin"])
-    ci = confirmation["result"]["ci95_bootstrap"]
-    supported = bool(audit["distinguishes_predictions"]
-                     and audit["supports"] == "H1"
-                     and (ci[0] > 0 or ci[1] < 0)
-                     and confirmation["result"]["negative_control_tested"]
-                     and confirmation["result"]["negative_control_passed"] is True)
+    supported = bool(
+        audit["distinguishes_predictions"] and audit["supports"] == "H1"
+        and audit["observed_direction"] in ("increase", "decrease")
+        and confirmation["result"]["negative_control_tested"]
+        and confirmation["result"]["negative_control_passed"] is True
+        and confirmation["identification"]["confirmation_users_consulted"]
+        and not confirmation["identification"]["platform_policy_identified"])
     return {
         "status": ("confirmed_scoped_model_mechanism" if supported
                    else "scoped_model_mechanism_not_confirmed"),
         "frozen_id": identifier,
         "tested_concept_version": concept["version"],
+        "frozen_trial_index": frozen_index,
         "frozen_specification": specification,
         "confirmation_measurement": {
             "estimand": confirmation["estimand"],
