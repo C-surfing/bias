@@ -113,7 +113,7 @@ def test_qwen_style_intent_executes_through_scientist_designer_critic(tmp_path, 
          "discovery":{"open_phenomena":False}},max_rounds=5,development_path=db)
     journal=json.loads((output/"journal.json").read_text())
     experiments=[x for x in journal if "experiment" in x]
-    assert len(experiments)==1
+    assert len(experiments)==1, json.dumps(journal, indent=2, default=str)[-6000:]
     assert experiments[0]["experiment"]["result"]["n_paired_units"]==20
     assert experiments[0]["experiment"]["identifies_causal_bias"] is False
     assert {"concept-formation","research-opportunity-selector",
