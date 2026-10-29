@@ -457,13 +457,13 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
     # can masquerade as a systematic recommender distortion.
     if "shared_item_pool_events" not in tools.reference_views:
         raise ValueError("Randomized reference requires an enabled matched item pool")
-    matched = (
+    matched_strata_sql = (
         "SELECT vid, event_day FROM shared_item_pool_events "
         "WHERE is_random IN (0,1) GROUP BY vid,event_day "
         "HAVING COUNT(*) FILTER (WHERE is_random=0)>0 "
         "AND COUNT(*) FILTER (WHERE is_random=1)>0")
     matched_n = tools.connection.execute(
-        "SELECT COUNT(*) FROM (" + matched + ")").fetchone()[0]
+        "SELECT COUNT(*) FROM (" + matched_strata_sql + ")").fetchone()[0]
     if matched_n < 1:
         raise ValueError("No shared item/day strata with both exposure modes")
     # The matched view exposes all development event columns, allowing
@@ -480,7 +480,7 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
         "CAST((" + group + ") AS VARCHAR) arm,"
         "COUNT(*) n, SUM(CAST((" + outcome + ") AS DOUBLE)) sy "
         "FROM " + source + " AS matched_events "
-        "WHERE (vid,event_day) IN (" + matched + ") "
+        "WHERE (vid,event_day) IN (" + matched_strata_sql + ") "
         "AND (" + where + ") AND (" + outcome + ") IS NOT NULL "
         "AND CAST((" + group + ") AS VARCHAR) IN ('" + _safe_literal(arms[0]) + "','"
         + _safe_literal(arms[1]) + "') "
@@ -567,7 +567,7 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
         "user_matched_interaction_supported": len(matched) >= 10,
         "reference": "randomly inserted item response; not randomized full recommender",
         "same_calendar_days": [row[0] for row in tools.connection.execute(
-            "SELECT DISTINCT event_day FROM (" + matched + ") ORDER BY event_day"
+            "SELECT DISTINCT event_day FROM (" + matched_strata_sql + ") ORDER BY event_day"
         ).fetchall()],
         "source_table": "events",
         "group_expression": group,
