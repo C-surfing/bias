@@ -18,6 +18,12 @@ class DatasetAdapter:
     outcome_columns = ("click", "hate", "long_view", "next_click",
                        "next_tags", "watch_ratio", "relevance")
     item_features = ("vid", "tags", "author")
+    # Source, inclusive event lags. Unknown fields intentionally have no
+    # asserted lineage; adapters should register only verified constructors.
+    feature_lineage = {
+        "click": ("click", 0, 0), "hate": ("hate", 0, 0),
+        "long_view": ("long_view", 0, 0),
+    }
     capabilities = {
         "observed_responses": True, "randomized_exposure_probe": False,
         "dense_relevance": False, "logging_propensities": False,
@@ -56,6 +62,7 @@ class DatasetAdapter:
     def describe(self) -> dict:
         return {"dataset_id": self.dataset_id,
                 "capabilities": dict(self.capabilities),
+                "feature_lineage": dict(self.feature_lineage),
                 "outcome_columns": list(self.outcome_columns),
                 "item_features": list(self.item_features),
                 "guidance": self.guidance}
@@ -63,6 +70,13 @@ class DatasetAdapter:
 
 class KuaiRandAdapter(DatasetAdapter):
     dataset_id = "kuairand27k"
+    feature_lineage = {
+        **DatasetAdapter.feature_lineage,
+        "previous_click": ("click", 1, 1),
+        "recent_click": ("click", 1, 8),
+        "previous_hate": ("hate", 1, 1),
+        "previous_long_view": ("long_view", 1, 1),
+    }
     capabilities = {
         **DatasetAdapter.capabilities,
         "randomized_exposure_probe": True,
