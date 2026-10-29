@@ -1357,8 +1357,16 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         observed["specification"])
                     if not observed_alignment["same_estimand"]:
                         raise ValueError("Observed experiment differs from the selected estimand")
+                    observed_prediction = rival_prediction_audit(
+                        observed["result"],
+                        selected_contract["prediction_if_mechanism"],
+                        selected_contract["prediction_if_rival"], 0.01)
                     source_anchor = {
                         "source_observed": True,
+                        "observed_prediction_audit": observed_prediction,
+                        "observed_h1_supported": bool(
+                            observed_prediction["supports"] == "H1"
+                            and selected_contract["prediction_if_mechanism"] != "no_change"),
                         "same_selected_estimand": True,
                         "observed_estimand": declared.as_record(),
                         "observed_statistics": observed["result"],
@@ -2073,6 +2081,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "observed_statistics": model_statistics(measured_experiment["result"]),
                         "randomized_reference_diagnostic": entry.get(
                             "randomized_reference_diagnostic"),
+                        "randomized_reference_prediction_audit": entry.get(
+                            "randomized_reference_prediction_audit"),
+                        "observational_prediction_audit": entry.get(
+                            "observational_prediction_audit"),
                         "negative_control": (model_statistics(
                             measured_experiment["negative_control"]["result"])
                             if measured_experiment["negative_control"] else None),
