@@ -8,6 +8,9 @@ all other capabilities are left for their dedicated, identified executors.
 from __future__ import annotations
 
 from rsi_researcher.research.discovery.research_handoff import previously_measured
+from rsi_researcher.research.discovery.variable_lineage import (
+    audit_construct_overlap, audit_observation_sql,
+)
 
 DIRECTIONS = {"increase": 1, "no_change": 0, "decrease": -1}
 CAPABILITY_SCHEMA = (
@@ -38,6 +41,16 @@ CANDIDATE_SCHEMA = {
                     "sql": {"type": "string"},
                     "reference_assumption": {"type": "string"},
                     "mechanism_link": {"type": "string"},
+                    # Optional in old fixtures; new Qwen designs should name
+                    # their actual recommendation decision and reference.
+                    "decision_target": {"type": "string", "enum": [
+                        "exposure_allocation", "ranking", "candidate_generation",
+                        "model_state", "utility", "behavior_only", "unknown"]},
+                    "reference_kind": {"type": "string", "enum": [
+                        "none", "random_insertions", "dense_relevance",
+                        "owned_model", "other"]},
+                    "predictor_column": {"type": "string"},
+                    "outcome_column": {"type": "string"},
                 },
                 "required": [
                     "concept_id", "question", "required_capability",
@@ -94,7 +107,8 @@ def assess_candidates(tools, concepts: list[dict],
     for candidate in candidates:
         kind = candidate["required_capability"]
         record = {"candidate": candidate, "score": 0, "status": "",
-                  "reason": "", "evidence_scope": None}
+                  "reason": "", "evidence_scope": None,
+                  "scientific_scope": "exploratory_unidentified"}
         if candidate["concept_id"] not in active:
             record.update(status="invalid_concept", reason="Unknown or inactive concept")
         elif (candidate["direction_h1"] == candidate["direction_h2"] or
@@ -121,16 +135,41 @@ def assess_candidates(tools, concepts: list[dict],
             record.update(status="duplicate_candidate", reason="Same proposed SQL")
         else:
             seen.add(candidate["sql"].strip())
-            try:
-                tools.preflight_sql(candidate["sql"])
-            except Exception as exc:
-                record.update(status="invalid_sql", reason=str(exc)[:240])
-            else:
+            overlap = (audit_construct_overlap(
+                tools, candidate["predictor_column"], candidate["outcome_column"])
+                if candidate.get("predictor_column") and candidate.get("outcome_column")
+                else audit_observation_sql(tools, candidate["sql"]))
+            if overlap and overlap["status"] == "overlapping_constructs":
                 record.update(
-                    status="feasible_descriptive_observation",
-                    evidence_scope=capabilities[kind]["scope"],
-                    score=abs(DIRECTIONS[candidate["direction_h1"]] -
-                              DIRECTIONS[candidate["direction_h2"]]))
+                    status="overlapping_constructs",
+                    reason="Predictor and outcome reuse the same measured history "
+                           "events; redesign outcome or separate temporal windows",
+                    lineage_audit=overlap)
+            else:
+                try:
+                    tools.preflight_sql(candidate["sql"])
+                except Exception as exc:
+                    record.update(status="invalid_sql", reason=str(exc)[:240])
+                else:
+                    disagreement = abs(
+                        DIRECTIONS[candidate["direction_h1"]] -
+                        DIRECTIONS[candidate["direction_h2"]])
+                    decision = candidate.get("decision_target", "unknown")
+                    reference = candidate.get("reference_kind", "none")
+                    is_decision = decision not in ("unknown", "behavior_only")
+                    has_reference = reference != "none"
+                    # This ranks *proposals*, never upgrades their evidence
+                    # scope or labels a reference as normative.
+                    priority = 2 * int(is_decision) + int(has_reference)
+                    record.update(
+                        status="feasible_descriptive_observation",
+                        evidence_scope=capabilities[kind]["scope"],
+                        decision_reference_priority=priority,
+                        score=disagreement,
+                        scientific_scope=(
+                            "decision_with_proposed_reference_unverified"
+                            if is_decision and has_reference else
+                            "exploratory_unidentified"))
         checked.append(record)
     return checked
 
@@ -140,7 +179,32 @@ def choose_feasible(checked: list[dict]) -> dict | None:
     ranked = [(index, result) for index, result in enumerate(checked)
               if result["status"] == "feasible_descriptive_observation"]
     return (max(ranked, key=lambda indexed: (
+        indexed[1].get("decision_reference_priority", 0),
         indexed[1]["score"], -indexed[0]))[1] if ranked else None)
+
+
+def design_and_select(planner, context: dict, tools, concepts: list[dict], tag: str):
+    """At most one pre-outcome repair; unsupported causal capabilities are final."""
+    initial = planner.act(context, tag, CANDIDATE_SCHEMA)
+    first = assess_candidates(tools, concepts, initial["candidates"])
+    attempts = [first]
+    chosen = choose_feasible(first)
+    if chosen is None and any(
+            x["status"] in ("invalid_sql", "not_discriminating",
+                             "overlapping_constructs") for x in first):
+        repaired = planner.act({
+            **context, "rejected_design_audit": first,
+            "revision_requirement": (
+                "Fix invalid SQL or overlapping history constructs using a "
+                "different outcome/time window. Keep H1/H2 tied to the same "
+                "measurable decision, and do not merely flip a direction label. "
+                "A behavior correlation does not measure ranking decisions. "
+                "Unsupported interventions remain unsupported."),
+        }, tag + "-repair", CANDIDATE_SCHEMA)
+        checked = assess_candidates(tools, concepts, repaired["candidates"])
+        attempts.append(checked)
+        chosen = choose_feasible(checked)
+    return chosen, attempts[-1], attempts
 
 
 def execute_observation(tools, picked: dict) -> dict:
@@ -162,6 +226,7 @@ def execute_observation(tools, picked: dict) -> dict:
         "h1_h2_discriminated": False,
         "reference_identified": False,
         "production_algorithm_causality_identified": False,
+        "design_scientific_scope": picked["scientific_scope"],
         "next_requirement": "Pre-register a supported inferential test or "
                             "controlled reference before adjudicating mechanism",
     }
