@@ -1587,7 +1587,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     entry["experiment"] = measurement
                     opportunity_pool.record_reference_measurement(
                         selected["id"], measurement["result"],
-                        scope="matched_item_pool_standard_minus_random_diagnostic")
+                        scope="matched_item_pool_standard_minus_random_diagnostic",
+                        executed_specification=measurement["specification"],
+                        target_identity={"item_field": field, "item_value": value})
                     selected["tests"].append({
                         "version": selected["version"],
                         "test_question": specification["question"],
