@@ -163,9 +163,9 @@ class ResearchOpportunityPool:
             # unidentified, but must not trap the scoped mechanism in SQL.
             trials = [t for t in item.get("controlled_reference_tests", [])
                       if t.get("tested_concept_version") == concept["version"]]
-            h1 = any(t.get("prediction_audit", {}).get("supports") == "H1"
-                     and t.get("prediction_audit", {}).get(
-                         "distinguishes_predictions") for t in trials)
+            from rsi_researcher.research.discovery.references import (
+                eligible_scoped_model_trials)
+            h1 = bool(eligible_scoped_model_trials(concept, item))
             if not trials:
                 mode, reason = ("test_controlled_mechanism",
                                 "Use the executable recommender to test this version")
