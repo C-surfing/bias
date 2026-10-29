@@ -212,9 +212,9 @@ def scoped_trial_evidence_audit(trial: dict, opportunity: dict) -> dict:
         len(source_ci) == 2
         and all(isinstance(x, (int, float)) and isfinite(x)
                 for x in [*source_numbers, *source_ci])
-        and source_ci[0] <= source_ci[1]
-        and isclose(source_numbers[1] - source_numbers[0],
-                    source_numbers[0], abs_tol=1e-9))
+        and source_ci[0] <= source_ci[1])
+    # Paired-user mean differences need not equal pooled-group mean differences.
+    # Workbench's per-user estimator and pooled means weight users differently.
     try:
         observed_prediction = rival_prediction_audit(
             source_stats, selection["prediction_if_mechanism"],
