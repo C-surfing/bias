@@ -377,8 +377,10 @@ def test_scoped_model_gate_requires_h1_not_just_an_executed_intervention():
     frozen = _scoped_frozen_record()
     concept = frozen["concepts"][0]
     opportunity = frozen["research_opportunities"]["opportunities"][0]
+    from rsi_researcher.research.discovery.references import scoped_trial_evidence_audit
     assert all(scoped_model_freeze_gate(
-        concept, opportunity, enough_exploration=True).values())
+        concept, opportunity, enough_exploration=True).values()), scoped_trial_evidence_audit(
+            opportunity["controlled_reference_tests"][0], opportunity)
     wrong_rival = deepcopy(opportunity)
     wrong_rival["controlled_reference_tests"][0]["prediction_audit"]["supports"] = "H2"
     assert not scoped_model_freeze_gate(
