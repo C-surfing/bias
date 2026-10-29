@@ -49,3 +49,33 @@ def primary_experiment_intent(contract: dict, concept: dict) -> dict:
         "falsifier": "H2: " + contract["prediction_if_rival"],
         "meaningful_margin": 0.01,
     }
+
+
+def audit_design_role(specification: dict, selection_contract: dict | None,
+                      *, primary: bool) -> dict:
+    """Preserve primary estimand; permit explicitly distinct inferential tests.
+
+    The secondary experiment belongs to the same hypothesis version but is
+    not a substitute for the registered main comparison and cannot silently
+    be used as evidence about the original estimand.
+    """
+    if not selection_contract:
+        return {"purpose": "exploratory", "parent_estimand": None}
+    from rsi_researcher.research.discovery.references import EstimandSpec
+    parent = selection_contract["estimand_spec"]
+    comparison = EstimandSpec(**parent).compare_executed(specification)
+    same = comparison["same_estimand"]
+    if primary and not same:
+        raise ValueError(
+            "Primary experiment changed preregistered estimand; use "
+            "the selected contract, not a new comparison")
+    if not primary and same:
+        raise ValueError(
+            "Repeated primary estimand is not a rival-discriminating "
+            "countertest; change the condition, outcome or study design")
+    return {
+        "purpose": "preregistered_primary" if primary else "distinct_countertest",
+        "parent_estimand": parent, "matches_original_contrast": same,
+        **comparison,
+        "countertest_not_primary_substitute": not primary,
+    }
