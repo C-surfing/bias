@@ -366,6 +366,26 @@ def test_scoped_model_gate_requires_h1_not_just_an_executed_intervention():
         concept, no_placebo, enough_exploration=True)["executed_h1_rival_discrimination"]
 
 
+def test_numeric_h2_or_inconclusive_vetoes_premature_ready():
+    from rsi_researcher.research.discovery.references import (
+        constrain_controlled_critique)
+    critic = {"decision": "ready", "reason": "plausible", "observable_valid": True,
+              "rival_discriminated": True}
+    anchored = {"observed_h1_supported": True}
+    assert constrain_controlled_critique(
+        critic, {"supports": "H1"}, anchored) is critic
+    h2 = constrain_controlled_critique(
+        critic, {"supports": "H2"}, anchored)
+    assert h2["decision"] == "revise"
+    assert h2["numeric_ready_veto"]
+    uncertain = constrain_controlled_critique(
+        critic, {"supports": "inconclusive"}, anchored)
+    assert uncertain["decision"] == "test"
+    missing_source = constrain_controlled_critique(
+        critic, {"supports": "H1"}, {"observed_h1_supported": False})
+    assert missing_source["decision"] == "test"
+
+
 def test_scoped_freeze_never_combines_two_incomplete_trials():
     from copy import deepcopy
     from rsi_researcher.research.discovery.references import (
