@@ -156,19 +156,41 @@ def assess_candidates(tools, concepts: list[dict],
                         DIRECTIONS[candidate["direction_h2"]])
                     decision = candidate.get("decision_target", "unknown")
                     reference = candidate.get("reference_kind", "none")
-                    is_decision = decision not in ("unknown", "behavior_only")
-                    has_reference = reference != "none"
-                    # This ranks *proposals*, never upgrades their evidence
-                    # scope or labels a reference as normative.
-                    priority = 2 * int(is_decision) + int(has_reference)
+                    # A model's claimed "ranking/allocation/reference" is
+                    # NOT itself evidence of what the SQL measures. Reward
+                    # only the restricted matched-pool exposure diagnostic
+                    # for which we can inspect actual source/aggregate fields.
+                    query = candidate["sql"].lower()
+                    eligible_reference = (
+                        reference == "random_insertions"
+                        and bool(tools.adapter.capabilities.get(
+                            "randomized_exposure_probe"))
+                        and "shared_item_pool_events" in getattr(
+                            tools, "reference_views", [])
+                        and "shared_item_pool_events" in query)
+                    observes_allocation = (
+                        decision == "exposure_allocation"
+                        and eligible_reference
+                        and "is_random" in query
+                        and any(field in query for field in
+                                getattr(tools.adapter, "item_features", ()))
+                        and "count(" in query)
+                    # This controls ordering only. Even the recognized
+                    # diagnostic is NOT a normative or causal Bias reference.
+                    priority = 3 if observes_allocation else 0
                     record.update(
                         status="feasible_descriptive_observation",
                         evidence_scope=capabilities[kind]["scope"],
                         decision_reference_priority=priority,
+                        decision_link_audit={
+                            "declared": decision,
+                            "measured_restricted_allocation": observes_allocation,
+                            "reference_scope_grounded": eligible_reference,
+                        },
                         score=disagreement,
                         scientific_scope=(
-                            "decision_with_proposed_reference_unverified"
-                            if is_decision and has_reference else
+                            "restricted_exposure_reference_diagnostic_only"
+                            if observes_allocation else
                             "exploratory_unidentified"))
         checked.append(record)
     return checked
