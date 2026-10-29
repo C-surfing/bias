@@ -1980,7 +1980,12 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     event_days = tools.connection.execute(
                         "SELECT MIN(event_day), MAX(event_day) FROM events").fetchone()
                     first_workbench = not any(
-                        "workbench" in test for test in selected["tests"])
+                        "workbench" in test and
+                        test.get("version") == selected["version"]
+                        for test in selected["tests"])
+                    entry["experiment_purpose"] = (
+                        "preregistered_primary" if first_workbench
+                        else "distinct_countertest")
                     feature_pairs = [(table, name) for table, items in tools.features.items()
                                      for name in items]
                     choice_contract = opportunity_pool.records.get(
@@ -2161,15 +2166,6 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                          "Choose a different condition, outcome or mechanism")
                     choice_contract = opportunity_pool.records.get(
                         selected["id"], {}).get("selection_contract")
-                    if choice_contract:
-                        from rsi_researcher.research.discovery.references import EstimandSpec
-                        aligned = EstimandSpec(
-                            **choice_contract["estimand_spec"]).compare_executed(
-                                experiment_spec)
-                        entry["selection_contract_audit"] = {
-                            "matches_original_contrast": aligned["same_estimand"],
-                            **aligned,
-                        }
                     import duckdb
                     entry["experiment_specification"] = experiment_spec
                     # A native-column experiment must not be forced to use an
@@ -2178,24 +2174,22 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         experiment_spec["group_expression"]
                         if experiment_spec["group_expression"] in tools.feature_records
                         else None)
+                    from rsi_researcher.research.discovery.research_handoff import (
+                        audit_design_role)
+                    from rsi_researcher.research.discovery.variable_lineage import (
+                        audit_construct_overlap)
                     def validate_selected_contrast(specification):
-                        if choice_contract:
-                            # A primary experiment must execute EXACTLY the
-                            # preregistered observable. Population-shifted
-                            # sensitivity analyses belong to a labeled
-                            # countertest, never the original H1/H2 audit.
-                            keys = ("source_table", "unit_expression",
-                                    "population_filter", "group_expression",
-                                    "outcome_expression", "control_value",
-                                    "treatment_value", "analysis")
-                            changed = [k for k in keys if
-                                       specification[k] !=
-                                       choice_contract["estimand_spec"][k]]
-                            if changed:
-                                raise ValueError("Experiment silently changed the selected "
-                                                 "rival-discriminating comparison: " +
-                                                 ", ".join(changed) +
-                                                 ". Use the prevalidated selection contract.")
+                        # Pre-outcome construct overlap can invalidate a
+                        # comparison even when SQL and user support are valid.
+                        lineage = audit_construct_overlap(
+                            tools, specification["group_expression"],
+                            specification["outcome_expression"])
+                        if lineage["status"] == "overlapping_constructs":
+                            raise ValueError("overlapping_constructs: "
+                                             + str(lineage["shared"]))
+                        return audit_design_role(
+                            specification, choice_contract,
+                            primary=first_workbench)
                     try:
                         validate_selected_contrast(experiment_spec)
                         measured_experiment = workbench.run(
@@ -2207,12 +2201,20 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "created_features": tools.features,
                             "registered_variable_cards": tools.feature_cards(),
                             "must_bind_feature": required_feature or "",
-                            "selected_contrast_must_match": choice_contract,
+                            "selected_contrast_must_match": (
+                                choice_contract if first_workbench else None),
+                            "countertest_parent_contrast": (
+                                choice_contract if not first_workbench else None),
                             "schema": tools.schema(),
                             "observed_rows": data_examples,
-                            "instruction": "Repair the actual experiment to use TWO SUPPORTED "
-                                           "groups and real row-level fields. Change the group "
-                                           "or population, not just the hypothesis wording.",
+                            "instruction": (
+                                "Repair an executable preregistered PRIMARY while "
+                                "preserving its exact estimand; do not invent a "
+                                "new outcome." if first_workbench else
+                                "Repair a DISTINCT rival countertest. You MAY "
+                                "change its population or outcome, but never "
+                                "replace the registered primary contrast. "
+                                "Use two supported groups and genuine event data."),
                         }, "experiment-repair-" + str(step), design_schema)
                         if typed_design:
                             corrected = compile_experiment_intent(
@@ -2227,17 +2229,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             experiment_spec, required_feature=required_feature)
                     # Auditing must use the *executed* repaired spec, not a
                     # superseded first draft that may have been rejected.
-                    if choice_contract:
-                        from rsi_researcher.research.discovery.references import EstimandSpec
-                        aligned = EstimandSpec(
-                            **choice_contract["estimand_spec"]).compare_executed(
-                                experiment_spec)
-                        entry["selection_contract_audit"] = {
-                            "matches_original_contrast": aligned["same_estimand"],
-                            **aligned,
-                        }
+                    entry["selection_contract_audit"] = validate_selected_contrast(
+                        experiment_spec)
                     entry["experiment"] = measured_experiment
-                    if choice_contract:
+                    if choice_contract and first_workbench:
                         from rsi_researcher.research.discovery.references import (
                             rival_prediction_audit)
                         entry["observational_prediction_audit"] = {
@@ -2270,6 +2265,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 selected["id"], reference, reference_audit)
                         except Exception as exc:
                             entry["randomized_reference_probe_error"] = str(exc)[:350]
+                    if choice_contract and not first_workbench:
+                        entry["countertest_evidence_role"] = {
+                            "parent_estimand": choice_contract["estimand_spec"],
+                            "independent_inferential_test": True,
+                            "cannot_replace_primary_estimand": True,
+                            "causal_recommender_mechanism_identified": False,
+                        }
                     entry["feature_binding"] = {
                         "registered_feature": required_feature,
                         "original_expression": (
@@ -2296,7 +2298,8 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         "version": selected["version"],
                         "test_question": experiment_spec["question"],
                         "predicted_falsifier": experiment_spec["falsifier"],
-                        "result": numeric, "workbench": measured_experiment})
+                        "result": numeric, "workbench": measured_experiment,
+                        "experiment_purpose": entry["experiment_purpose"]})
                     critique = critic.act({
                         "concept": _concept_summary(selected),
                         "hypothesis": selected["claim"],
