@@ -1,6 +1,8 @@
 """Regression tests for research selection -> actual experiment handoff."""
 import unittest
 
+from rsi_researcher.research.discovery.experiment_contract import compile_experiment_intent
+from rsi_researcher.research.discovery.references import EstimandSpec
 from rsi_researcher.research.discovery.research_handoff import (
     pending_primary_contract, previously_measured, primary_experiment_intent,
 )
@@ -43,6 +45,23 @@ class ResearchHandoffTests(unittest.TestCase):
         self.assertEqual(actual["outcome"], "click")
         self.assertEqual(actual["prediction"], "H1: increase")
         self.assertEqual(actual["falsifier"], "H2: decrease")
+
+        class FakeTools:
+            feature_records = {}
+
+            @staticmethod
+            def schema():
+                return {"events": [
+                    {"column": "uid", "type": "VARCHAR"},
+                    {"column": "item_group", "type": "INTEGER"},
+                    {"column": "click", "type": "INTEGER"},
+                ]}
+
+        full_contract = {**estimand, **contract}
+        compiled = compile_experiment_intent(
+            actual, FakeTools(), full_contract)
+        self.assertTrue(
+            EstimandSpec(**estimand).compare_executed(compiled)["same_estimand"])
 
 
 if __name__ == "__main__":
