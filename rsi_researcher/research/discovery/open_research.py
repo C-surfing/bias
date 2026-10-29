@@ -2157,6 +2157,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "scientific requirement failed and choose a "
                             "reference-support or rival-discriminating test."),
                     }, "experiment-critique-" + str(step), CRITIC_SCHEMA)
+                    # An LLM-only "ready" after the primary observational
+                    # comparison cannot replace an executed rival countertest.
+                    if (critique["decision"] == "ready"
+                            and not any(t.get("requested_by") == "critic"
+                                        and "workbench" in t
+                                        for t in selected["tests"])):
+                        entry["premature_critic_ready_guard"] = True
+                        critique["decision"] = "test"
+                        critique["rival_discriminated"] = False
+                        critique["reason"] += (
+                            " [AUDIT: no executed inferential rival countertest; "
+                            "the primary observational comparison is insufficient.]")
                     entry["critique"] = critique
                     selected["critique"] = critique
                     scientific_gaps = scientific_evidence_gaps(
@@ -2165,7 +2177,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     opportunity_pool.records[selected["id"]][
                         "scientific_evidence_gaps"] = scientific_gaps
                     if critique["decision"] == "test":
+                        # Ground the follow-up in measured support BEFORE
+                        # asking the model to invent another subgroup.
+                        supported_filters = feasible_countertest_filters(
+                            tools, experiment_spec)
+                        followup_schema = (experiment_intent_schema(
+                            tools, choice_contract) if typed_design else
+                            EXPERIMENT_SCHEMA)
+                        if typed_design and supported_filters:
+                            followup_schema = {
+                                **followup_schema, "properties": {
+                                    **followup_schema["properties"],
+                                    "population_filter": {
+                                        "type": "string",
+                                        "enum": [f["population_filter"]
+                                                 for f in supported_filters]},
+                                }}
                         followup_generated = designer.act({
+                            "feasible_development_subgroups": supported_filters,
                             "concept": _concept_summary(selected),
                             "previous_experiment": experiment_spec,
                             "results": model_statistics(measured_experiment["result"]),
@@ -2174,10 +2203,14 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "critic_feedback": critique,
                             "schema": tools.schema(),
                             "available_event_day_range": list(event_days),
-                            "instruction": "Propose a different experiment, grouping, control, time window or placebo that distinguishes the rival. Do not repeat the earlier specification.",
+                            "instruction": "Select a feasible and scientifically "
+                                           "rival-discriminating conditional test "
+                                           "from the measured support options when "
+                                           "available. Keep the source H1/H2 estimand "
+                                           "as the primary; this is a labeled "
+                                           "countertest, not a replacement primary.",
                         }, "experiment-countertest-" + str(step),
-                            experiment_intent_schema(tools, choice_contract)
-                            if typed_design else EXPERIMENT_SCHEMA)
+                            followup_schema)
                         followup_spec = (compile_experiment_intent(
                             followup_generated, tools, choice_contract)
                             if typed_design else followup_generated)
@@ -2268,6 +2301,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         selected["status"] = "rejected_development"
                     elif critique["decision"] == "revise":
                         selected["status"] = "needs_revision"
+                    elif (critique["decision"] == "test"
+                          and "critic_experiment" not in entry
+                          and "critic_sql_countertest" not in entry):
+                        selected["status"] = "needs_revision"
+                        entry["reflection_veto"] = (
+                            "Countertest design failed; revise the measurement "
+                            "or mechanism rather than rerun the same primary estimand")
                     # A countertest that does not resolve the rival forces a real
                     # next-research choice rather than reusing the same hypothesis.
                     if (critique["decision"] == "test"
