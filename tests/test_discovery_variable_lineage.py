@@ -25,7 +25,8 @@ def tools(tmp_path):
         for uid in range(1, 31) for vid in range(1, 9)])
     con.execute("CREATE TABLE features AS SELECT * FROM events")
     con.close()
-    dev = DevelopmentTools(dbpath, adapter=KuaiRandAdapter())
+    dev = DevelopmentTools(
+        dbpath, adapter=KuaiRandAdapter(), enable_matched_pool=True)
     yield dev
     dev.close()
 
@@ -73,8 +74,8 @@ def test_derived_history_group_inherits_lineage(tools):
 def test_active_choice_filters_overlap_before_observing_results(tools):
     overlap = idea("SELECT previous_click,AVG(recent_click) "
                    "FROM events GROUP BY previous_click")
-    supported = idea("SELECT previous_click,COUNT(*) n,AVG(click) "
-                     "FROM events GROUP BY previous_click",
+    supported = idea("SELECT is_random,vid,COUNT(*) n "
+                     "FROM shared_item_pool_events GROUP BY 1,2",
                      decision="exposure_allocation", reference="random_insertions")
     behavior = idea("SELECT is_random,COUNT(*) n,AVG(click) "
                     "FROM events GROUP BY is_random",
@@ -87,6 +88,8 @@ def test_active_choice_filters_overlap_before_observing_results(tools):
         "feasible_descriptive_observation",
         "feasible_descriptive_observation"]
     assert choose_feasible(checked)["candidate"] is supported
+    assert checked[2]["decision_link_audit"][
+        "measured_restricted_allocation"] is True
     assert tools.history == []  # preflight never reads outcomes
 
 
@@ -115,3 +118,16 @@ def test_one_repair_fixes_overlap_without_doubling_failed_actions(tools):
 def test_unverified_lineage_is_not_claimed_safe(tools):
     audit = audit_construct_overlap(tools, "arbitrary_new_column", "click")
     assert audit["status"] == "lineage_unverified"
+
+
+def test_false_decision_labels_cannot_upgrade_click_correlation(tools):
+    falsely_claimed_allocation = idea(
+        "SELECT previous_click,COUNT(*) n,AVG(click) FROM events GROUP BY 1",
+        decision="exposure_allocation", reference="random_insertions")
+    checked = assess_candidates(
+        tools, [{"id": "H001", "status": "investigating"}],
+        [falsely_claimed_allocation])
+    assert checked[0]["status"] == "feasible_descriptive_observation"
+    assert checked[0]["decision_reference_priority"] == 0
+    assert checked[0]["scientific_scope"] == "exploratory_unidentified"
+    assert checked[0]["decision_link_audit"]["measured_restricted_allocation"] is False
