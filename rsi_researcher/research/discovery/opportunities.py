@@ -200,8 +200,17 @@ class ResearchOpportunityPool:
         item["next_research_decision"] = {
             "mode": mode,
             "reason": str(reason)[:300],
-            "next_sql": (reflection.get("next_sql") if mode == "test_revised_mechanism"
-                         else item.get("next_observation", ""))[:380],
+            # A failed rival test must not point back to the same already
+            # measured observational SQL; it needs a NEW test or revision.
+            "next_sql": (
+                reflection.get("next_sql", "") if mode == "test_revised_mechanism"
+                else item.get("next_observation", "")
+                if mode in ("investigate", "repair_execution") else "")[:380],
+            "next_action": (
+                "revise" if mode in ("rethink_mechanism", "change_mechanism")
+                else "experiment" if mode == "disambiguate"
+                else "reference_gap" if mode == "identify_reference"
+                else "choose_new_observation"),
             "reference_status": item.get("scientific_contract", {}).get(
                 "reference_status", "unidentified"),
             "h1_h2_discriminated": bool(critique.get("rival_discriminated", False)

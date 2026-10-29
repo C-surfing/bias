@@ -14,6 +14,9 @@ import urllib.request
 from pathlib import Path
 
 from rsi_researcher.research.discovery.opportunities import ResearchOpportunityPool
+from rsi_researcher.research.discovery.research_handoff import (
+    pending_primary_contract, previously_measured, primary_experiment_intent,
+)
 from rsi_researcher.research.scientific_agents import ResearchAgent
 from rsi_researcher.runtime.limits import RunLimits
 from rsi_researcher.runtime.client import BudgetExceeded, ModelFailure
@@ -207,12 +210,31 @@ class DevelopmentTools:
                             "PRAGMA table_info('" + table + "')").fetchall()]
                 for table in tables}
 
-    def sql(self, query: str):
-        clean = query.strip().rstrip(";")
+    def _validated_sql(self, query: str) -> str:
+        clean = query.strip().rstrip(";").strip()
         if (not clean or ";" in clean or len(clean) > 4000
                 or not re.match(r"^(select|with)\b", clean, re.I)
                 or FORBIDDEN.search(clean)):
             raise ValueError("Only one bounded SELECT/WITH on development data is supported")
+        return clean
+
+    def preflight_sql(self, query: str) -> dict:
+        """Compile proposed SQL WITHOUT reading outcomes or mutating history.
+
+        This is a syntax/schema and read-only gateway check, not a test of
+        sufficient users, overlap, temporal identification or causal validity.
+        """
+        clean = self._validated_sql(query)
+        if any(item["sql"] == clean for item in self.history):
+            raise ValueError("Already measured on development data")
+        executed = self.rewrite_sources(clean)
+        self.connection.execute(
+            "EXPLAIN SELECT * FROM (" + executed +
+            ") AS research_result LIMIT 30").fetchall()
+        return {"executable": True, "scope": "development_descriptive_only"}
+
+    def sql(self, query: str):
+        clean = self._validated_sql(query)
         if any(item["sql"] == clean for item in self.history):
             raise ValueError("This exact development query already ran; change the measurement or research direction")
         executed = self.rewrite_sources(clean)
@@ -409,6 +431,21 @@ def compact_step(entry: dict):
             "prediction_audit": entry.get("numeric_prediction_audit"),
             "critic": entry.get("critique"),
         }
+    if "active_experiment" in entry:
+        trial = entry["active_experiment"]
+        result["active_experiment"] = {
+            "scientific_status": trial["scientific_status"],
+            "concept_id": trial["concept_id"],
+            "target_quantity": trial["target_quantity"],
+            "h1_prediction": trial["h1_prediction"],
+            "h2_prediction": trial["h2_prediction"],
+            "observation": compact_query(trial["executed_evidence"])}
+    if "candidate_experiment_audit" in entry:
+        result["candidate_experiment_audit"] = [{
+            "concept_id": x["candidate"]["concept_id"],
+            "capability": x["candidate"]["required_capability"],
+            "status": x["status"], "reason": x["reason"]}
+            for x in entry["candidate_experiment_audit"]]
     if "experiment" in entry:
         record = entry["experiment"]
         result["experiment"] = {
@@ -545,6 +582,10 @@ def compact_opportunity_pool(pool) -> dict:
             if k in ("source_table", "group_expression", "outcome_expression",
                      "control_value", "treatment_value", "analysis",
                      "prediction_if_mechanism", "prediction_if_rival")},
+        "latest_experiment_capabilities": [
+            {"required_capability": e["required_capability"],
+             "status": e["status"], "reason": e["reason"][:150]}
+            for e in item.get("experiment_capability_audit", [])[-3:]],
         "latest_observation": [{
             "sql": e.get("sql", "")[:130],
             "rows": e.get("rows", [])[:2]}
@@ -706,8 +747,17 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     _save(dest / "phenomena.json", phenomena)
     native_dimensions = supported_native_levels(data_profile)
     import hashlib
+    from rsi_researcher.research.discovery.active_experiments import (
+        CANDIDATE_SCHEMA, available_capabilities, assess_candidates,
+        choose_feasible, execute_observation,
+    )
+    active_experiment_planning = bool(
+        open_phenomena and discovery_options.get(
+            "active_experiment_planning", True))
     _save(dest / "discovery_protocol.json", {
         "observation_protocol": "schema_derived_open_phenomena_v1",
+        "active_experiment_planning": active_experiment_planning,
+        "experiment_capabilities": available_capabilities(adapter),
         "open_phenomena": open_phenomena,
         "predefined_observation_cards": False,
         "dataset_capabilities": adapter.describe(),
@@ -726,7 +776,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
     # Live science mode has no model-request, token or wall-clock research quota.
     # Each HTTP call still has its ordinary timeout and retry policy. Bounded
     # quotas remain for controlled comparisons when --max-rounds is explicit.
-    limits = (RunLimits(model_dir, max_requests=5 * max_rounds + 4,
+    limits = (RunLimits(model_dir, max_requests=(
+                            (6 if active_experiment_planning else 5)
+                            * max_rounds + 4),
                         max_tokens=250000, max_seconds=2400)
               if max_rounds is not None else None)
     model = create_model(model_dir,
@@ -931,6 +983,98 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                 history.append({"round": step, "action": stage_action,
                                 "concept_formation": stage_ids})
                 _save(dest / "concept_formation.json", formed)
+                # Unlike the binary group Workbench contract, this Designer
+                # may propose a time-ordered or cross-unit SQL observation for
+                # a mechanism that the six-parameter model cannot express.
+                # Screening uses declared prediction disagreement and SQL
+                # feasibility only; exploratory rows never confirm causal Bias.
+                if stage_ids and active_experiment_planning:
+                    planner = ResearchAgent(model)
+                    planner.role = "research-designer"
+                    planner.instruction = (
+                        "Design TWO or THREE distinct experiments for these "
+                        "agent-generated scientific mechanisms. Choose whichever "
+                        "fields, cross-user time-ordering, conditioning and "
+                        "statistical unit are scientifically relevant; do not "
+                        "force every phenomenon into a pre-existing binary "
+                        "group or our six-parameter recommender. Each candidate "
+                        "MUST state opposing H1/H2 predictions about the SAME "
+                        "observable target quantity and explicitly identify "
+                        "the experiment capability it requires. "
+                        "For sql_observation, provide ONE valid, bounded SELECT "
+                        "or WITH statement over development tables, returning "
+                        "actual aggregates with counts and study units. "
+                        "For time-dependent or cross-user ideas, distinguish "
+                        "other users from the target user and order predictors "
+                        "strictly before measured outcomes. Never use a "
+                        "current/future outcome as its own predictor. "
+                        "Observational SQL is descriptive only, not an "
+                        "identified platform intervention. If a mechanism "
+                        "requires policy comparison or sequential intervention, "
+                        "declare that needed capability rather than inventing "
+                        "a controlled parameter or asserting causality. "
+                        "Avoid repeated SQL and p-value fishing. "
+                        + BIAS_RESEARCH_CONTRACT)
+                    proposals = planner.act({
+                        "new_concepts": [
+                            _concept_summary(c) for c in concepts
+                            if c["id"] in stage_ids],
+                        "development_schema": tools.schema(),
+                        "registered_features": tools.feature_cards(),
+                        "observed_data_evidence": evidence_for_agent(
+                            evidence_cards, tools.history),
+                        "available_experiment_capabilities":
+                            available_capabilities(adapter),
+                        "candidate_count": "2 or 3, including unsupported "
+                                           "experiments when scientifically needed",
+                        "evaluation_rule": "Preflight executability BEFORE "
+                                           "execution. H1/H2 prediction difference "
+                                           "does not by itself identify a mechanism.",
+                    }, "active-experiment-design-" + str(step), CANDIDATE_SCHEMA)
+                    checked = assess_candidates(
+                        tools,
+                        [c for c in concepts if c["id"] in stage_ids],
+                        proposals["candidates"])
+                    chosen = choose_feasible(checked)
+                    active_entry = {
+                        "round": step,
+                        "action": {
+                            "action": "active_experiment_selection",
+                            "reason": "Agent-proposed capability-aware designs",
+                            "concept_id": (
+                                chosen["candidate"]["concept_id"]
+                                if chosen else ""),
+                            "concept": "", "query": ""},
+                        "candidate_experiment_audit": checked,
+                        "selection_rule": (
+                            "maximize declared H1/H2 directional disagreement "
+                            "among feasible non-duplicate SQL; no outcomes used"),
+                        "selected_candidate": (
+                            chosen["candidate"] if chosen else None),
+                    }
+                    for item in checked:
+                        cid = item["candidate"]["concept_id"]
+                        if cid in opportunity_pool.records:
+                            opportunity_pool.records[cid].setdefault(
+                                "experiment_capability_audit", []).append({
+                                    "question": item["candidate"]["question"],
+                                    "required_capability": item["candidate"][
+                                        "required_capability"],
+                                    "status": item["status"],
+                                    "reason": item["reason"]})
+                    if chosen:
+                        try:
+                            observation = execute_observation(tools, chosen)
+                            active_entry["active_experiment"] = observation
+                            opportunity_pool.observation(
+                                observation["concept_id"],
+                                observation["executed_evidence"]["sql"],
+                                observation["executed_evidence"]["rows"])
+                        except Exception as exc:
+                            active_entry["tool_error"] = str(exc)[:350]
+                    history.append(active_entry)
+                    _save(dest / ("active_experiments_" + str(step) +
+                                   ".json"), active_entry)
                 # The autonomous choice runs INSIDE the same research cycle and
                 # shares the same logged Qwen/tool calls. Fixtures without an
                 # actual configured LLM still exercise the normal action route.
@@ -1166,6 +1310,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             choice["selected_concept_id"], choice, support,
                             adapter.capabilities)
                         chosen_item = opportunity_pool.records[choice["selected_concept_id"]]
+                        chosen_item["selection_contract"]["concept_version"] = next(
+                            c["version"] for c in concepts
+                            if c["id"] == choice["selected_concept_id"])
                         chosen_item["prediction_if_mechanism"] = choice["prediction_if_mechanism"]
                         chosen_item["prediction_if_rival"] = choice["prediction_if_rival"]
                         chosen_item["discriminating_experiment"] = choice["discriminating_prediction"]
@@ -1179,14 +1326,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "opportunity_selection": choice,
                             "selection_feasibility": support}
                         if choice["next_action"] == "observe" and choice["next_sql"].strip():
-                            try:
-                                chosen_entry["result"] = tools.sql(choice["next_sql"])
-                                opportunity_pool.observation(
-                                    choice["selected_concept_id"],
-                                    chosen_entry["result"]["sql"],
-                                    chosen_entry["result"]["rows"])
-                            except Exception as exc:
-                                chosen_entry["tool_error"] = str(exc)[:300]
+                            prior = previously_measured(choice["next_sql"], tools.history)
+                            if prior is not None:
+                                chosen_entry["reused_observation"] = prior["sql"]
+                            else:
+                                try:
+                                    chosen_entry["result"] = tools.sql(choice["next_sql"])
+                                    opportunity_pool.observation(
+                                        choice["selected_concept_id"],
+                                        chosen_entry["result"]["sql"],
+                                        chosen_entry["result"]["rows"])
+                                except Exception as exc:
+                                    chosen_entry["tool_error"] = str(exc)[:300]
                         history.append(chosen_entry)
                 _save(dest / "research_opportunities.json", opportunity_pool.snapshot())
                 _save(dest / "journal.json", history)
@@ -1316,10 +1467,36 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     **ACTION_SCHEMA["properties"],
                     "action": {"type": "string", "enum": live_actions},
                     "concept_id": {"type": "string", "enum": ["", *live_ids]}}}
-            decision = scientist.act(
-                instruction, "open-" + str(step), model_action_schema)
+            # The opportunity selector already authored an independently checked
+            # estimand and different H1/H2 directions. Execute that first before
+            # asking Scientist to rediscover the same SQL in another round.
+            pending_primary = (
+                pending_primary_contract(concepts, opportunity_pool.records)
+                if model_config.get("llm") and discovery_options.get(
+                    "compact_experiment", True) else None)
+            if pending_primary:
+                decision = {
+                    "action": "experiment", "concept_id": pending_primary,
+                    "reason": "Execute the preregistered, support-checked H1/H2 "
+                              "primary comparison before designing countertests",
+                    "query": "", "feature_name": "", "expression": "",
+                    "source_table": "events", "concept": "", "mechanism": "",
+                    "rival": "", "falsifier": "", "measurement": "",
+                }
+            else:
+                decision = scientist.act(
+                    instruction, "open-" + str(step), model_action_schema)
             entry = {"round": step, "action": decision}
+            if pending_primary:
+                entry["preregistered_primary_handoff"] = True
             act = decision["action"]
+            # Re-observing a successful SQL is not another research test.
+            # Record a no-information action without calling the SQL tool or Critic.
+            if act in ("sql", "test", "select_opportunity") and decision["query"].strip():
+                prior = previously_measured(decision["query"], tools.history)
+                if prior is not None:
+                    entry["reused_observation"] = prior["sql"]
+                    act = "reused_observation"
             selected = next((c for c in concepts if c["id"] == decision["concept_id"]), None)
             try:
                 if act == "controlled_experiment":
@@ -1878,7 +2055,15 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                 "the original same-pool item allocation estimand "
                                 "and test whether this context weakens the gap; "
                                 "this is a rival sensitivity test, NOT confirmation.")
-                    generated_spec = designer.act({
+                    if typed_design and choice_contract and first_workbench:
+                        # Primary estimand has already passed Workbench support
+                        # inspection at opportunity selection. A second model
+                        # draft can only drift from its preregistered identity.
+                        generated_spec = primary_experiment_intent(
+                            choice_contract, selected)
+                        entry["primary_experiment_source"] = "selection_contract"
+                    else:
+                        generated_spec = designer.act({
                         "available_event_day_range": list(event_days),
                         "population_filter_syntax": "Boolean SQL condition only, no leading WHERE",
                         "previous_execution_error": history[-1].get("tool_error") if history else None,
@@ -1906,7 +2091,7 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                              "numerical_evidence": compact_query(t["result"])}
                             for t in selected["tests"][-3:]],
                         "scientist_request": decision["reason"],
-                    }, "experiment-design-" + str(step), design_schema)
+                        }, "experiment-design-" + str(step), design_schema)
                     experiment_spec = (compile_experiment_intent(
                         generated_spec, tools, choice_contract)
                         if typed_design else generated_spec)
@@ -2113,6 +2298,18 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "scientific requirement failed and choose a "
                             "reference-support or rival-discriminating test."),
                     }, "experiment-critique-" + str(step), CRITIC_SCHEMA)
+                    # An LLM-only "ready" after the primary observational
+                    # comparison cannot replace an executed rival countertest.
+                    if (critique["decision"] == "ready"
+                            and not any(t.get("requested_by") == "critic"
+                                        and "workbench" in t
+                                        for t in selected["tests"])):
+                        entry["premature_critic_ready_guard"] = True
+                        critique["decision"] = "test"
+                        critique["rival_discriminated"] = False
+                        critique["reason"] += (
+                            " [AUDIT: no executed inferential rival countertest; "
+                            "the primary observational comparison is insufficient.]")
                     entry["critique"] = critique
                     selected["critique"] = critique
                     scientific_gaps = scientific_evidence_gaps(
@@ -2121,7 +2318,24 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                     opportunity_pool.records[selected["id"]][
                         "scientific_evidence_gaps"] = scientific_gaps
                     if critique["decision"] == "test":
+                        # Ground the follow-up in measured support BEFORE
+                        # asking the model to invent another subgroup.
+                        supported_filters = feasible_countertest_filters(
+                            tools, experiment_spec)
+                        followup_schema = (experiment_intent_schema(
+                            tools, choice_contract) if typed_design else
+                            EXPERIMENT_SCHEMA)
+                        if typed_design and supported_filters:
+                            followup_schema = {
+                                **followup_schema, "properties": {
+                                    **followup_schema["properties"],
+                                    "population_filter": {
+                                        "type": "string",
+                                        "enum": [f["population_filter"]
+                                                 for f in supported_filters]},
+                                }}
                         followup_generated = designer.act({
+                            "feasible_development_subgroups": supported_filters,
                             "concept": _concept_summary(selected),
                             "previous_experiment": experiment_spec,
                             "results": model_statistics(measured_experiment["result"]),
@@ -2130,10 +2344,14 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             "critic_feedback": critique,
                             "schema": tools.schema(),
                             "available_event_day_range": list(event_days),
-                            "instruction": "Propose a different experiment, grouping, control, time window or placebo that distinguishes the rival. Do not repeat the earlier specification.",
+                            "instruction": "Select a feasible and scientifically "
+                                           "rival-discriminating conditional test "
+                                           "from the measured support options when "
+                                           "available. Keep the source H1/H2 estimand "
+                                           "as the primary; this is a labeled "
+                                           "countertest, not a replacement primary.",
                         }, "experiment-countertest-" + str(step),
-                            experiment_intent_schema(tools, choice_contract)
-                            if typed_design else EXPERIMENT_SCHEMA)
+                            followup_schema)
                         followup_spec = (compile_experiment_intent(
                             followup_generated, tools, choice_contract)
                             if typed_design else followup_generated)
@@ -2224,6 +2442,13 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         selected["status"] = "rejected_development"
                     elif critique["decision"] == "revise":
                         selected["status"] = "needs_revision"
+                    elif (critique["decision"] == "test"
+                          and "critic_experiment" not in entry
+                          and "critic_sql_countertest" not in entry):
+                        selected["status"] = "needs_revision"
+                        entry["reflection_veto"] = (
+                            "Countertest design failed; revise the measurement "
+                            "or mechanism rather than rerun the same primary estimand")
                     # A countertest that does not resolve the rival forces a real
                     # next-research choice rather than reusing the same hypothesis.
                     if (critique["decision"] == "test"
@@ -2464,6 +2689,11 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                         selected["id"], entry["experiment"],
                         entry.get("critic_experiment"),
                         entry.get("post_counter_critique", entry["critique"]))
+                if "revised_concept" in entry:
+                    # A changed mechanism/measurement must receive a fresh
+                    # selection contract; the old estimand is not silently valid.
+                    opportunity_pool.records[selected["id"]].pop(
+                        "selection_contract", None)
                 if ("reflection" in entry or "revised_concept" in entry
                         or selected["status"] in ("rejected_development", "design_blocked")):
                     opportunity_pool.update_claim(

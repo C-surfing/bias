@@ -5,6 +5,8 @@ on:
     paths:
       - "rsi_researcher/research/discovery/**"
       - "tests/test_discovery_science_contract.py"
+      - "tests/test_discovery_research_handoff.py"
+      - "tests/test_discovery_active_experiments.py"
       - "tests/test_discovery_dataset_reference.py"
       - "tests/test_discovery_opportunity_frontier.py"
       - "tests/test_discovery_controlled_reference.py"
@@ -31,4 +33,4 @@ jobs:
       - name: Compile changed Python sources
         run: python -m compileall -q rsi_researcher/research/discovery tests/test_discovery_science_contract.py
       - name: Test discovery execution and scientific state
-        run: python -m pytest -q tests/test_discovery_controlled_reference.py tests/test_discovery_opportunity_frontier.py tests/test_discovery_dataset_reference.py tests/test_discovery_science_contract.py tests/test_discovery_review.py tests/test_discovery_native_intent.py tests/test_discovery_compact_agent_route.py tests/test_open_research.py
+        run: python -m pytest -q tests/test_discovery_active_experiments.py tests/test_discovery_research_handoff.py tests/test_discovery_controlled_reference.py tests/test_discovery_opportunity_frontier.py tests/test_discovery_dataset_reference.py tests/test_discovery_science_contract.py tests/test_discovery_review.py tests/test_discovery_native_intent.py tests/test_discovery_compact_agent_route.py tests/test_open_research.py
