@@ -162,46 +162,56 @@ def audit_reference_probe(choice: dict, probe: dict) -> dict:
     }
 
 
+def eligible_scoped_model_trials(concept: dict, opportunity: dict) -> list[dict]:
+    """One trial must satisfy BOTH the controlled result and the source bridge.
+
+    In particular, an H1 effect from trial A must never be joined to an
+    observational bridge from trial B. The returned order is execution order,
+    so freezing and sealed confirmation select the same last qualifying trial.
+    """
+    eligible = []
+    for trial in opportunity.get("controlled_reference_tests", []):
+        if trial.get("tested_concept_version") != concept.get("version"):
+            continue
+        stats = trial.get("statistics", {})
+        audit = trial.get("prediction_audit", {})
+        identification = trial.get("identification", {})
+        anchor = trial.get("observational_anchor", {})
+        ci = stats.get("ci95_bootstrap") or []
+        model_valid = (
+            audit.get("distinguishes_predictions") is True
+            and audit.get("supports") == "H1"
+            and len(ci) == 2 and (ci[0] > 0 or ci[1] < 0)
+            and stats.get("negative_control_tested") is True
+            and stats.get("negative_control_passed") is True
+            and identification.get("within_model_paired_intervention") is True
+            and not identification.get("platform_policy_identified")
+            and not identification.get("confirmation_users_consulted"))
+        bridge_valid = (
+            anchor.get("source_observed") is True
+            and anchor.get("same_selected_estimand") is True
+            and anchor.get("mechanism_link_declared") is True
+            and anchor.get("observed_h1_supported") is True
+            and anchor.get("cross_environment_causal_transfer_identified") is False)
+        if model_valid and bridge_valid and trial.get("specification"):
+            eligible.append(trial)
+    return eligible
+
+
 def scoped_model_freeze_gate(concept: dict, opportunity: dict, *,
                              enough_exploration: bool) -> dict:
-    """Freeze a falsifiable *owned-model* hypothesis, never a platform Bias.
-
-    Unlike a normative platform reference, a controlled replay can identify
-    an effect inside the executable recommender. Freeze only the CURRENT
-    concept version with a measured, rival-discriminating H1 prediction and
-    a genuine pipeline negative control. Confirmation remains sealed.
-    """
+    """Freeze an evidence-linked *owned-model* mechanism, never platform Bias."""
     bias = opportunity.get("bias_relevance", {})
-    tests = [trial for trial in opportunity.get("controlled_reference_tests", [])
-             if trial.get("tested_concept_version") == concept.get("version")]
-    valid = []
-    for trial in tests:
-        result = trial.get("statistics", {})
-        prediction = trial.get("prediction_audit", {})
-        identification = trial.get("identification", {})
-        ci = result.get("ci95_bootstrap", [])
-        valid.append(bool(
-            prediction.get("distinguishes_predictions")
-            and prediction.get("supports") == "H1"
-            and len(ci) == 2 and (ci[0] > 0 or ci[1] < 0)
-            and result.get("negative_control_tested")
-            and result.get("negative_control_passed") is True
-            and identification.get("within_model_paired_intervention")
-            and not identification.get("platform_policy_identified")
-            and not identification.get("confirmation_users_consulted")))
+    tests = [t for t in opportunity.get("controlled_reference_tests", [])
+             if t.get("tested_concept_version") == concept.get("version")]
+    complete = eligible_scoped_model_trials(concept, opportunity)
     critique = concept.get("critique") or {}
-    bridged = any(t.get("observational_anchor", {}).get("source_observed")
-                  and t.get("observational_anchor", {}).get("same_selected_estimand")
-                  and t.get("observational_anchor", {}).get("mechanism_link_declared")
-                  and t.get("observational_anchor", {}).get("observed_h1_supported")
-                  and not t.get("observational_anchor", {}).get(
-                      "cross_environment_causal_transfer_identified")
-                  for t in tests)
     return {
         "reference_is_owned_model": bias.get("reference_spec", {}).get("kind") == "controlled_model",
         "current_concept_version_tested": bool(tests),
-        "executed_h1_rival_discrimination": any(valid),
-        "agent_mechanism_linked_to_observed_estimand": bridged,
+        "executed_h1_rival_discrimination": bool(complete),
+        "agent_mechanism_linked_to_observed_estimand": bool(complete),
+        "same_trial_has_complete_evidence": bool(complete),
         "exploration_completed": enough_exploration,
         "critic_ready_for_scoped_mechanism": critique.get("decision") == "ready",
         "critic_observable_valid": bool(critique.get("observable_valid")),
