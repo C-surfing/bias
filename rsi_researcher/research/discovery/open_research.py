@@ -2384,6 +2384,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                             enough_exploration=len(tools.history) >= min_queries)
                         entry["freeze_gate"] = audit
                         if all(audit.values()):
+                            from rsi_researcher.research.discovery.references import (
+                                latest_scoped_trial_index)
+                            selected["frozen_trial_index"] = latest_scoped_trial_index(
+                                selected, opportunity)
                             selected["status"] = "frozen_scoped_mechanism_unconfirmed"
                             last = selected["id"]
                             history.append(entry)
@@ -2497,6 +2501,9 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                   "scientific_stalled" if stop_reason.startswith("scientific_stall") else
                   "scientific_stop" if stop_reason else "development_inconclusive")
         final = {"status": status, "frozen_id": last or None,
+                 "frozen_trial_index": next(
+                     (c.get("frozen_trial_index") for c in concepts
+                      if c["id"] == last), None),
                  "concepts": concepts, "registered_features": tools.features,
                  "development_queries": tools.history,
                  "exploration_evidence": evidence_cards,
