@@ -246,7 +246,9 @@ class ResearchOpportunityPool:
             "development_support": support,
         }
 
-    def record_reference_measurement(self, identifier: str, stats: dict, *, scope: str):
+    def record_reference_measurement(self, identifier: str, stats: dict, *, scope: str,
+                                     executed_specification: dict | None = None,
+                                     target_identity: dict | None = None):
         """Record an executed reference contrast without claiming a normative target.
 
         A paired-user mean difference need not equal a pooled-share difference.
@@ -270,6 +272,8 @@ class ResearchOpportunityPool:
             "ci95": ci,
             "measured": True,
             "reference_scope": scope,
+            "executed_specification": executed_specification,
+            "agent_selected_target_identity": target_identity,
             "normative_target_validated": False,
         }
         bias["reference_measured"] = True
