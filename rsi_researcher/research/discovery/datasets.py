@@ -148,13 +148,23 @@ class KuaiRandAdapter(DatasetAdapter):
             if dominant and dominant[0] is not None:
                 tab = str(dominant[0]).replace("'", "''")
                 period += " AND e.tab='" + tab + "'"
+        # Restrict the public reference view to the SAME item/day and UI
+        # supported by both exposure modes; otherwise reference_gap and generic
+        # observations silently use a wider pool than Workbench inference.
+        match = ""
+        if "event_day" in existing:
+            ui_match = " AND other.tab=e.tab" if "tab" in existing else ""
+            match = (
+                " AND e.is_random IN (0,1) AND EXISTS (SELECT 1 FROM main.events other"
+                " WHERE other.vid=e.vid AND other.event_day=e.event_day"
+                " AND other.is_random=1-e.is_random" + ui_match + ")")
         connection.execute(
             # Keep every development-only event field. The Agent may register
             # novel, pre-outcome item features which a fixed projection would
             # otherwise silently make unavailable to the reference executor.
             "CREATE TEMP VIEW shared_item_pool_events AS SELECT e.*"
             " FROM main.events e WHERE e.vid IN "
-            "(SELECT DISTINCT vid FROM main.events WHERE is_random=1) " + period)
+            "(SELECT DISTINCT vid FROM main.events WHERE is_random=1) " + period + match)
         return ["shared_item_pool_events"]
 
 
