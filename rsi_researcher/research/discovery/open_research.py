@@ -1069,16 +1069,6 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                         "required_capability": item["candidate"]["required_capability"],
                                         "status": item["status"],
                                         "reason": item["reason"]})
-                    for item in []:
-                        cid = item["candidate"]["concept_id"]
-                        if cid in opportunity_pool.records:
-                            opportunity_pool.records[cid].setdefault(
-                                "experiment_capability_audit", []).append({
-                                    "question": item["candidate"]["question"],
-                                    "required_capability": item["candidate"][
-                                        "required_capability"],
-                                    "status": item["status"],
-                                    "reason": item["reason"]})
                     if chosen:
                         try:
                             observation = execute_observation(tools, chosen)
