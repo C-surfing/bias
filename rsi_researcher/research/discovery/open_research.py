@@ -1457,6 +1457,10 @@ def run_open_discovery(source_db: str, output: str, model_config: dict,
                                        "with independently verified platform Bias. "
                                        "State remaining reference/causality gaps.",
                     }, "controlled-critique-" + str(step), CRITIC_SCHEMA)
+                    from rsi_researcher.research.discovery.references import (
+                        constrain_controlled_critique)
+                    critique = constrain_controlled_critique(
+                        critique, audit, source_anchor)
                     entry["critique"] = critique
                     selected["critique"] = critique
                     reflector = ResearchAgent(model)

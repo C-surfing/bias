@@ -147,18 +147,49 @@ def audit_reference_probe(choice: dict, probe: dict) -> dict:
     predictions = rival_prediction_audit(
         measured, choice["mechanism_direction"], choice["rival_direction"],
         choice.get("meaningful_margin", 0.01))
+    pool_valid = (probe.get("matched_item_day_support") is True
+                  and probe.get("matched_item_day_strata", 0) > 0
+                  and probe.get("reference_pool_scope") ==
+                      "shared_item_pool_same_video_same_day_same_ui_scope")
+    aligned = not differences and pool_valid
     return {
         "estimand": "standard_minus_random_item_group_response_interaction",
         "scope": "observed_standard_vs_random_insertion_modes",
-        "matches_selected_observable": not differences,
+        "matches_selected_observable": aligned,
+        "matched_item_day_reference_valid": pool_valid,
         "differences": differences,
-        "prediction_audit": predictions if not differences else {
+        "prediction_audit": predictions if aligned else {
             **predictions, "supports": "inconclusive", "distinguishes_predictions": False},
         "reference_identifies_production_bias": False,
-        "status": ("measured_restricted_reference_only" if not differences
+        "status": ("measured_restricted_reference_only" if aligned
                    else "estimand_mismatch"),
         "reason": ("Mode-conditioned response comparison does not randomize the "
                    "production recommender or user preferences."),
+    }
+
+
+def constrain_controlled_critique(critique: dict, model_audit: dict,
+                                  source_anchor: dict) -> dict:
+    """A language-only 'ready' must not overrule executed rival predictions.
+
+    A numerical contradiction can still distinguish rivals scientifically,
+    but it does not justify freezing H1. Preserve the Critic's other fields;
+    the deterministic override applies only to a premature ready verdict.
+    """
+    model_support = model_audit.get("supports")
+    source_supported = source_anchor.get("observed_h1_supported") is True
+    if critique.get("decision") != "ready" or (
+            model_support == "H1" and source_supported):
+        return critique
+    decision = "revise" if model_support == "H2" else "test"
+    return {
+        **critique,
+        "decision": decision,
+        "reason": (critique.get("reason", "") +
+                   " [NUMERICAL VETO: model supports " +
+                   str(model_support) + "; observed source supports H1=" +
+                   str(source_supported) + ". Freeze cannot proceed.]"),
+        "numeric_ready_veto": True,
     }
 
 

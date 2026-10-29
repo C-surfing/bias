@@ -451,21 +451,39 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
         raise ValueError("Identical comparison arms")
     for arm in arms:
         _safe_literal(arm)
-    days = [row[0] for row in tools.connection.execute(
-        "SELECT event_day FROM events GROUP BY event_day "
-        "HAVING COUNT(*) FILTER (WHERE is_random=1)>0 "
-        "AND COUNT(*) FILTER (WHERE is_random=0)>0 ORDER BY event_day").fetchall()]
-    if not days:
-        raise ValueError("No calendar days with both exposure policies")
-    source = tools.active_table("events")
-    days_sql = ",".join(str(int(d)) for d in days)
+    # Comparison eligibility must precede outcomes: both exposure modes
+    # need to have offered the SAME video on the SAME day, within the
+    # adapter's restricted UI/time reference pool. Otherwise supply shifts
+    # can masquerade as a systematic recommender distortion.
+    if "shared_item_pool_events" not in tools.reference_views:
+        raise ValueError("Randomized reference requires an enabled matched item pool")
+    matched_strata_sql = (
+        "SELECT vid, event_day FROM shared_item_pool_events "
+        "WHERE is_random IN (0,1) GROUP BY vid,event_day "
+        "HAVING COUNT(*) FILTER (WHERE is_random=0)>0 "
+        "AND COUNT(*) FILTER (WHERE is_random=1)>0")
+    matched_n = tools.connection.execute(
+        "SELECT COUNT(*) FROM (" + matched_strata_sql + ")").fetchone()[0]
+    if matched_n < 1:
+        raise ValueError("No shared item/day strata with both exposure modes")
+    # The matched view exposes all development event columns, allowing
+    # row-level features invented by the Agent to be evaluated on EXACTLY
+    # the eligible reference rows without a lossy join on user or item.
+    projection = tools.features.get("events", {})
+    source = "shared_item_pool_events"
+    if projection:
+        named = ", ".join("(" + expression + ") AS " + name
+                          for name, expression in projection.items())
+        source = "(SELECT *, " + named + " FROM shared_item_pool_events)"
     query = (
         "SELECT CAST(uid AS VARCHAR) u, CAST(is_random AS INTEGER) exposure_mode,"
         "CAST((" + group + ") AS VARCHAR) arm,"
         "COUNT(*) n, SUM(CAST((" + outcome + ") AS DOUBLE)) sy "
-        "FROM " + source + " WHERE event_day IN (" + days_sql + ") "
+        "FROM " + source + " AS matched_events "
+        "WHERE (vid,event_day) IN (" + matched_strata_sql + ") "
         "AND (" + where + ") AND (" + outcome + ") IS NOT NULL "
-        "AND CAST((" + group + ") AS VARCHAR) IN ('" + _safe_literal(arms[0]) + "','" + _safe_literal(arms[1]) + "') "
+        "AND CAST((" + group + ") AS VARCHAR) IN ('" + _safe_literal(arms[0]) + "','"
+        + _safe_literal(arms[1]) + "') "
         "GROUP BY 1,2,3")
     rows = tools.connection.execute(query).fetchall()
     per_user = defaultdict(lambda: {(0, arms[0]): (0, 0.0),
@@ -540,12 +558,17 @@ def randomized_reference_probe(tools, choice: dict) -> dict:
         matched_ci = [estimates[6], estimates[233]]
     return {
         "status": "development_randomized_reference_diagnostic",
+        "matched_item_day_support": True,
+        "matched_item_day_strata": matched_n,
+        "reference_pool_scope": "shared_item_pool_same_video_same_day_same_ui_scope",
         "user_matched_policy_response_interaction": matched_effect,
         "user_matched_interaction_ci95": matched_ci,
         "n_user_matched_four_cell_units": len(matched),
         "user_matched_interaction_supported": len(matched) >= 10,
         "reference": "randomly inserted item response; not randomized full recommender",
-        "same_calendar_days": days,
+        "same_calendar_days": [row[0] for row in tools.connection.execute(
+            "SELECT DISTINCT event_day FROM (" + matched_strata_sql + ") ORDER BY event_day"
+        ).fetchall()],
         "source_table": "events",
         "group_expression": group,
         "outcome_expression": outcome,

@@ -183,12 +183,16 @@ def test_random_insertion_reference_is_executed_and_estimand_bound(tmp_path):
     for uid in range(1, 25):
         for mode in (0, 1):
             for group in ("0", "1"):
-                rows.append((uid, uid*10+mode, 20220423, mode, group,
+                rows.append((uid, 100+int(group), 20220423, mode, group,
                              int(mode == 0 and group == "1")))
+        # This video was NEVER shown by the standard recommender; it
+        # must not enter a matched-policy inference or dilute the effect.
+        rows.append((uid, 999, 20220423, 1, "1", 0))
     con.executemany("INSERT INTO events VALUES (?,?,?,?,?,?)", rows)
     con.execute("CREATE TABLE features AS SELECT * FROM events")
     con.close()
-    tools = research.DevelopmentTools(path, adapter=KuaiRandAdapter())
+    tools = research.DevelopmentTools(
+        path, enable_matched_pool=True, adapter=KuaiRandAdapter())
     try:
         choice = {
             "reference_kind": "randomized_exposure",
@@ -199,6 +203,8 @@ def test_random_insertion_reference_is_executed_and_estimand_bound(tmp_path):
             "meaningful_margin": .01}
         probe = randomized_reference_probe(tools, choice)
         audit = audit_reference_probe(choice, probe)
+        assert probe["matched_item_day_support"]
+        assert probe["matched_item_day_strata"] == 2
         assert probe["n_user_matched_four_cell_units"] == 24
         assert probe["user_matched_interaction_supported"]
         assert probe["user_matched_policy_response_interaction"] == pytest.approx(1.)
@@ -225,5 +231,43 @@ def test_random_insertion_reference_is_executed_and_estimand_bound(tmp_path):
         wrong = audit_reference_probe({**choice, "contrast_outcome": "hate"}, probe)
         assert not wrong["matches_selected_observable"]
         assert wrong["prediction_audit"]["supports"] == "inconclusive"
+        no_pool = audit_reference_probe(choice, {
+            **probe, "matched_item_day_support": False})
+        assert not no_pool["matches_selected_observable"]
+        assert no_pool["prediction_audit"]["supports"] == "inconclusive"
+        # The Agent may derive a novel item-side grouping; it must remain
+        # executable against the SAME matched pool.
+        tools.define_feature(
+            "derived_item_arm",
+            "CASE WHEN item_group='1' THEN '1' ELSE '0' END",
+            source_table="events")
+        derived = randomized_reference_probe(
+            tools, {**choice, "contrast_group": "derived_item_arm"})
+        assert derived["matched_item_day_strata"] == 2
+        assert derived["standard_minus_random_response_contrast"] == pytest.approx(1.)
+    finally:
+        tools.close()
+
+
+def test_random_reference_rejects_disjoint_item_day_support(tmp_path):
+    from rsi_researcher.research.discovery.workbench import randomized_reference_probe
+    path = str(tmp_path / "no-overlap.duckdb")
+    con = duckdb.connect(path)
+    con.execute("CREATE TABLE events(uid INT, vid INT, event_day INT, "
+                "is_random INT, item_group VARCHAR, click INT)")
+    con.execute("INSERT INTO events VALUES "
+                "(1, 101, 20220423, 0, '0', 1), "
+                "(2, 202, 20220423, 1, '1', 0)")
+    con.execute("CREATE TABLE features AS SELECT * FROM events")
+    con.close()
+    tools = research.DevelopmentTools(
+        path, enable_matched_pool=True, adapter=KuaiRandAdapter())
+    try:
+        choice = {"reference_kind": "randomized_exposure",
+                  "contrast_source": "events", "contrast_group": "item_group",
+                  "contrast_outcome": "click", "contrast_filter": "",
+                  "control_value": "0", "treatment_value": "1"}
+        with pytest.raises(ValueError, match="No shared item/day"):
+            randomized_reference_probe(tools, choice)
     finally:
         tools.close()
